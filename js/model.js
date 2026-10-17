@@ -2,8 +2,8 @@
 import * as ev from "./events.js";
 import { today, cmpFlat, flatKey } from "./util.js";
 
-export const CHANNELS = { whatsapp: "WhatsApp", phone: "Phone", walkin: "Walk-in", swiggy: "Swiggy", zomato: "Zomato" };
-export const PREORDER = ["whatsapp", "phone"];
+export const CHANNELS = { whatsapp: "WhatsApp", phone: "Phone", instagram: "Instagram", bulk: "Bulk / event", other: "Other", walkin: "Walk-in", swiggy: "Swiggy", zomato: "Zomato" };
+export const PREORDER = ["whatsapp", "phone", "instagram", "bulk", "other"];
 export const STATUSES = ["received", "confirmed", "baking", "ready", "out", "delivered"];
 export const STATUS_LABEL = { received: "Received", confirmed: "Confirmed", baking: "In a bake", ready: "Ready", out: "Out for delivery", delivered: "Delivered", cancelled: "Cancelled" };
 export const DEFAULT_CONFIG = { id: "app", business: "My Bakery", tagline: "Home bakery", logo: "", accent: "#F7B718", upi: "", payee: "", activeTag: "", tags: [], festive: false, businessId: "b1", outletId: "home", folderName: "Batchwala data", clientId: "" };
@@ -83,14 +83,31 @@ export function requirement(lines) {
   lines.forEach(l => { const m = menuByName(l.item); if (!m || !(m.recipe || []).length) { if (l.qty) unknown.push(l.item); return; } m.recipe.forEach(r => { need[r.ingId] = (need[r.ingId] || 0) + (+r.qty || 0) * l.qty; }); });
   return { need, unknown: [...new Set(unknown)] };
 }
-export const bakesOn = date => ev.all("bakes").filter(b => b.date === date);
+
+/* ---------- batches ---------- */
+// A batch is one recorded bake (kind "bakes"): numbered, with pieces and spoiled pieces per item and the stock it used.
+export const batches = () => ev.all("bakes").map(b => ({ no: "", notes: "", ...b, lines: (b.lines || []).map(l => ({ item: l.item, qty: +l.qty || 0, spoiled: +l.spoiled || 0 })) }))
+  .sort((a, b) => (a.date + (a.at || a._at || "")) < (b.date + (b.at || b._at || "")) ? 1 : -1);
+export const bakesOn = date => batches().filter(b => b.date === date);
+export const batchPcs = b => b.lines.reduce((s, l) => s + l.qty, 0);
+export const batchSpoiled = b => b.lines.reduce((s, l) => s + l.spoiled, 0);
+// Stock used, priced when the batch was saved; older batches are priced from their stock moves at today's cost.
+export function batchStock(b) {
+  if (Array.isArray(b.stock)) return b.stock;
+  const ings = Object.fromEntries(ingredients().map(i => [i.id, i])); const use = {};
+  ev.all("moves").filter(m => m.ref === b.id && m.type === "bake").forEach(m => { use[m.ingId] = (use[m.ingId] || 0) - (+m.qty || 0); });
+  return Object.entries(use).map(([ingId, q]) => ({ ingId, qty: q, cost: ings[ingId] ? unitCost(ings[ingId]) * q : 0 }));
+}
+export const batchCost = b => batchStock(b).reduce((s, x) => s + (+x.cost || 0), 0);
+// Same idea as order numbers: each person's prefix keeps two phones from clashing offline.
+export function nextBatchNo(prefix) { const n = batches().map(b => +String(b.no || "").split("-").pop() || 0); return `${prefix || ""}B-${Math.max(0, ...n) + 1}`; }
 
 /* ---------- bake board ---------- */
 // Per item for a date: committed (pre-orders), par (kept ready for on-demand), baked, sold (counter and aggregator), left.
 export function board(date) {
-  const rows = new Map(); const row = name => { if (!rows.has(name)) rows.set(name, { item: name, committed: 0, par: 0, baked: 0, sold: 0 }); return rows.get(name); };
+  const rows = new Map(); const row = name => { if (!rows.has(name)) rows.set(name, { item: name, committed: 0, par: 0, baked: 0, sold: 0, spoiled: 0 }); return rows.get(name); };
   orders(false).filter(o => o.date === date).forEach(o => o.items.forEach(i => { const r = row(i.item); if (PREORDER.includes(o.channel)) r.committed += i.qty; else r.sold += i.qty; }));
   menuActive().filter(m => m.par > 0).forEach(m => { row(m.name).par = m.par; });
-  bakesOn(date).forEach(b => (b.lines || []).forEach(l => { row(l.item).baked += +l.qty || 0; }));
+  bakesOn(date).forEach(b => b.lines.forEach(l => { const r = row(l.item); r.baked += l.qty - l.spoiled; r.spoiled += l.spoiled; }));
   return [...rows.values()].map(r => ({ ...r, toBake: Math.max(0, r.committed + r.par - r.baked), left: r.baked - r.committed - r.sold })).sort((a, b) => b.toBake - a.toBake || b.committed - a.committed);
 }

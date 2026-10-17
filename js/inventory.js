@@ -22,31 +22,34 @@ V.bake = () => {
   let h = band("Bake board", "", `<div class="stats"><div class="st"><b>${totalToBake}</b><span>pieces to bake</span></div><div class="st"><b>${committed}</b><span>pre-ordered</span></div><div class="st"><b>${rows.reduce((s, r) => s + r.baked, 0)}</b><span>baked so far</span></div></div>`);
   h += `<div class="tools"><div class="chips">${[t, addDays(t, 1), addDays(t, 2)].map((x, i) => `<button class="chip" data-bakedate="${x}" aria-pressed="${d === x}">${i === 0 ? "Today" : i === 1 ? "Tomorrow" : esc(dLong(x))}</button>`).join("")}</div></div>`;
   if (!rows.length) return h + `<div class="empty"><strong>Nothing to bake for ${esc(dLong(d))}</strong>Pre-orders and par levels for this day appear here.</div>`;
-  h += `<ul class="list">${rows.map(r => `<li class="row board${r.toBake ? "" : " done"}"><div class="who"><div class="nm big">${esc(r.item)}</div><div class="subl">${r.committed} pre-ordered${r.par ? ` · ${r.par} kept ready` : ""}${r.sold ? ` · ${r.sold} sold at counter` : ""}${r.baked ? ` · ${r.baked} baked` : ""}${r.baked ? ` · ${Math.max(0, r.left)} left` : ""}</div></div>
+  h += `<ul class="list">${rows.map(r => `<li class="row board${r.toBake ? "" : " done"}"><div class="who"><div class="nm big">${esc(r.item)}</div><div class="subl">${r.committed} pre-ordered${r.par ? ` · ${r.par} kept ready` : ""}${r.sold ? ` · ${r.sold} sold at counter` : ""}${r.baked ? ` · ${r.baked} baked` : ""}${r.spoiled ? ` · ${r.spoiled} spoiled` : ""}${r.baked ? ` · ${Math.max(0, r.left)} left` : ""}</div></div>
     <div class="side"><div class="bignum">${r.toBake}</div><small class="mut">to bake</small></div></li>`).join("")}</ul>
-  <div style="padding:0 12px 12px">${R.can("bake.record") ? `<button class="btn btn-primary" data-inv="bake" data-date="${d}">${ICON.oven}Record a bake</button>` : ""}
-  ${baked.length ? `<label class="f">Bakes recorded</label><div class="kv">${baked.map(b => `<div><span>${(b.lines || []).map(l => esc(l.item) + " × " + l.qty).join(", ")}<small class="mut" style="display:block">${new Date(b.at || b._at).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" })}</small></span>${R.can("bake.record") ? `<button class="linkbtn" data-undobake="${esc(b.id)}">Undo</button>` : ""}</div>`).join("")}</div>` : ""}</div>`;
+  <div class="boardfoot">${R.can("bake.record") ? `<button class="btn btn-primary" data-inv="bake" data-date="${d}">${ICON.oven}Record a batch</button>` : ""}
+  ${baked.length ? `<label class="f">Batches for ${d === t ? "today" : esc(dLong(d))}</label><div class="kv">${baked.map(b => `<div style="align-items:center"><button class="who" data-batch="${esc(b.id)}"><div class="nm" style="font-size:15px">${b.no ? "#" + esc(b.no) + " · " : ""}${new Date(b.at || b._at).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" })}</div><div class="subl">${b.lines.map(l => esc(l.item) + " × " + l.qty).join(", ")}</div></button><span class="chev">${ICON.chev}</span></div>`).join("")}</div>` : ""}
+  <button class="btn btn-ghost" data-go="batches">${ICON.batch}All batches</button></div>`;
   return h;
 };
-function bakeSheet(date) {
+export function bakeSheet(date) {
   if (!guard("bake.record")) return;
   const lines = M.board(date).filter(r => r.toBake > 0).map(r => ({ item: r.item, qty: r.toBake }));
   M.menuActive().forEach(m => { if (!lines.some(l => l.item === m.name)) lines.push({ item: m.name, qty: 0 }); });
-  const st = { kind: "bake", date, lines }; st.redraw = () => drawBake(st); drawBake(st);
+  const st = { kind: "bake", date, lines, notes: "" }; st.redraw = () => drawBake(st); drawBake(st);
 }
 function drawBake(st) {
   const ings = Object.fromEntries(M.ingredients().map(i => [i.id, i])); const sm = M.stockMap();
   const { need, unknown } = M.requirement(st.lines); const ids = Object.keys(need).filter(id => ings[id]);
   const short = ids.filter(id => (sm[id] || 0) < need[id]);
-  openSheet(st, `<div class="sh-head"><h2 class="h">Record bake</h2><button class="x" data-close aria-label="Close">×</button></div>
-  <p class="hint" style="margin-top:-4px">${esc(dLong(st.date))} · pieces you are baking now</p>
+  const me = R.me();
+  openSheet(st, `<div class="sh-head"><h2 class="h">New batch</h2><button class="x" data-close aria-label="Close">×</button></div>
+  <p class="hint" style="margin-top:-4px">Batch #${esc(M.nextBatchNo((me && me.prefix) || ""))} · ${esc(dLong(st.date))} · pieces you are baking now</p>
   <div class="kv">${st.lines.map((l, ix) => `<div style="align-items:center"><span>${esc(l.item)}</span><div class="stepper"><button data-bstep="${ix}:-1" aria-label="One less">−</button><span>${l.qty}</span><button data-bstep="${ix}:1" aria-label="One more">+</button></div></div>`).join("")}</div>
   <label class="f" style="margin-top:14px">Stock this bake uses</label>
   ${ids.length ? `<div class="kv">${ids.map(id => { const i = ings[id]; const have = sm[id] || 0; const s = have < need[id];
     return `<div><span>${esc(i.name)}${s ? ` <span class="tag t-due">short ${qty(need[id] - have, i.unit)}</span>` : ""}</span><span>${qty(need[id], i.unit)} <small class="mut">/ ${qty(have, i.unit)}</small></span></div>`; }).join("")}</div>`
   : `<p class="hint">No recipe for these items yet, so stock won’t change. The bake still counts on the board.</p>`}
   ${unknown.length && ids.length ? `<p class="hint">No recipe yet for ${unknown.map(esc).join(", ")}.</p>` : ""}
-  <button class="btn btn-primary" data-inv="saveBake" ${st.lines.some(l => l.qty > 0) ? "" : "disabled"}>${ICON.oven}Save bake</button>
+  <label class="f" for="bNotes">Note <small class="mut">(optional · oven, tray, flavour, who baked)</small></label><input class="in" id="bNotes" value="${esc(st.notes)}" placeholder="Optional">
+  <button class="btn btn-primary" data-inv="saveBake" ${st.lines.some(l => l.qty > 0) ? "" : "disabled"}>${ICON.oven}Save batch</button>
   ${short.length ? `<p class="hint" style="color:var(--due)">${short.length} ingredient${short.length > 1 ? "s" : ""} will go below zero. Record purchases first, or save and fix with a stock count.</p>` : ""}`);
 }
 
@@ -166,6 +169,14 @@ function drawItem(st) {
 }
 function syncItem() { const x = ui.sheet.x; x.name = $("#iName").value.trim(); if (R.can("prices")) x.price = num($("#iPrice").value); x.category = $("#iCat").value.trim(); x.aliases = $("#iAlias").value.trim(); x.par = num($("#iPar").value); }
 
+// Removes a batch from the board and puts the stock it used back on the shelf.
+export async function undoBatch(id) {
+  if (!guard("bake.record")) return false;
+  if (!await yesNo(`<p class="cq">Undo this batch?</p><div class="cdetail">It comes off the bake board and the stock it used goes back on the shelf.</div>`, "Undo batch", "btn-danger-solid")) return false;
+  for (const m of ev.all("moves").filter(m => m.ref === id)) await putMove({ ingId: m.ingId, type: "adjust", qty: -m.qty, note: "Batch undone", ref: m.ref + ":undo" });
+  await ev.del("bakes", id); sync.soon(); toast("Batch undone"); return true;
+}
+
 /* ---------- actions ---------- */
 const I = {
   shopping: shoppingSheet,
@@ -191,11 +202,13 @@ const I = {
     if (st.type === "count") { const on = M.stockLevel(i).on; const d = q - on; if (!await yesNo(`<p class="cq">Set stock to ${qty(q, i.unit)}?</p><div class="cdetail">${esc(i.name)} shows ${qty(on, i.unit)} now. This ${d >= 0 ? "adds" : "removes"} ${qty(Math.abs(d), i.unit)}.</div>`, "Save count")) return; await putMove({ ingId: i.id, type: "count", qty: d, date, note: note || "Stock count" }); toast("Stock count saved"); }
     ingSheet(i.id); },
   bake: el => bakeSheet(el.dataset.date),
-  saveBake: async () => { const st = ui.sheet; const lines = st.lines.filter(l => l.qty > 0); const { need } = M.requirement(lines); const ings = Object.fromEntries(M.ingredients().map(i => [i.id, i]));
-    const ids = Object.keys(need).filter(id => ings[id]);
-    if (!await yesNo(`<p class="cq">Save this bake?</p><div class="cdetail">${lines.map(l => esc(l.item) + " × " + l.qty).join("<br>")}${ids.length ? "<br><br>Stock used: " + ids.map(id => esc(ings[id].name) + " " + qty(need[id], ings[id].unit)).join(", ") : ""}</div>`, "Save bake", "btn-ok")) return;
-    const bakeId = uid("b"); for (const id of ids) await putMove({ ingId: id, type: "bake", qty: -need[id], date: st.date, note: "Bake " + dLabel(st.date), ref: bakeId });
-    await ev.put("bakes", { id: bakeId, date: st.date, lines, at: new Date().toISOString(), outletId: M.config().outletId }); sync.soon(); closeSheet(); toast("Bake saved"); },
+  saveBake: async () => { const st = ui.sheet; const lines = st.lines.filter(l => l.qty > 0).map(l => ({ item: l.item, qty: l.qty })); const { need } = M.requirement(lines); const ings = Object.fromEntries(M.ingredients().map(i => [i.id, i]));
+    const ids = Object.keys(need).filter(id => ings[id]); const me = R.me(); const no = M.nextBatchNo((me && me.prefix) || "");
+    if (!await yesNo(`<p class="cq">Save batch #${esc(no)}?</p><div class="cdetail">${lines.map(l => esc(l.item) + " × " + l.qty).join("<br>")}${ids.length ? "<br><br>Stock used: " + ids.map(id => esc(ings[id].name) + " " + qty(need[id], ings[id].unit)).join(", ") : ""}</div>`, "Save batch", "btn-ok")) return;
+    const bakeId = uid("b"); for (const id of ids) await putMove({ ingId: id, type: "bake", qty: -need[id], date: st.date, note: `Batch #${no}`, ref: bakeId });
+    const stock = ids.map(id => ({ ingId: id, qty: need[id], cost: Math.round(M.unitCost(ings[id]) * need[id] * 100) / 100 }));
+    await ev.put("bakes", { id: bakeId, no, date: st.date, lines, notes: (st.notes || "").trim(), stock, cost: Math.round(stock.reduce((s, x) => s + x.cost, 0) * 100) / 100, madeBy: me ? me.id : "", at: new Date().toISOString(), outletId: M.config().outletId });
+    sync.soon(); closeSheet(); toast(`Batch #${no} saved`, `<button data-batch="${esc(bakeId)}">View</button>`); },
   newItem: () => itemSheet(null),
   addRecipeLine: () => { syncItem(); const ings = M.ingredients(); ui.sheet.x.recipe.push({ ingId: ings[0].id, qty: 0 }); drawItem(ui.sheet); },
   saveItem: async () => { syncItem(); const st = ui.sheet, x = st.x; if (!x.name) { toast("Add the item name"); return; }
@@ -208,10 +221,6 @@ H.click.push(async T => {
   const st = ui.sheet;
   const a = T.closest("[data-inv]"); if (a && I[a.dataset.inv]) { await I[a.dataset.inv](a); return true; }
   const bd = T.closest("[data-bakedate]"); if (bd) { S.bakeDate = bd.dataset.bakedate; H.render(); return true; }
-  const ub = T.closest("[data-undobake]"); if (ub) { if (!guard("bake.record")) return true;
-    if (await yesNo(`<p class="cq">Undo this bake?</p><div class="cdetail">The stock it used goes back on the shelf.</div>`, "Undo bake", "btn-danger-solid")) {
-      for (const m of ev.all("moves").filter(m => m.ref === ub.dataset.undobake)) await putMove({ ingId: m.ingId, type: "adjust", qty: -m.qty, note: "Bake undone", ref: m.ref + ":undo" });
-      await ev.del("bakes", ub.dataset.undobake); sync.soon(); toast("Bake undone"); } return true; }
   const ig = T.closest("[data-ing]"); if (ig) { ingSheet(ig.dataset.ing); return true; }
   const mi = T.closest("[data-menuitem]"); if (mi) { if (R.can("menu.edit")) itemSheet(M.menu().find(m => m.id === mi.dataset.menuitem)); return true; }
   const tg = T.closest("[data-togm]"); if (tg) { if (!guard("menu.edit")) return true; const m = M.menu().find(x => x.id === tg.dataset.togm); if (m) { const { _at, _by, ...rec } = m; await ev.put("menu", { ...rec, active: m.active === false }); sync.soon(); menuSheet(); } return true; }
@@ -225,7 +234,8 @@ H.click.push(async T => {
   return false;
 });
 H.input.push(T => {
-  const st = ui.sheet; if (!st || st.kind !== "item") return false;
+  const st = ui.sheet; if (st && st.kind === "bake" && T.id === "bNotes") { st.notes = T.value; return true; }
+  if (!st || st.kind !== "item") return false;
   if (T.dataset.rpqty != null) st.x.recipe[+T.dataset.rpqty].qty = num(T.value);
   if (T.id === "iPrice") st.x.price = num(T.value);
   if (T.dataset.rpqty != null || T.id === "iPrice") { const rc = M.recipeCost(st.x); $("#rcCost") && ($("#rcCost").textContent = rs2(rc.cost)); $("#rcMargin") && ($("#rcMargin").textContent = st.x.price ? Math.round((1 - rc.cost / st.x.price) * 100) + "%" : "–"); return true; }

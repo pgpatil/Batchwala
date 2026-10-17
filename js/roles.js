@@ -8,7 +8,7 @@ export const ROLES = {
   admin:      { label: "Admin",      home: "today", tabs: ["today", "orders", "pay", "stock", "more"], perms: "*", note: "Every module, including users, settings, sync, backup and deleting records" },
   management: { label: "Management", home: "today", tabs: ["today", "orders", "pay", "stock", "more"], perms: MGMT, note: "Runs the business: orders, money, stock, menu and prices, reports" },
   manager:    { label: "Manager",    home: "today", tabs: ["today", "orders", "pay", "stock", "more"], perms: MGMT.filter(p => !["menu.edit", "prices", "export", "history"].includes(p)), note: "Day-to-day operations; can’t change prices" },
-  kitchen:    { label: "Kitchen",    home: "bake",  tabs: ["bake", "stock", "more"], perms: ["bake.record", "stock.waste", "stock.count"], note: "Bake board, wastage and stock counts; no money or phone numbers" },
+  kitchen:    { label: "Kitchen",    home: "bake",  tabs: ["bake", "batches", "stock", "more"], perms: ["bake.record", "stock.waste", "stock.count"], note: "Bake board, batches, wastage and stock counts; no money or phone numbers" },
   delivery:   { label: "Delivery",   home: "run",   tabs: ["run", "more"], perms: ["deliver", "collect", "phone", "money"], note: "Today’s delivery run and payment collection" },
   counter:    { label: "Counter",    home: "sale",  tabs: ["sale", "more"], perms: ["sale", "money"], note: "Quick sales for walk-in and aggregator orders" }
 };

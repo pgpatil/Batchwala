@@ -12,7 +12,10 @@ It is a Progressive Web App: it opens from a link, installs to the home screen, 
 | New order | Tap-to-add menu, saved customers, channel, offer %, occasion tag |
 | From WhatsApp | Paste or share a customer’s message; the app reads customer, flat, items and date, then shows a confirm screen. Unmatched words must be matched or ignored before saving, and can be remembered as short names |
 | Quick sale | Walk-in, Swiggy or Zomato sale in three taps; Swiggy and Zomato show as owing until settled |
-| Bake board | Per item: pre-ordered, kept ready (par level), baked, sold at counter, left, and how many still to bake. Recording a bake deducts ingredients by recipe |
+| Bake board | Per item: pre-ordered, kept ready (par level), baked, spoiled, sold at counter, left, and how many still to bake |
+| Batches | Every bake recorded as a numbered batch: pieces per item, spoiled pieces, note, who made it, stock used by recipe and its cost. Filter by today, 7 days, 30 days or all |
+| Orders | Every order from every channel (WhatsApp, Phone, Instagram, Bulk / event, Other, Walk-in, Swiggy, Zomato), filtered by period, channel and occasion |
+| Desktop | On a laptop or desktop: sidebar navigation, side-drawer forms, Orders and Batches as tables with totals; N for new order, / to search |
 | Delivery run | Today’s pre-orders by wing and floor; Delivered + paid by UPI or cash in one confirm |
 | Bill summary | Per order: items with quantity, rate and amount, then Total, Discount and Total payable. Copy marks it “Bill summary sent”; editing the order afterwards flags it |
 | Payments | Balances by customer, one-tap UPI or cash, part payments oldest-first, reversals instead of edits, WhatsApp reminders with your UPI ID |
@@ -30,7 +33,7 @@ It is a Progressive Web App: it opens from a link, installs to the home screen, 
 | Admin | Today | Everything, including users, business settings, sync, backup and deleting records |
 | Management | Today | Orders, bake board, delivery, payments, stock, menu and prices, customers, reports, Excel export |
 | Manager | Today | Day-to-day operations; can’t change prices or export |
-| Kitchen | Bake board | Record bakes, wastage and stock counts; no money or phone numbers |
+| Kitchen | Bake board | Record batches and spoiled pieces, wastage and stock counts; no money or phone numbers |
 | Delivery | My run | Mark delivered, collect payment |
 | Counter | Quick sale | Walk-in and aggregator sales |
 
@@ -86,7 +89,8 @@ No build step: plain HTML, CSS and JavaScript modules. Run locally with `python3
 | `js/model.js` | Totals, balances, customers, stock, costing, bake board |
 | `js/orders.js` | Today, Orders, order detail and history, order form |
 | `js/money.js` | Payments, customers, reports |
-| `js/inventory.js` | Bake board, stock, menu and recipes |
+| `js/inventory.js` | Bake board, recording a batch, stock, menu and recipes |
+| `js/batches.js` | Batches register and batch detail |
 | `js/ops.js` | Delivery run, quick sale, WhatsApp import |
 | `js/waparse.js` | Reads a WhatsApp message into a draft order |
 | `js/admin.js` | More, first run, users, settings, sync, backup, Excel |

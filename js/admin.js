@@ -14,18 +14,19 @@ V.more = () => {
   const c = M.config(); const me = R.me(); const st = sync.status;
   const items = [
     ["menu", "menu", "Menu, prices & recipes", `${M.menuActive().length} items on sale`, R.can("menu.edit") || R.can("reports")],
+    ["batches", "batch", "Batches", `${M.batches().length} recorded · pieces, spoilage and cost`, R.tabs().includes("today")],
     ["customers", "people", "Customers", `${M.customers().length} saved`, R.can("customers")],
     ["reports", "chart", "Sales & profit", "Sales by day and channel, best sellers, margins", R.can("reports")],
     ["users", "people", "Users & roles", `${R.members().length} people`, R.isAdmin()],
     ["settings", "gear", "Business settings", "Logo, name, colour, UPI ID, occasions", R.isAdmin()],
     ["syncSettings", "cloud", "Cloud sync (Google Drive)", st.state === "off" ? "Off · this phone only" : st.state === "ok" ? "On · up to date" : st.state === "error" ? "Needs attention" : "On", true],
     ["backup", "backup", "Backup & restore", "Save a backup file or load one", R.isAdmin()],
-    ["export", "dl", "Export to Excel", "Orders, payments, stock and menu", R.can("export")],
+    ["export", "dl", "Export to Excel", "Orders, payments, batches, stock and menu", R.can("export")],
     ["switchUser", "people", "Switch user", "Hand this phone to someone else", true]
   ].filter(x => x[4]);
   return `<div class="band"><div class="top">${logoHtml(c)}<div class="biz"><div class="name">${esc(c.business)}</div><div class="sub">${esc(me ? me.name + " · " + R.ROLES[me.role].label : "")}</div></div></div>${toran()}</div>
   <div class="menu-list" style="margin-top:14px">${items.map(([a, ic, t, s]) => `<button class="mi" data-act="${a}"><span class="ic">${ICON[ic]}</span><span class="grow">${t}<small>${esc(s)}</small></span><span class="chev">${ICON.chev}</span></button>`).join("")}</div>
-  <p class="hint" style="padding:4px 18px">${APP_NAME} 2.0 · ${st.state === "off" ? "data saved on this phone only" : "synced through Google Drive"}${st.last ? " · last sync " + new Date(st.last).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" }) : ""}</p>`;
+  <p class="hint" style="padding:4px 18px">${APP_NAME} 2.2 · ${st.state === "off" ? "data saved on this phone only" : "synced through Google Drive"}${st.last ? " · last sync " + new Date(st.last).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" }) : ""}</p>`;
 };
 
 /* ---------- first run ---------- */
@@ -256,6 +257,10 @@ export function buildWorkbook() {
   const ings = Object.fromEntries(M.ingredients().map(i => [i.id, i]));
   const V2 = [["Date", "Ingredient", "Type", "Qty", "Unit", "Amount (₹)", "Note"]]; M.moves().forEach(m => { const i = ings[m.ingId]; V2.push([m.date, i ? i.name : "?", m.type, m.qty, i ? i.unit : "", m.amount || "", m.note || ""]); });
   X.utils.book_append_sheet(wb, X.utils.aoa_to_sheet(V2), "Stock movements");
+  const Bt = [["Batch #", "Date", "Time", "Item", "Pieces", "Spoiled", "Batch cost (₹)", "Made by", "Note"]];
+  M.batches().slice().reverse().forEach(b => { const m = ev.get("members", b.madeBy || b._by); const at = b.at || b._at;
+    b.lines.forEach((l, ix) => Bt.push([b.no, b.date, ix || !at ? "" : new Date(at).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" }), l.item, l.qty, l.spoiled, ix ? "" : Math.round(M.batchCost(b) * 100) / 100, ix ? "" : (m ? m.name : ""), ix ? "" : b.notes])); });
+  X.utils.book_append_sheet(wb, X.utils.aoa_to_sheet(Bt), "Batches");
   const Mn = [["Item", "Category", "Price (₹)", "Short names", "Keep ready", "Recipe cost (₹)", "Margin %", "On sale"]]; M.menu().forEach(m => { const rc = M.recipeCost(m); Mn.push([m.name, m.category, m.price, m.aliases, m.par, rc.lines ? Math.round(rc.cost * 100) / 100 : "", rc.lines && m.price ? Math.round((1 - rc.cost / m.price) * 100) : "", m.active !== false ? "Yes" : "No"]); });
   X.utils.book_append_sheet(wb, X.utils.aoa_to_sheet(Mn), "Menu");
   return wb;

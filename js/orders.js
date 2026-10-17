@@ -88,13 +88,17 @@ V.orders = () => {
   S.filter.orders = S.filter.orders || "upcoming";
   const t = today(); const all = M.orders(); const tags = [...new Set(all.map(o => o.tag).filter(Boolean))];
   const g = { upcoming: o => o.date >= t && o.status !== "cancelled", past: o => o.date < t && o.status !== "cancelled", cancelled: o => o.status === "cancelled", all: () => true };
-  const tagF = S.filter.ordersTag || "";
-  const list = all.filter(g[S.filter.orders]).filter(o => !tagF || o.tag === tagF).filter(o => matchQ("orders", o))
+  const tagF = S.filter.ordersTag || "", chanF = S.filter.ordersChan || "";
+  const group = all.filter(g[S.filter.orders]); const ck = Object.keys(M.CHANNELS);
+  const chans = [...new Set(all.map(o => o.channel))].sort((a, b) => ck.indexOf(a) - ck.indexOf(b));
+  const list = group.filter(o => !tagF || o.tag === tagF).filter(o => !chanF || o.channel === chanF).filter(o => matchQ("orders", o))
     .sort((a, b) => S.filter.orders === "past" ? (a.date < b.date ? 1 : a.date > b.date ? -1 : cmpFlat(a, b)) : (a.date < b.date ? -1 : a.date > b.date ? 1 : cmpFlat(a, b)));
   let h = band("Orders", R.can("export") ? `<button class="pillbtn" data-act="export">${ICON.dl}Excel</button>` : "");
   h += `<div class="tools">${searchBox("orders", "Search name, flat, phone or #")}${chipBar("orders", [["upcoming", "Upcoming", all.filter(g.upcoming).length], ["past", "Past", all.filter(g.past).length], ["cancelled", "Cancelled", all.filter(g.cancelled).length], ["all", "All", all.length]])}</div>`;
+  if (chans.length > 1) h += `<div class="tools" style="padding-top:2px"><div class="chips scroll"><button class="chip" data-chanf="" aria-pressed="${!chanF}">All channels</button>${chans.map(k => `<button class="chip" data-chanf="${esc(k)}" aria-pressed="${chanF === k}">${esc(M.CHANNELS[k] || k)}<span class="n">${group.filter(o => o.channel === k).length}</span></button>`).join("")}</div></div>`;
   if (tags.length) h += `<div class="tools" style="padding-top:2px"><div class="chips"><button class="chip" data-tagf="" aria-pressed="${!tagF}">All occasions</button>${tags.map(x => `<button class="chip" data-tagf="${esc(x)}" aria-pressed="${tagF === x}">${esc(x)}</button>`).join("")}</div></div>`;
   if (!list.length) return h + `<div class="empty"><strong>No orders here</strong>${all.length ? "Try another filter or search." : "Tap New order to take your first one."}</div>`;
+  if (S.wide) return h + ordersTable(list);
   let cur = ""; h += "<div>";
   list.forEach(o => {
     if (o.date !== cur) { if (cur) h += "</ul>"; cur = o.date; const d = list.filter(x => x.date === cur); h += `<div class="sect">${esc(dLong(cur))}${cur === t ? " · Today" : ""}<span>${d.length} orders${R.can("money") ? " · " + rs(d.reduce((s, x) => s + M.total(x), 0)) : ""}</span></div><ul class="list" style="padding-top:0">`; }
@@ -102,6 +106,16 @@ V.orders = () => {
   });
   return h + "</ul></div>";
 };
+
+// Desktop register: one row per order, every channel, with totals for what is shown.
+const statusTag = o => o.status === "cancelled" ? `<span class="tag t-due">Cancelled</span>` : o.status === "delivered" ? `<span class="tag t-paid">${ICON.check}Delivered</span>` : `<span class="tag t-camp">${esc(M.STATUS_LABEL[o.status] || o.status)}</span>`;
+function ordersTable(list) {
+  const money = R.can("money"); const live = list.filter(o => o.status !== "cancelled");
+  return `<div class="card tablecard"><table class="reg"><thead><tr><th>#</th><th>Date</th><th>Customer</th><th>Channel</th><th>Items</th><th class="r">Pcs</th>${money ? `<th class="r">Total</th><th class="r">Due</th><th>Payment</th>` : ""}<th>Status</th></tr></thead>
+  <tbody>${list.map(o => `<tr data-open="${esc(o.id)}" tabindex="0"><td>${noLabel(o)}</td><td>${esc(dLong(o.date))}</td><td><b>${esc(o.customer || M.CHANNELS[o.channel])}</b>${o.flat ? ` <small class="mut">${esc(o.flat)}</small>` : ""}${o.tag ? ` <span class="tag t-camp">${esc(o.tag)}</span>` : ""}</td><td>${esc(M.CHANNELS[o.channel] || o.channel)}</td>
+    <td class="items">${o.items.map(i => esc(i.item) + " ×" + i.qty).join(", ")}</td><td class="r">${M.pcs(o)}</td>${money ? `<td class="r">${rs(M.total(o))}</td><td class="r">${M.bal(o) ? `<span class="due">${rs(M.bal(o))}</span>` : "–"}</td><td>${o.status === "cancelled" ? "" : payTag(o)} ${billTag(o)}</td>` : ""}<td>${statusTag(o)}</td></tr>`).join("")}</tbody>
+  <tfoot><tr><td colspan="5">${list.length} order${list.length === 1 ? "" : "s"}${live.length < list.length ? ` · ${list.length - live.length} cancelled` : ""}</td><td class="r">${live.reduce((s, o) => s + M.pcs(o), 0)}</td>${money ? `<td class="r">${rs(live.reduce((s, o) => s + M.total(o), 0))}</td><td class="r">${rs(live.reduce((s, o) => s + M.bal(o), 0))}</td><td></td>` : ""}<td></td></tr></tfoot></table></div>`;
+}
 
 /* ---------- delivery confirm (shared with the run) ---------- */
 export async function confirmDeliver(o, withCollect = false) {
@@ -164,6 +178,10 @@ export function historySheet(kind, id, title, back) {
     let what = "";
     if (e.op === "del") what = "Deleted";
     else if (!prev) what = "Created";
+    else if (kind === "bakes") { const ch = []; const d = e.data, p = prev.data || {};
+      if (JSON.stringify(d.lines) !== JSON.stringify(p.lines)) ch.push("pieces or spoiled changed");
+      if ((d.notes || "") !== (p.notes || "")) ch.push(`note → ${d.notes || "blank"}`);
+      what = ch.join("; ") || "Saved with no visible change"; }
     else { const ch = []; const d = e.data, p = prev.data || {};
       if (d.status !== p.status) ch.push(`status → ${M.STATUS_LABEL[d.status] || d.status}`);
       if (JSON.stringify(d.items) !== JSON.stringify(p.items)) ch.push("items or prices changed");
@@ -211,7 +229,7 @@ function drawCompose(st) {
     ${sugg.length ? `<div class="sugg">${sugg.map(c => `<button data-pickcust="${esc(c.key)}"><b>${esc(c.customer)}</b> ${esc(c.flat)}<small>${c.orders.length} past order${c.orders.length > 1 ? "s" : ""}</small></button>`).join("")}</div>` : ""}
     <div class="two"><div><label class="f" for="cFlat">Flat / address</label><input class="in" id="cFlat" value="${esc(o.flat)}" placeholder="e.g. A-1301" autocomplete="off"></div>
     <div><label class="f" for="cPhone">Phone</label><input class="in" id="cPhone" value="${esc(o.phone)}" placeholder="10-digit mobile" inputmode="tel" autocomplete="off"></div></div>
-    <label class="f">Channel</label><div class="chips">${["whatsapp", "phone"].map(k => `<button class="chip" data-chan="${k}" aria-pressed="${o.channel === k}">${M.CHANNELS[k]}</button>`).join("")}</div>
+    <label class="f">Channel</label><div class="chips">${M.PREORDER.map(k => `<button class="chip" data-chan="${k}" aria-pressed="${o.channel === k}">${M.CHANNELS[k]}</button>`).join("")}</div>
     <label class="f">Delivery date</label><div class="datechips">
       ${three.map((d, i) => `<button class="chip" data-cdate="${d}" aria-pressed="${o.date === d}">${i === 0 ? "Today" : i === 1 ? "Tomorrow" : esc(dObj(d).toLocaleDateString("en-IN", { weekday: "short", day: "numeric" }))}</button>`).join("")}
       <label class="chip" aria-pressed="${!three.includes(o.date)}">${!three.includes(o.date) ? esc(dLong(o.date)) : "Other date"}<input type="date" id="cDate" value="${o.date}" aria-label="Other date"></label></div>
