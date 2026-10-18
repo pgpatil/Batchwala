@@ -6,8 +6,8 @@ import * as R from "./roles.js";
 import { S, A, V, H, guard, chipBar, searchBox, band, clean } from "./core.js";
 import { bakeSheet, undoBatch } from "./inventory.js";
 import { historySheet } from "./orders.js";
-import { $, esc, rs, rs2, today, addDays, dLong, qty, ICON } from "./util.js";
-import { ui, toast, openSheet, closeSheet, ask } from "./ui.js";
+import { $, esc, rs, rs2, uid, today, addDays, dLong, qty, ICON } from "./util.js";
+import { ui, toast, openSheet, closeSheet, ask, yesNo } from "./ui.js";
 
 const time = b => { const t = b.at || b._at; return t ? new Date(t).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" }) : ""; };
 const who = b => { const m = ev.get("members", b.madeBy || b._by); return m ? m.name : ""; };
@@ -56,7 +56,8 @@ export function batchSheet(id) {
   <div class="kpis" style="padding:0;margin-bottom:10px"><div class="kpi"><b>${p - s}</b><span>good pieces${s ? ` of ${p}` : ""}</span></div><div class="kpi"><b style="${s ? "color:var(--due)" : ""}">${s}</b><span>spoiled</span></div>
   ${money && !b.lines.length ? `<div class="kpi"><b>${rs2(M.batchMadeValue(b))}</b><span>value of prep made</span></div>` : ""}
   ${money && b.lines.length ? `<div class="kpi"><b>${c ? rs2(c) : "–"}</b><span>${b.prep.length && b.lines.length ? "net cost of pieces" : "ingredient cost"}</span></div><div class="kpi"><b>${c && p - s > 0 ? rs2(c / (p - s)) : "–"}</b><span>cost per good piece</span></div>` : ""}</div>
-  ${b.lines.length ? `<label class="f">Pieces</label><div class="kv">${b.lines.map(l => `<div><span>${esc(l.item)}${l.spoiled ? ` <span class="tag t-due">${l.spoiled} spoiled</span>` : ""}</span><b>${l.qty}</b></div>`).join("")}</div>` : ""}
+  ${b.lines.length ? `<label class="f">Pieces</label><div class="kv">${b.lines.map(l => { const lot = M.batchLots().find(x => x.b.id === b.id && x.ix === b.lines.indexOf(l));
+    return `<div><span>${esc(l.item)}${l.spoiled ? ` <span class="tag t-due">${l.spoiled} spoiled</span>` : ""}${l.discarded ? ` <span class="tag t-due">${l.discarded} discarded</span>` : ""}${l.cleared ? ` <span class="tag t-part">${l.cleared} cleared on count</span>` : ""}<small class="mut" style="display:block">${lot ? `${lot.left} unsold · ${lot.life}-day shelf life, ${lot.expired ? "expired" : "good till"} ${esc(dLong(addDays(lot.expires, lot.expired ? 0 : -1)))}` : ""}</small></span><b>${l.qty}</b></div>`; }).join("")}</div>` : ""}
   ${b.prep.length ? `<label class="f">Semi-finished made</label><div class="kv">${b.prep.map(p => { const i = ings[p.ingId]; const m = (b.made || []).find(x => x.ingId === p.ingId); return `<div><span>${esc(i ? i.name : "Removed material")} <small class="mut">× ${p.runs} run${p.runs === 1 ? "" : "s"}</small></span><span>${i ? qty(p.qty, i.unit) : p.qty}${money && m && m.cost ? ` <small class="mut">${rs2(m.cost)}</small>` : ""}</span></div>`; }).join("")}</div>` : ""}
   <label class="f">Stock used</label>${stock.length ? `<div class="kv">${stock.map(x => { const i = ings[x.ingId]; return `<div><span>${esc(i ? i.name : "Removed ingredient")}</span><span>${i ? qty(x.qty, i.unit) : x.qty}${money && x.cost ? ` <small class="mut">${rs2(x.cost)}</small>` : ""}</span></div>`; }).join("")}</div>` : `<p class="hint" style="margin-top:0">No recipe for these items, so stock didn’t change.</p>`}
   ${b.notes ? `<p class="hint">Note: ${esc(b.notes)}</p>` : ""}
@@ -90,5 +91,45 @@ H.click.push(async T => {
   const b = T.closest("[data-batch]"); if (b) { batchSheet(b.dataset.batch); return true; }
   const st = ui.sheet;
   if (st && st.kind === "batchSpoil") { const sp = T.closest("[data-spstep]"); if (sp) { const [ix, d] = sp.dataset.spstep.split(":").map(Number); const l = st.lines[ix]; l.spoiled = Math.min(l.qty, Math.max(0, l.spoiled + d)); drawSpoil(st); return true; } }
+  return false;
+});
+
+/* ---------- past shelf life ---------- */
+// Pieces older than their shelf life that haven't been sold: discard them, or update the count when some went without being recorded.
+// Opens when the app starts (and when it comes back after a while) until nothing is left to sort out.
+const canClear = () => R.can("bake.record") || R.can("stock.waste") || R.can("sale");
+export function expirySheet() {
+  const lots = M.expiredLots(); if (!lots.length) { if (ui.sheet && ui.sheet.kind === "expiry") { closeSheet(); toast("Nothing left past its shelf life"); } return; }
+  const total = lots.reduce((s, l) => s + l.left, 0);
+  openSheet({ kind: "expiry", lots, redraw: expirySheet }, `<div class="sh-head"><h2 class="h">Past shelf life</h2><button class="x" data-close aria-label="Close">×</button></div>
+  <p class="hint" style="margin-top:-4px">${total} piece${total > 1 ? "s" : ""} older than their shelf life haven’t been sold. Discard them, or update the count if some were sold or used without being recorded. This comes back each time the app opens until it’s cleared.</p>
+  <div class="kv">${lots.map((l, i) => `<div class="exprow"><span><b>${esc(l.item)}</b><small class="mut" style="display:block">Batch ${l.b.no ? "#" + esc(l.b.no) : ""} · made ${esc(dLong(l.date))} · ${l.life}-day life, expired ${esc(dLong(l.expires))}</small></span>
+    <span class="side"><b class="due">${l.left} left</b><span class="exbtns"><button class="paybtn dangerbtn" data-expdis="${i}">Discard ${l.left}</button><button class="linkbtn" data-expupd="${i}">Update count</button></span></span></div>`).join("")}</div>
+  ${lots.length > 1 ? `<button class="btn btn-danger-solid" data-expall>Discard all ${total} pieces</button>` : ""}
+  <button class="btn btn-ghost" data-close>Later</button>`);
+}
+// gone: pieces leaving this batch's count. how: "discarded" (thrown away) or "cleared" (sold or used without a record). With ERP, finished-goods stock at this location changes too.
+async function clearLot(l, gone, how) {
+  const raw = ev.get("bakes", l.b.id); const b = M.batches().find(x => x.id === l.b.id); if (!raw || !b || gone <= 0) return;
+  const lines = b.lines.map((x, ix) => ix === l.ix ? { ...x, [how]: (x[how] || 0) + gone } : x);
+  await ev.put("bakes", clean({ ...raw, lines }));
+  if (M.erpOn()) await ev.put("fg", { id: uid("f"), loc: M.here(), item: l.item, qty: -gone, type: how === "discarded" ? "waste" : "count", date: today(), note: `Past shelf life · batch ${b.no ? "#" + b.no : ""}` });
+  sync.soon();
+}
+H.expiryCheck = () => { if (R.me() && canClear() && !ui.sheet && M.expiredLots().length) expirySheet(); };
+H.expiryBanner = () => { if (!canClear()) return ""; const lots = M.expiredLots(); if (!lots.length) return ""; const n = lots.reduce((s, l) => s + l.left, 0);
+  return `<button class="banner bad expbanner" data-act="expiry">${n} piece${n > 1 ? "s" : ""} past shelf life · tap to discard or update</button>`; };
+A.expiry = () => expirySheet();
+H.click.push(async T => {
+  const st = ui.sheet; if (!st || st.kind !== "expiry") return false;
+  const d = T.closest("[data-expdis]"); if (d) { const l = st.lots[+d.dataset.expdis];
+    if (await yesNo(`<p class="cq">Discard ${l.left} ${esc(l.item)}?</p><div class="cdetail">Batch ${l.b.no ? "#" + esc(l.b.no) : ""}, made ${esc(dLong(l.date))}. Recorded as discarded.</div>`, "Discard", "btn-danger-solid")) { await clearLot(l, l.left, "discarded"); toast(`${l.left} ${l.item} discarded`); expirySheet(); } return true; }
+  const u = T.closest("[data-expupd]"); if (u) { const l = st.lots[+u.dataset.expupd];
+    const ok = await ask(`<p class="cq">${esc(l.item)}: how many are really left?</p><div class="cdetail">Batch ${l.b.no ? "#" + esc(l.b.no) : ""} should have ${l.left}. Pieces not there were sold or used without a record.</div><input class="in" id="expN" inputmode="numeric" value="0" style="margin-top:12px;text-align:center;font-size:22px">`, [{ label: "Cancel", cls: "btn-ghost", value: false }, { label: "Save count", cls: "btn-primary", value: true }], true);
+    if (!ok) return true; const n = Math.round(+($("#expN") || {}).value || 0); if (!(n >= 0 && n <= l.left)) { toast(`Enter a number from 0 to ${l.left}`); return true; }
+    if (l.left - n) await clearLot(l, l.left - n, "cleared");
+    toast(n ? `${n} still there and past shelf life: discard them` : "Count updated"); expirySheet(); return true; }
+  if (T.closest("[data-expall]")) { const total = st.lots.reduce((s, l) => s + l.left, 0);
+    if (await yesNo(`<p class="cq">Discard all ${total} pieces?</p><div class="cdetail">${st.lots.map(l => `${esc(l.item)} × ${l.left}`).join("<br>")}</div>`, "Discard all", "btn-danger-solid")) { for (const l of st.lots) await clearLot(l, l.left, "discarded"); toast(`${total} pieces discarded`); expirySheet(); } return true; }
   return false;
 });

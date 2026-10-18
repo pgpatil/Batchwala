@@ -1,6 +1,6 @@
 // Business rules over the event store: orders, payments, customers, stock, costing and the bake board.
 import * as ev from "./events.js";
-import { today, cmpFlat, flatKey } from "./util.js";
+import { today, addDays, cmpFlat, flatKey } from "./util.js";
 
 export const CHANNELS = { whatsapp: "WhatsApp", phone: "Phone", instagram: "Instagram", bulk: "Bulk / event", other: "Other", walkin: "Walk-in", swiggy: "Swiggy", zomato: "Zomato" };
 export const PREORDER = ["whatsapp", "phone", "instagram", "bulk", "other"];
@@ -119,7 +119,7 @@ export function requirement(lines) {
 
 /* ---------- batches ---------- */
 // A batch is one recorded bake (kind "bakes"): numbered, with pieces and spoiled pieces per item and the stock it used.
-export const batches = () => ev.all("bakes").map(b => ({ no: "", notes: "", void: false, ...b, lines: (b.lines || []).map(l => ({ item: l.item, qty: +l.qty || 0, spoiled: +l.spoiled || 0 })), prep: (b.prep || []).map(p => ({ ingId: p.ingId, runs: +p.runs || 0, qty: +p.qty || 0 })) }))
+export const batches = () => ev.all("bakes").map(b => ({ no: "", notes: "", void: false, ...b, lines: (b.lines || []).map(l => ({ item: l.item, qty: +l.qty || 0, spoiled: +l.spoiled || 0, discarded: +l.discarded || 0, cleared: +l.cleared || 0 })), prep: (b.prep || []).map(p => ({ ingId: p.ingId, runs: +p.runs || 0, qty: +p.qty || 0 })) }))
   .sort((a, b) => (a.date + (a.at || a._at || "")) < (b.date + (b.at || b._at || "")) ? 1 : -1);
 export const bakesOn = date => batches().filter(b => b.date === date && !b.void);
 export const batchPcs = b => b.lines.reduce((s, l) => s + l.qty, 0);
@@ -228,3 +228,18 @@ export function inTransit(loc) { const m = {}; ev.all("transfers").filter(t => !
 export const transfers = () => ev.all("transfers").sort((a, b) => (b.date + b._at).localeCompare(a.date + a._at));
 // GRN-P12, T-P4: the document type, then the person's prefix so two phones never clash offline.
 export function nextDocNo(kind, prefix, tag) { const n = ev.all(kind).map(x => +((/(\d+)$/.exec(String(x.no || "")) || [])[1] || 0)); return `${tag}-${prefix || ""}${Math.max(0, ...n) + 1}`; }
+
+/* ---------- shelf life ---------- */
+// Days a piece can be sold, counting the day it was baked. Set per menu item; otherwise cookies keep a month and everything else 3 days.
+export const shelfLife = m => m && m.shelfLife != null && m.shelfLife !== "" ? Math.max(1, +m.shelfLife) : (/cookie/i.test(m ? `${m.name} ${m.category}` : "") ? 30 : 3);
+// Pieces of each batch still unsold: delivered orders use up the oldest batch made on or before their date first.
+// Discarded pieces and pieces cleared on a count also come off. A lot is expired from the day its shelf life ends.
+export function batchLots() {
+  const lots = {}; const t = today();
+  batches().filter(b => !b.void).sort((a, b) => (a.date + (a.at || a._at || "")) < (b.date + (b.at || b._at || "")) ? -1 : 1)
+    .forEach(b => b.lines.forEach((l, ix) => { (lots[l.item] = lots[l.item] || []).push({ b, ix, item: l.item, date: b.date, made: l.qty - l.spoiled, left: Math.max(0, l.qty - l.spoiled - l.discarded - l.cleared) }); }));
+  orders(false).filter(isDelivered).flatMap(o => o.items.map(i => ({ item: i.item, qty: i.qty, date: o.date }))).sort((a, b) => a.date < b.date ? -1 : 1)
+    .forEach(s => { let q = s.qty; for (const lot of lots[s.item] || []) { if (q <= 0) break; if (lot.date > s.date || lot.left <= 0) continue; const u = Math.min(lot.left, q); lot.left -= u; q -= u; } });
+  return Object.values(lots).flat().map(l => { const life = shelfLife(menuByName(l.item)); const exp = addDays(l.date, life); return { ...l, life, expires: exp, expired: l.left > 0 && exp <= t }; });
+}
+export const expiredLots = () => batchLots().filter(l => l.expired).sort((a, b) => a.expires < b.expires ? -1 : 1);

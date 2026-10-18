@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.7.0 — 18 Oct 2026
+- Fixed: Pick date on Today (and other date chips) didn't open on desktop browsers
+- Mark as delivered: "Delivered, not paid yet" is now the first option
+- Shelf life per menu item (default 30 days for cookies, 3 days for everything else). Unsold pieces are followed batch by batch (oldest sold first); anything past its shelf life raises a prompt when the app opens, and when it comes back after 30 minutes away, until each line is discarded or its count updated. Bake boards show a banner; batches show unsold pieces and the last good day
+- Stock is now Inventory, with tabs for raw materials, packing and semi-finished, and categories within each (Dairy, Flour & grains, Boxes…)
+- Upload a purchase invoice (Excel, CSV or pasted lines): supplier item names are matched to inventory items (remembered for next time) or added as new, then a GRN opens filled in
+- Upload BOM from Excel on the BOM screen: components and parents not found are matched to inventory or created before saving
+- Checks before creating new records: customers (same flat or phone under another name, or a near-identical name), menu items, materials and suppliers (similar names), and new names in imports, are confirmed first
+
 ## 2.6.0 — 18 Oct 2026
 - Help: every screen and module explained (setup, roles and modes, Counter, orders, payments, bake board, production, batches, BOM, stock, GRNs, transfers, finished goods, settings, import & export, backup, keys, fixes). Searchable; opens on the topic for the screen you're on; each topic links to its screen. In the sidebar and More
 - Import & export by data type: Export (CSV) for menu items, materials, BOM, material stock, finished goods, suppliers, orders, customers, payments, batches, GRNs and transfers. Template download for each importable type, with notes and an example. Import (CSV or .xlsx) for menu items, materials, BOM (multilevel), stock counts, finished-goods counts, suppliers and orders, with a check screen listing what will be added, updated, skipped or rejected (by line) before anything changes. Admin only for import

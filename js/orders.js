@@ -5,6 +5,7 @@ import * as R from "./roles.js";
 import { S, A, V, H, render, guard, saveOrder, payOrders, reversePayments, logoHtml, toran, chipBar, searchBox, matchQ, band, payTag, chanTag, noLabel } from "./core.js";
 import { $, esc, rs, rs2, num, uid, today, addDays, dObj, dLabel, dLong, plate, cmpFlat, ICON, copyText, waHref } from "./util.js";
 import { ui, toast, openSheet, closeSheet, ask, yesNo } from "./ui.js";
+import { checkCustomer } from "./match.js";
 
 /* ---------- WhatsApp text ---------- */
 export function orderText(o) {
@@ -133,7 +134,7 @@ export async function confirmDeliver(o, withCollect = false) {
   const head = `${plate(o.flat)}<p class="cq">${v ? "Mark as delivered?" : "Undo delivery?"}</p><div class="cname">${esc(o.customer)}</div><div class="cdetail">${o.items.map(i => esc(i.item) + " × " + i.qty).join(", ")}<br>${esc(dLong(o.date))}${R.can("money") ? " · " + rs(M.total(o)) + (b > 0 ? ` · <b>${rs(b)} due</b>` : " · paid") : ""}</div>`;
   let choice;
   if (!v) choice = await ask(head, [{ label: "Keep delivered", cls: "btn-ghost", value: false }, { label: "Undo", cls: "btn-danger-solid", value: "undo" }], true);
-  else if (withCollect && b > 0 && R.can("collect")) choice = await ask(head, [{ label: "Delivered + paid by UPI", cls: "btn-ok", value: "UPI" }, { label: "Delivered + paid in cash", cls: "btn-ok", value: "Cash" }, { label: "Delivered, not paid yet", cls: "btn-ghost", value: "nopay" }, { label: "Cancel", cls: "btn-danger", value: null }]);
+  else if (withCollect && b > 0 && R.can("collect")) choice = await ask(head, [{ label: "Delivered, not paid yet", cls: "btn-primary", value: "nopay" }, { label: "Delivered + paid by UPI", cls: "btn-ok", value: "UPI" }, { label: "Delivered + paid in cash", cls: "btn-ok", value: "Cash" }, { label: "Cancel", cls: "btn-danger", value: null }]);
   else choice = await ask(head, [{ label: "Cancel", cls: "btn-ghost", value: false }, { label: "Yes, delivered", cls: "btn-ok", value: "yes" }], true);
   if (!choice) return false;
   await saveOrder({ ...o, status: v ? "delivered" : "ready", deliveredAt: v ? new Date().toISOString() : "" });
@@ -270,6 +271,9 @@ A.saveCompose = async el => { syncCompose(); const st = ui.sheet; const o = st.o
   o.customer = o.customer.trim(); o.flat = o.flat.trim().toUpperCase().replace(/^([A-Z])\s*-?\s*(\d+)$/, "$1-$2"); o.phone = o.phone.trim(); o.notes = o.notes.trim();
   if (!o.customer) { toast("Add the customer’s name"); $("#cName").focus(); return; }
   if (!o.items.length) { toast("Add at least one item"); return; }
+  // A customer not seen before is checked against saved ones (same flat or phone, similar name) before the order is saved.
+  const prev = st.isNew ? null : M.orders().find(x => x.id === o.id);
+  if (!prev || M.ckey(prev) !== M.ckey(o)) { const r = await checkCustomer(o); if (!r) return; if (r !== "new") { Object.assign(o, r); st.dirty = true; } }
   if (!o.no) o.no = M.nextNo(st.prefix);
   el.disabled = true; await saveOrder(o); const wasNew = st.isNew; ui.sheet = null; closeSheet();
   if (S.view === "today" && wasNew && o.date !== S.date) { S.date = o.date; S.center = true; render(); }

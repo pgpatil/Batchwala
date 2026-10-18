@@ -19,7 +19,7 @@ import { APP_NAME } from "./config.js";
 import { $, esc, ICON } from "./util.js";
 import { ui, toast, closeSheet, yesNo } from "./ui.js";
 
-const TAB = { help: ["Help", ICON.help], data: ["Import & export", ICON.dl], pos: ["Counter", ICON.cart], bom: ["BOM", ICON.tree], prod: ["Production", ICON.oven], grn: ["Purchases (GRN)", ICON.inbox], xfer: ["Transfers", ICON.truck], fg: ["Finished goods", ICON.batch], today: ["Today", ICON.today], orders: ["Orders", ICON.orders], pay: ["Payments", ICON.pay], stock: ["Stock", ICON.stock], bake: ["Bake board", ICON.oven], batches: ["Batches", ICON.batch], run: ["Delivery run", ICON.run], more: ["More", ICON.more] };
+const TAB = { help: ["Help", ICON.help], data: ["Import & export", ICON.dl], pos: ["Counter", ICON.cart], bom: ["BOM", ICON.tree], prod: ["Production", ICON.oven], grn: ["Purchases (GRN)", ICON.inbox], xfer: ["Transfers", ICON.truck], fg: ["Finished goods", ICON.batch], today: ["Today", ICON.today], orders: ["Orders", ICON.orders], pay: ["Payments", ICON.pay], stock: ["Inventory", ICON.stock], bake: ["Bake board", ICON.oven], batches: ["Batches", ICON.batch], run: ["Delivery run", ICON.run], more: ["More", ICON.more] };
 const SHORT = { bake: "Bake", run: "My run", grn: "GRN", fg: "FG stock", prod: "Make" };   // bottom-bar labels on phones
 const ORDER = ["pos", "today", "orders", "bake", "prod", "grn", "stock", "xfer", "fg", "batches", "bom", "run", "pay", "more"];
 // Screens a role may open in the current mode, from its permissions; its phone tabs are a subset.
@@ -95,6 +95,9 @@ ui.onClose = () => render();
 const DIRTY = ["compose", "waConfirm"];
 document.addEventListener("click", async e => {
   const T = e.target;
+  // Date inputs styled as chips are invisible; desktop browsers only open their picker from the calendar icon, so open it explicitly.
+  const dl = T.closest && T.closest("label"); const di = T.matches && T.matches('input[type="date"]') ? T : dl && dl.querySelector('input[type="date"]');
+  if (di && di.showPicker && e.isTrusted) { try { di.showPicker(); } catch (_) {} if (T !== di) e.preventDefault(); }
   const nb = T.closest(".nb[data-view]"); if (nb) { S.view = nb.dataset.view; if (S.view === "today") S.center = true; render(); window.scrollTo({ top: 0 }); return; }
   const go = T.closest("[data-go]"); if (go) { if (ui.sheet) closeSheet(); S.view = go.dataset.go; if (go.dataset.stockfilter) S.filter.stock = go.dataset.stockfilter; render(); window.scrollTo({ top: 0 }); return; }
   if (T.closest("#fab")) { H.fab && H.fab(); return; }
@@ -140,7 +143,7 @@ $("#scrim").addEventListener("click", () => { const x = document.querySelector("
   await R.loadMe(); R.setMode(await ev.getMeta("mode")); M.setHere(await ev.getMeta("here") || (R.me() || {}).loc || null);
   ev.setActor(() => (R.me() || {}).id || "setup");
   if (R.me()) S.view = R.home();
-  ev.onChange(() => { if (ui.sheet && ui.sheet.redraw && !["compose", "waConfirm", "settings", "member", "ingEdit", "item", "move", "bake", "part", "batchSpoil", "grn", "xfer", "fgAdj", "xferRecv"].includes(ui.sheet.kind)) rerenderSheet(); render(); });
+  ev.onChange(() => { if (ui.sheet && ui.sheet.redraw && !["compose", "waConfirm", "settings", "member", "ingEdit", "item", "move", "bake", "part", "batchSpoil", "grn", "xfer", "fgAdj", "xferRecv", "imp", "invin", "expiry"].includes(ui.sheet.kind)) rerenderSheet(); render(); });
   sync.onStatus(async st => {
     let joined = false;
     if (st.state === "ok" && !R.me()) { const a = sync.current(); const m = a && R.matchEmail(a.account); if (m) { await R.setMe(m.id); S.view = R.home(); joined = true; toast(`Welcome, ${m.name}`); } }
@@ -151,4 +154,7 @@ $("#scrim").addEventListener("click", () => { const x = document.querySelector("
   const shared = [qs.get("title"), qs.get("text"), qs.get("url")].filter(Boolean).join("\n");
   if (R.me() && shared) { history.replaceState(null, "", location.pathname); waSheet(shared); }
   else if (R.me() && qs.get("action") === "new") { history.replaceState(null, "", location.pathname); H.fab(); }
+  else if (H.expiryCheck) H.expiryCheck();
+  // Coming back to the app after a while counts as opening it again.
+  let away = 0; document.addEventListener("visibilitychange", () => { if (document.hidden) away = Date.now(); else if (away && Date.now() - away > 30 * 60 * 1000 && H.expiryCheck) H.expiryCheck(); });
 })();

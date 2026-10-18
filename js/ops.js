@@ -7,6 +7,7 @@ import { S, A, V, H, guard, saveOrder, payOrders, addPayment, band, toran, payTa
 import { confirmDeliver, compose, openOrder } from "./orders.js";
 import { $, esc, rs, uid, today, addDays, dObj, dLabel, dLong, plate, flatKey, ICON } from "./util.js";
 import { ui, toast, openSheet, closeSheet, ask, yesNo } from "./ui.js";
+import { checkCustomer } from "./match.js";
 
 /* ---------- Delivery run ---------- */
 V.run = () => {
@@ -90,6 +91,8 @@ function syncWa() { const o = ui.sheet.o; const g = id => document.getElementByI
 A.waConfirm = async el => {
   syncWa(); const st = ui.sheet; const o = st.o; const me = R.me();
   if (!o.customer.trim()) { toast("Add the customer’s name"); return; }
+  const chk = await checkCustomer({ customer: o.customer.trim(), flat: o.flat.trim().toUpperCase().replace(/^([A-Z])\s*-?\s*(\d+)$/, "$1-$2"), phone: o.phone.trim() }); if (!chk) return;
+  if (chk !== "new") Object.assign(o, chk);
   const order = { id: uid("o"), no: M.nextNo((me && me.prefix) || ""), customer: o.customer.trim(), flat: o.flat.trim().toUpperCase().replace(/^([A-Z])\s*-?\s*(\d+)$/, "$1-$2"), phone: o.phone.trim(), channel: "whatsapp", date: o.date, items: o.items, discountPct: 0, status: "received", notes: o.notes, tag: M.config().activeTag || "", source: "whatsapp-import", createdAt: new Date().toISOString() };
   el.disabled = true; await saveOrder(order); closeSheet(); toast(`Order #${order.no} saved for ${dLabel(order.date)}`); openOrder(order.id);
 };

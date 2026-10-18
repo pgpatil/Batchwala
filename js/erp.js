@@ -8,6 +8,7 @@ import { S, A, V, H, guard, chipBar, searchBox, band, clean } from "./core.js";
 import { bakeSheet, putMove } from "./inventory.js";
 import { $, esc, rs, rs2, num, uid, today, addDays, dLong, qty, UNITS, ICON, copyText, waHref } from "./util.js";
 import { ui, toast, openSheet, closeSheet, yesNo } from "./ui.js";
+import { confirmNew, byNameOrAka } from "./match.js";
 
 const big = u => UNITS[u] || null;
 const who = x => { const m = ev.get("members", x.by || x._by); return m ? m.name : ""; };
@@ -49,6 +50,7 @@ function outletBoardView() {
   S.askText = `🧁 ${M.locName(loc)} needs for ${dLong(d)}:\n` + short.map(r => `• ${r.item}: ${r.short}`).join("\n");
   let h = band(`Bake board · ${esc(M.locName(loc))}`, short.length ? `<button class="pillbtn" data-askcopy>${ICON.wa}Ask kitchen</button>` : "",
     `<div class="stats"><div class="st"><b>${rows.reduce((s, r) => s + Math.max(0, r.onHand), 0)}</b><span>pieces on hand</span></div><div class="st"><b>${rows.reduce((s, r) => s + r.committed, 0)}</b><span>pre-orders to hand over</span></div><div class="st"><b>${short.reduce((s, r) => s + r.short, 0)}</b><span>short · ask the kitchen</span></div></div>`);
+  if (H.expiryBanner) h += `<div class="boardfoot" style="padding-bottom:0">${H.expiryBanner()}</div>`;
   h += `<div class="tools">${dateChips("bakedate", d)}</div>`;
   if (coming.length) h += `<div class="boardfoot"><label class="f">On the way · confirm when it arrives</label><div class="kv">${coming.map(x => `<div style="align-items:center"><button class="who" data-xfer="${esc(x.id)}"><div class="nm" style="font-size:15px">${esc(x.no)} from ${esc(M.locName(x.from))}</div><div class="subl">${esc(xferText(x))}</div></button>${canReceive() ? `<button class="paybtn" data-xferrecv="${esc(x.id)}">Receive</button>` : ""}</div>`).join("")}</div></div>`;
   if (!rows.length) return h + `<div class="empty"><strong>Nothing here yet</strong>Pieces the kitchen sends to ${esc(M.locName(loc))} show here, with pre-orders and kept-ready levels.</div>`;
@@ -67,7 +69,7 @@ V.grn = () => {
   const all = M.grns(); const list = all.filter(g => g.date >= from).filter(g => !q || (g.no + " " + g.supplier + " " + (g.invoiceNo || "") + " " + g.lines.map(l => (ings[l.ingId] || {}).name).join(" ")).toLowerCase().includes(q));
   const live = list.filter(g => !g.void); const spend = live.reduce((s, g) => s + (+g.total || 0), 0), taxPaid = live.reduce((s, g) => s + (+g.tax || 0), 0);
   const bySup = {}; live.forEach(g => { bySup[g.supplier] = (bySup[g.supplier] || 0) + (+g.total || 0); });
-  let h = band("Purchases", "", `<div class="stats"><div class="st"><b>${rs(spend)}</b><span>received${tax ? ` · ${rs(taxPaid)} ${esc(M.taxCfg().name)}` : ""}</span></div><div class="st"><b>${live.length}</b><span>GRNs</span></div><div class="st"><b>${Object.keys(bySup).length}</b><span>suppliers</span></div></div>`);
+  let h = band("Purchases", R.can("stock.buy") ? `<button class="pillbtn" data-act="invoiceIn">${ICON.inbox}Upload invoice</button>` : "", `<div class="stats"><div class="st"><b>${rs(spend)}</b><span>received${tax ? ` · ${rs(taxPaid)} ${esc(M.taxCfg().name)}` : ""}</span></div><div class="st"><b>${live.length}</b><span>GRNs</span></div><div class="st"><b>${Object.keys(bySup).length}</b><span>suppliers</span></div></div>`);
   h += `<div class="tools">${searchBox("grn", "Search GRN, supplier, invoice or material")}${chipBar("grn", [["month", "This month"], ["d30", "30 days"], ["all", "All"]])}</div>`;
   if (!all.length) return h + `<div class="empty"><strong>No goods received yet</strong>Record each delivery from a supplier as a GRN: what came, how much, the bill amount${tax ? " and tax" : ""}. It adds stock at the location that received it.${R.can("stock.buy") ? `<button class="btn btn-primary" data-act="newGrn" style="margin-top:14px">${ICON.inbox}New GRN</button>` : ""}</div>`;
   if (!list.length) return h + `<div class="empty"><strong>Nothing matches</strong>Try another search or period.</div>`;
@@ -84,10 +86,12 @@ A.newGrn = () => grnSheet();
 H.grnSheet = opts => grnSheet(opts);
 function grnSheet(opts = {}) {
   if (!guard("stock.buy")) return; const mats = M.ingredients().filter(i => i.type !== "sf");
-  if (!mats.length) { toast("Add raw or packing materials on Stock first"); return; }
+  if (!mats.length) { toast("Add raw or packing materials in Inventory first"); return; }
   const line = id => { const i = mats.find(x => x.id === id) || mats[0]; return { ingId: i.id, qty: 0, f: big(i.unit) ? big(i.unit).f : 1, amount: 0, taxPct: M.taxCfg().on ? (i.taxPct != null && i.taxPct !== "" ? +i.taxPct : +M.taxCfg().rate || 0) : 0 }; };
   const first = opts.ingId ? mats.find(x => x.id === opts.ingId) : null;
-  const st = { kind: "grn", x: { supplier: first && first.supplier || "", invoiceNo: "", date: today(), loc: M.here(), notes: "", lines: [line(opts.ingId)] }, line }; st.redraw = () => drawGrn(st); drawGrn(st);
+  // opts.lines: a draft read from a supplier invoice ({ ingId, qty in base units, f, amount, taxPct or null }).
+  const lines = opts.lines && opts.lines.length ? opts.lines.map(l => ({ ...line(l.ingId), qty: l.qty, f: l.f, amount: l.amount, ...(l.taxPct != null ? { taxPct: l.taxPct } : {}) })) : [line(opts.ingId)];
+  const st = { kind: "grn", x: { supplier: opts.supplier || (first && first.supplier) || "", invoiceNo: opts.invoiceNo || "", date: today(), loc: M.here(), notes: "", lines }, line }; st.redraw = () => drawGrn(st); drawGrn(st);
 }
 function drawGrn(st) {
   const x = st.x; const mats = M.ingredients().filter(i => i.type !== "sf"); const tax = M.taxCfg().on; const sm = M.stockMap(x.loc);
@@ -118,8 +122,10 @@ function syncGrn() {
     if (q) l.qty = num(q.value) * l.f; if (a) l.amount = num(a.value); if (t) l.taxPct = num(t.value); });
 }
 A.saveGrn = async el => {
-  syncGrn(); const st = ui.sheet, x = st.x; const ings = M.ingMap(); const sup = x.supplier.trim();
-  if (!sup) { toast("Add the supplier"); return; } const lines = x.lines.filter(l => l.qty > 0); if (!lines.length) { toast("Enter what was received"); return; }
+  syncGrn(); const st = ui.sheet, x = st.x; const ings = M.ingMap(); let sup = x.supplier.trim();
+  if (!sup) { toast("Add the supplier"); return; }
+  const known = byNameOrAka(M.suppliers(), sup); if (known) sup = known.name;
+  else { const r = await confirmNew("supplier", sup, M.suppliers()); if (!r) return; if (r !== "new") { sup = r.name; x.supplier = sup; } } const lines = x.lines.filter(l => l.qty > 0); if (!lines.length) { toast("Enter what was received"); return; }
   const tax = r2(Object.values(grnTax(lines)).reduce((s, v) => s + v, 0)); const amount = r2(lines.reduce((s, l) => s + (+l.amount || 0), 0));
   const no = M.nextDocNo("grns", prefix(), "GRN");
   if (!await yesNo(`<p class="cq">Save ${esc(no)}?</p><div class="cdetail">${esc(sup)}${x.invoiceNo ? " · inv " + esc(x.invoiceNo) : ""}<br>${lines.map(l => esc(ings[l.ingId].name) + " " + qty(l.qty, ings[l.ingId].unit)).join("<br>")}<br><br>Total ${rs2(amount + tax)} · adds stock at ${esc(M.locName(x.loc))}</div>`, "Save GRN", "btn-ok")) return;

@@ -7,6 +7,7 @@ import { S, A, V, H, band, clean, saveOrder } from "./core.js";
 import { putMove } from "./inventory.js";
 import { esc, uid, today, ICON } from "./util.js";
 import { ui, toast, openSheet, closeSheet } from "./ui.js";
+import { similar, byNameOrAka, norm } from "./match.js";
 
 /* ---------- CSV ---------- */
 // Spreadsheet apps run cells starting with = + - @ as formulas; text like that is prefixed with ' (numbers are left alone).
@@ -49,65 +50,67 @@ const memberName = id => (ev.get("members", id) || {}).name || "";
 // cols: k = key, label = column header, req = required on import. notes: template guidance. ex: example row for the template (written as a # note).
 const T = {
   menu: { label: "Menu items", icon: "menu", desc: "Prices, categories, short names, keep-ready levels, tax rate.",
-    cols: [{ k: "name", label: "Name", req: true }, { k: "category", label: "Category" }, { k: "price", label: "Price" }, { k: "tax", label: "Tax %" }, { k: "par", label: "Keep ready" }, { k: "aliases", label: "Short names" }, { k: "active", label: "On sale" }],
-    notes: ["Matched by Name: existing items are updated, new ones added.", "Tax % blank = the default rate. On sale: Yes or No (blank = Yes). Short names: comma separated, in quotes."],
-    ex: ["Paneer Strudel", "Savoury", 120, 5, 6, "strudel, ps", "Yes"],
+    cols: [{ k: "name", label: "Name", req: true }, { k: "category", label: "Category" }, { k: "price", label: "Price" }, { k: "tax", label: "Tax %" }, { k: "par", label: "Keep ready" }, { k: "aliases", label: "Short names" }, { k: "active", label: "On sale" }, { k: "life", label: "Shelf life days" }],
+    notes: ["Matched by Name: existing items are updated, new ones added.", "Tax % blank = the default rate. On sale: Yes or No (blank = Yes). Short names: comma separated, in quotes. Shelf life days blank = 30 for cookies, 3 for others."],
+    ex: ["Paneer Strudel", "Savoury", 120, 5, 6, "strudel, ps", "Yes", 3],
     count: () => M.menu().length,
-    rows: () => M.menu().map(m => [m.name, m.category, m.price, m.taxPct ?? "", m.par || "", m.aliases, m.active !== false ? "Yes" : "No"]),
-    plan(recs) { const out = newPlan(); const menu = M.menu(); const seen = new Set();
-      recs.forEach(r => { const name = r.name.trim(); if (!name) return out.err(r, "Name is blank"); if (seen.has(name.toLowerCase())) return out.err(r, `${name} appears twice`); seen.add(name.toLowerCase());
-        const price = numOr(r.price), tax = numOr(r.tax), par = numOr(r.par, 0); if ([price, tax, par].some(Number.isNaN)) return out.err(r, "Price, Tax % and Keep ready must be numbers");
-        const ex = byName(menu, name); if (!ex && price == null) return out.err(r, `${name} is new and needs a Price`);
-        const rec = { ...(ex ? clean(ex) : { id: uid("m"), recipe: [], sort: menu.length + out.adds + 1 }), name, category: r.category || (ex ? ex.category : ""), price: price ?? ex.price, par,
+    rows: () => M.menu().map(m => [m.name, m.category, m.price, m.taxPct ?? "", m.par || "", m.aliases, m.active !== false ? "Yes" : "No", m.shelfLife ?? ""]),
+    plan(recs, dec) { const out = newPlan(dec); const menu = M.menu(); const seen = new Set();
+      recs.forEach(r => { let name = r.name.trim(); if (!name) return out.err(r, "Name is blank"); if (seen.has(name.toLowerCase())) return out.err(r, `${name} appears twice`); seen.add(name.toLowerCase());
+        const price = numOr(r.price), tax = numOr(r.tax), par = numOr(r.par, 0), life = numOr(r.life); if ([price, tax, par, life].some(Number.isNaN)) return out.err(r, "Price, Tax %, Shelf life and Keep ready must be numbers");
+        let ex = byName(menu, name); if (!ex) { const same = askSame(out, "menu item", name, menu); if (same === undefined) return; if (same !== "new") { ex = same; name = ex.name; } }
+        if (!ex && price == null) return out.err(r, `${name} is new and needs a Price`);
+        const rec = { ...(ex ? clean(ex) : { id: uid("m"), recipe: [], sort: menu.length + out.adds + 1 }), name, shelfLife: r.life === "" ? (ex ? ex.shelfLife ?? null : null) : Math.max(1, Math.round(life)), category: r.category || (ex ? ex.category : ""), price: price ?? ex.price, par,
           aliases: r.aliases || (ex ? ex.aliases : ""), active: r.active === "" ? (ex ? ex.active !== false : true) : yes(r.active), taxPct: r.tax === "" ? (ex ? ex.taxPct ?? null : null) : tax };
         out.upsert(ex, rec, name, () => ev.put("menu", rec)); });
       return out; } },
   materials: { label: "Materials", icon: "stock", desc: "Raw materials, packing and semi-finished: unit, reorder level, price, supplier, tax.",
-    cols: [{ k: "name", label: "Name", req: true }, { k: "type", label: "Type" }, { k: "unit", label: "Unit" }, { k: "reorder", label: "Reorder level" }, { k: "price", label: "Price per unit" }, { k: "supplier", label: "Supplier" }, { k: "barcode", label: "Barcode" }, { k: "tax", label: "Tax %" }, { k: "taxcost", label: "Purchase tax in cost" }, { k: "yield", label: "Yield per run" }],
+    cols: [{ k: "name", label: "Name", req: true }, { k: "type", label: "Type" }, { k: "unit", label: "Unit" }, { k: "reorder", label: "Reorder level" }, { k: "price", label: "Price per unit" }, { k: "supplier", label: "Supplier" }, { k: "barcode", label: "Barcode" }, { k: "tax", label: "Tax %" }, { k: "taxcost", label: "Purchase tax in cost" }, { k: "yield", label: "Yield per run" }, { k: "category", label: "Category" }],
     notes: ["Matched by Name. Type: RM, PM or Semi-finished (blank = RM). Unit: g, kg, ml, L or pcs; Reorder level, Price per unit and Yield per run are in that unit.", "Price is used until a GRN or purchase is recorded. Purchase tax in cost: Yes = tax paid is added to cost; No = recoverable. Yield per run is for semi-finished items; give their recipe in the BOM import."],
-    ex: ["Maida", "RM", "kg", 5, 45, "Sharma Traders", "", 5, "No", ""],
+    ex: ["Maida", "RM", "kg", 5, 45, "Sharma Traders", "", 5, "No", "", "Flour & grains"],
     count: () => M.ingredients().length,
-    rows: () => M.ingredients().map(i => { const [u, f] = BIG[i.unit] || [i.unit, 1]; return [i.name, { rm: "RM", pm: "PM", sf: "Semi-finished" }[i.type], u, i.reorder ? r4(i.reorder / f) : "", r4(M.unitCost(i) * f) || "", i.supplier, i.barcode, i.taxPct ?? "", i.taxInCost ? "Yes" : "No", i.type === "sf" && i.yield ? r4(i.yield / f) : ""]; }),
-    plan(recs) { const out = newPlan(); const ings = M.ingredients(); const seen = new Set();
-      recs.forEach(r => { const name = r.name.trim(); if (!name) return out.err(r, "Name is blank"); if (seen.has(name.toLowerCase())) return out.err(r, `${name} appears twice`); seen.add(name.toLowerCase());
-        const ex = byName(ings, name); const type = r.type ? TYPE_IN[r.type.trim().toLowerCase()] : (ex ? ex.type : "rm"); if (!type) return out.err(r, `Type “${r.type}” isn’t RM, PM or Semi-finished`);
+    rows: () => M.ingredients().map(i => { const [u, f] = BIG[i.unit] || [i.unit, 1]; return [i.name, { rm: "RM", pm: "PM", sf: "Semi-finished" }[i.type], u, i.reorder ? r4(i.reorder / f) : "", r4(M.unitCost(i) * f) || "", i.supplier, i.barcode, i.taxPct ?? "", i.taxInCost ? "Yes" : "No", i.type === "sf" && i.yield ? r4(i.yield / f) : "", i.category || ""]; }),
+    plan(recs, dec) { const out = newPlan(dec); const ings = M.ingredients(); const seen = new Set();
+      recs.forEach(r => { let name = r.name.trim(); if (!name) return out.err(r, "Name is blank"); if (seen.has(name.toLowerCase())) return out.err(r, `${name} appears twice`); seen.add(name.toLowerCase());
+        let ex = byNameOrAka(ings, name); if (!ex) { const same = askSame(out, "material", name, ings); if (same === undefined) return; if (same !== "new") ex = same; } if (ex) name = ex.name; const type = r.type ? TYPE_IN[r.type.trim().toLowerCase()] : (ex ? ex.type : "rm"); if (!type) return out.err(r, `Type “${r.type}” isn’t RM, PM or Semi-finished`);
         const uu = r.unit ? unitIn(r.unit) : [ex ? ex.unit : "g", ex && BIG[ex.unit] ? BIG[ex.unit][1] : 1]; if (!uu) return out.err(r, `Unit “${r.unit}” isn’t g, kg, ml, L or pcs`);
         const [unit, f] = uu; if (ex && ex.unit !== unit && (M.stockMap()[ex.id] || 0)) return out.err(r, `${name} has stock in ${ex.unit}; its unit can’t change to ${unit}`);
         const reorder = numOr(r.reorder), price = numOr(r.price), tax = numOr(r.tax), y = numOr(r.yield); if ([reorder, price, tax, y].some(Number.isNaN)) return out.err(r, "Reorder level, Price, Tax % and Yield must be numbers");
         const rec = { ...(ex ? clean(ex) : { id: uid("i"), recipe: [], barcode: "", supplier: "" }), name, type, unit, reorder: reorder != null ? reorder * f : (ex ? ex.reorder : 0), cost: price != null ? price / f : (ex ? ex.cost : 0),
-          supplier: r.supplier || (ex ? ex.supplier : ""), barcode: r.barcode || (ex ? ex.barcode : ""), taxPct: r.tax === "" ? (ex ? ex.taxPct ?? null : null) : tax, taxInCost: r.taxcost === "" ? !!(ex && ex.taxInCost) : yes(r.taxcost),
+          category: r.category || (ex ? ex.category || "" : ""), supplier: r.supplier || (ex ? ex.supplier : ""), barcode: r.barcode || (ex ? ex.barcode : ""), taxPct: r.tax === "" ? (ex ? ex.taxPct ?? null : null) : tax, taxInCost: r.taxcost === "" ? !!(ex && ex.taxInCost) : yes(r.taxcost),
           yield: type === "sf" ? (y != null ? y * f : (ex ? ex.yield : 0)) : 0 };
         if (type !== "sf") rec.recipe = [];
         out.upsert(ex, rec, name, () => ev.put("ingredients", rec)); });
       return out; } },
   bom: { label: "BOM", icon: "tree", desc: "What goes into each menu item (per piece) and each semi-finished item (per run).",
     cols: [{ k: "parent", label: "Parent", req: true }, { k: "ptype", label: "Parent type" }, { k: "component", label: "Component", req: true }, { k: "qty", label: "Qty", req: true }, { k: "unit", label: "Unit" }],
-    notes: ["One row per component. Parent = a menu item (Qty per piece) or a semi-finished material (Qty per run). Parent type: Menu item or Semi-finished (blank = whichever matches the name).", "Each parent listed gets exactly the rows given: its old BOM is replaced. Components must already exist as materials. Unit: g, kg, ml, L or pcs (blank = the component’s unit)."],
+    notes: ["One row per component. Parent = a menu item (Qty per piece) or a semi-finished material (Qty per run). Parent type: Menu item or Semi-finished (blank = whichever matches the name).", "Each parent listed gets exactly the rows given: its old BOM is replaced. A component or parent not found in the app is matched before saving: you pick the inventory item it means (remembered for next time) or create it. Unit: g, kg, ml, L or pcs (blank = the component’s unit)."],
     ex: ["Paneer Strudel", "Menu item", "Paneer", 40, "g"],
     count: () => M.menu().filter(m => (m.recipe || []).length).length + M.ingredients().filter(i => i.recipe.length).length,
     rows: () => { const ings = M.ingMap(); const out = [];
       M.menu().forEach(m => (m.recipe || []).forEach(r => { const i = ings[r.ingId]; if (i) out.push([m.name, "Menu item", i.name, r4(r.qty), i.unit]); }));
       M.ingredients().filter(x => x.type === "sf").forEach(x => x.recipe.forEach(r => { const i = ings[r.ingId]; if (i) out.push([x.name, "Semi-finished", i.name, r4(r.qty), i.unit]); })); return out; },
-    plan(recs) { const out = newPlan(); const menu = M.menu(), ings = M.ingredients(); const groups = new Map();
+    plan(recs, dec) { const out = newPlan(dec); const menu = M.menu(), ings = M.ingredients(); const groups = new Map(); const made = {};
       recs.forEach(r => { const pn = r.parent.trim(); const pt = r.ptype.trim().toLowerCase();
-        const m = pt.startsWith("semi") ? null : byName(menu, pn); const s = pt.startsWith("menu") ? null : byName(ings.filter(i => i.type === "sf"), pn);
-        const parent = m ? { kind: "menu", x: m } : s ? { kind: "sf", x: s } : null;
-        if (!parent) return out.err(r, `“${pn}” isn’t a menu item or semi-finished material`);
-        const c = byName(ings, r.component); if (!c) return out.err(r, `Component “${r.component}” isn’t a material. Import materials first.`);
+        const m = pt.startsWith("semi") ? null : byName(menu, pn); const s = pt.startsWith("menu") ? null : byNameOrAka(ings.filter(i => i.type === "sf"), pn);
+        let parent = m ? { kind: "menu", x: m } : s ? { kind: "sf", x: s } : null;
+        if (!parent) { const p = askParent(out, pn, menu, ings); if (p === undefined) return; if (!p) return out.skip(`Rows for “${pn}” skipped`); parent = p; }
+        const uh = unitIn(r.unit); const c = askMaterial(out, r.component, uh ? uh[0] : "", ings, made, `used in ${parent.x.name}`); if (c === undefined) return; if (!c) return out.skip(`“${r.component}” in ${parent.x.name} skipped`);
         const q = numOr(r.qty); if (q == null || Number.isNaN(q) || q <= 0) return out.err(r, "Qty must be more than 0");
         const uu = r.unit ? unitIn(r.unit) : [c.unit, 1]; if (!uu || uu[0] !== c.unit) return out.err(r, `${c.name} is measured in ${c.unit}; “${r.unit}” doesn’t fit`);
         const key = parent.kind + ":" + parent.x.id; const g = groups.get(key) || { ...parent, lines: [] }; g.lines.push({ ingId: c.id, qty: q * uu[1] }); groups.set(key, g); });
+      if (out.pend.length) return out;   // build the BOMs only once every name is settled
       groups.forEach(g => { if (g.kind === "sf" && M.makesCycle(g.x.id, g.lines)) { out.errors.push({ line: "", msg: `${g.x.name}’s recipe would use itself` }); return; }
         out.put("update", `${g.x.name}: ${g.lines.length} line${g.lines.length > 1 ? "s" : ""}`, () => ev.put(g.kind === "menu" ? "menu" : "ingredients", { ...clean(g.x), recipe: g.lines })); });
       return out; } },
-  stock: { label: "Stock count (materials)", icon: "stock", desc: "Opening stock or a stock-take: sets each material’s quantity at a location.",
+  stock: { label: "Inventory count", icon: "stock", desc: "Opening stock or a stock-take: sets each material’s quantity at a location.",
     cols: [{ k: "material", label: "Material", req: true }, { k: "location", label: "Location" }, { k: "qty", label: "Quantity", req: true }, { k: "unit", label: "Unit" }],
     notes: ["Sets the quantity on hand (a count), recorded as a stock-count entry. Location blank = the first location.", "Unit: g, kg, ml, L or pcs (blank = the material’s unit)."],
     ex: ["Maida", "Central kitchen", 25, "kg"],
     count: () => M.ingredients().length,
     rows: () => { const out = []; M.locations().forEach(l => { const sm = M.stockMap(l.id); M.ingredients().forEach(i => { const [u, f] = BIG[i.unit] || [i.unit, 1]; out.push([i.name, l.name, r4((sm[i.id] || 0) / f), u]); }); }); return out; },
     plan(recs) { const out = newPlan(); const ings = M.ingredients();
-      recs.forEach(r => { const i = byName(ings, r.material); if (!i) return out.err(r, `“${r.material}” isn’t a material`); const l = locByName(r.location); if (!l) return out.err(r, `Location “${r.location}” doesn’t exist`);
+      recs.forEach(r => { const i = byNameOrAka(ings, r.material); if (!i) return out.err(r, `“${r.material}” isn’t in inventory`); const l = locByName(r.location); if (!l) return out.err(r, `Location “${r.location}” doesn’t exist`);
         const q = numOr(r.qty); if (q == null || Number.isNaN(q) || q < 0) return out.err(r, "Quantity must be 0 or more"); const uu = r.unit ? unitIn(r.unit) : [i.unit, 1]; if (!uu || uu[0] !== i.unit) return out.err(r, `${i.name} is measured in ${i.unit}`);
         const target = q * uu[1]; const d = target - (M.stockMap(l.id)[i.id] || 0); if (!d) return out.skip(`${i.name} at ${l.name} already ${target} ${i.unit}`);
         out.put("update", `${i.name} at ${l.name}: ${d > 0 ? "+" : ""}${r4(d)} ${i.unit}`, () => putMove({ ingId: i.id, type: "count", qty: d, note: "Imported count", outletId: l.id })); });
@@ -128,8 +131,9 @@ const T = {
     notes: ["Matched by Name: existing suppliers are updated."], ex: ["Sharma Traders", "9876543210", "27ABCDE1234F1Z5"],
     count: () => M.suppliers().length,
     rows: () => M.suppliers().map(s => [s.name, s.phone || "", s.gstin || ""]),
-    plan(recs) { const out = newPlan(); const sup = M.suppliers();
-      recs.forEach(r => { const name = r.name.trim(); if (!name) return out.err(r, "Name is blank"); const ex = byName(sup, name);
+    plan(recs, dec) { const out = newPlan(dec); const sup = M.suppliers();
+      recs.forEach(r => { let name = r.name.trim(); if (!name) return out.err(r, "Name is blank"); let ex = byName(sup, name);
+        if (!ex) { const same = askSame(out, "supplier", name, sup); if (same === undefined) return; if (same !== "new") { ex = same; name = ex.name; } }
         const rec = { ...(ex ? clean(ex) : { id: uid("s") }), name, phone: r.phone || (ex ? ex.phone || "" : ""), gstin: (r.gstin || (ex ? ex.gstin || "" : "")).toUpperCase() };
         out.upsert(ex, rec, name, () => ev.put("suppliers", rec)); });
       return out; } },
@@ -174,8 +178,10 @@ const T = {
     rows: () => { const ings = M.ingMap(); const out = []; M.transfers().slice().reverse().forEach(t => t.lines.forEach(l => { const i = l.ingId ? ings[l.ingId] : null;
       out.push([t.no, t.date, M.locName(t.from), M.locName(t.to), l.item || (i ? i.name : "?"), l.qty, M.xferReceived(t) ? (l.recv ?? l.qty) : "", l.item ? "pcs" : (i ? i.unit : ""), t.void ? "Undone" : M.xferReceived(t) ? (M.xferShort(t) ? "Received short" : "Received") : "In transit"]); })); return out; } }
 };
-function newPlan() {
-  const out = { adds: 0, updates: 0, skips: [], errors: [], ops: [] };
+// dec: the answers given on the check screen so far, by question key. A question without an answer holds its rows back (out.pend).
+function newPlan(dec = {}) {
+  const out = { adds: 0, updates: 0, skips: [], errors: [], ops: [], pend: [], seenQ: new Set(), aka: new Set() };
+  out.ask = (key, q, opts, suggest) => { if (dec[key] !== undefined) return dec[key]; if (!out.seenQ.has(key)) { out.seenQ.add(key); out.pend.push({ key, q, opts, suggest }); } return undefined; };
   out.err = (r, msg) => { out.errors.push({ line: r.line, msg }); };
   out.skip = msg => { out.skips.push(msg); };
   // A record that would come out the same is reported as unchanged instead of written again.
@@ -183,13 +189,44 @@ function newPlan() {
   out.put = (kind, what, run) => { out[kind === "add" ? "adds" : "updates"]++; out.ops.push({ kind, what, run }); };
   return out;
 }
+// A new name that looks like an existing record: same one, or really new? Returns the record, "new", or undefined (not answered yet).
+function askSame(out, kind, name, list) {
+  const hits = similar(list, name).slice(0, 3); if (!hits.length) return "new";
+  const v = out.ask(`same:${kind}:${norm(name)}`, `“${name}” would be a new ${kind}. Similar: ${hits.map(h => h.x.name).join(", ")}.`, [...hits.map(h => ({ v: h.x.id, label: `Same as ${h.x.name} (update it)` })), { v: "new", label: `No, add “${name}” as new` }], hits[0].x.id);
+  return v === undefined ? undefined : v === "new" ? "new" : list.find(x => x.id === v);
+}
+// A material named in a file but not in inventory: match it (remembered as another name for that item), create it, or skip it.
+function askMaterial(out, name, unit, ings, made, ctx, types = ["rm", "pm", "sf"]) {
+  name = String(name || "").trim(); const ex = byNameOrAka(ings, name); if (ex) return ex; const key = "mat:" + norm(name);
+  const hits = similar(ings, name, 0.45).slice(0, 4); const hitIds = new Set(hits.map(h => h.x.id));
+  const v = out.ask(key, `“${name}”${ctx ? ` (${ctx})` : ""} isn’t in inventory. Which item is it?`, [
+    ...hits.map(h => ({ v: h.x.id, label: `${h.x.name}`, group: "Closest matches" })),
+    ...ings.filter(i => !hitIds.has(i.id)).map(i => ({ v: i.id, label: i.name, group: M.ING_TYPES[i.type] })),
+    ...types.map(t => ({ v: "new:" + t, label: `Add “${name}” as a new ${M.ING_TYPES[t].toLowerCase()}${unit ? ` (${unit})` : ""}`, group: "Not in inventory" })),
+    { v: "skip", label: "Skip these rows", group: "Not in inventory" }], hits.length ? hits[0].x.id : "");
+  if (v === undefined) return undefined; if (v === "skip") return null;
+  if (v.startsWith("new:")) { if (!made[key]) { const rec = { id: uid("i"), name, type: v.slice(4), unit: unit || "g", reorder: 0, cost: 0, barcode: "", supplier: "", category: "", recipe: [], yield: 0, aka: [] };
+    made[key] = rec; out.put("add", `New ${M.ING_TYPES[rec.type].toLowerCase()} “${name}” in ${rec.unit}`, () => ev.put("ingredients", rec)); } return made[key]; }
+  const m = ings.find(i => i.id === v); if (m && !out.aka.has(key)) { out.aka.add(key);
+    out.put("update", `Remember “${name}” as ${m.name}`, () => { const cur = ev.get("ingredients", m.id); return ev.put("ingredients", { ...clean(cur), aka: [...new Set([...(cur.aka || []), name])] }); }); }
+  return m;
+}
+function askParent(out, name, menu, ings) {
+  const sfs = ings.filter(i => i.type === "sf"); const all = [...menu.map(x => ({ x, kind: "menu" })), ...sfs.map(x => ({ x, kind: "sf" }))];
+  const hits = similar(all.map(a => ({ ...a.x, _k: a.kind })), name, 0.45).slice(0, 4);
+  const v = out.ask("parent:" + norm(name), `BOM parent “${name}” isn’t a menu item or semi-finished item. Which is it?`, [
+    ...hits.map(h => ({ v: h.x._k + ":" + h.x.id, label: h.x.name, group: "Closest matches" })), ...menu.map(x => ({ v: "menu:" + x.id, label: x.name, group: "Menu items" })),
+    ...sfs.map(x => ({ v: "sf:" + x.id, label: x.name, group: "Semi-finished" })), { v: "skip", label: "Skip these rows", group: "Other" }], hits.length ? hits[0].x._k + ":" + hits[0].x.id : "");
+  if (v === undefined) return undefined; if (v === "skip") return null; const [k, id] = v.split(":");
+  return { kind: k, x: (k === "menu" ? menu : sfs).find(x => x.id === id) };
+}
 const fileName = (k, kind) => `${(M.config().business || "bakery").replace(/[^\w]+/g, "_")}_${k}_${kind === "template" ? "template" : today()}.csv`;
 
 /* ---------- screen ---------- */
 const canExport = () => R.can("export"); const canImport = () => R.isAdmin();
 V.data = () => {
-  let h = band("Import & export", "", `<p class="bandnote">Export what’s in the app as CSV (opens in Excel or Google Sheets), download a template, or import a filled file. Imports show a check screen first.</p>`);
-  return h + `<div class="datalist">${Object.entries(T).map(([k, t]) => `<div class="datacard"><div class="dc-head"><span class="ic">${ICON[t.icon] || ICON.dl}</span><div class="grow"><b>${esc(t.label)}</b><small>${esc(t.desc)}</small></div><span class="tag t-camp">${t.count()}</span></div>
+  let h = band("Import & export", R.can("stock.buy") ? `<button class="pillbtn" data-act="invoiceIn">${ICON.inbox}Purchase invoice → GRN</button>` : "", `<p class="bandnote">Export what’s in the app as CSV (opens in Excel or Google Sheets), download a template, or import a filled file. Imports show a check screen first.</p>`);
+  return h + `<div class="datalist">${Object.entries(T).filter(([, t]) => !t.hidden).map(([k, t]) => `<div class="datacard"><div class="dc-head"><span class="ic">${ICON[t.icon] || ICON.dl}</span><div class="grow"><b>${esc(t.label)}</b><small>${esc(t.desc)}</small></div><span class="tag t-camp">${t.count()}</span></div>
     <div class="dc-btns">${canExport() ? `<button class="btn btn-ghost" data-exp="${k}">${ICON.dl}Export</button>` : ""}${t.exportOnly ? "" : `<button class="btn btn-ghost" data-tpl="${k}">Template</button>${canImport() ? `<label class="btn btn-primary">${ICON.inbox}Import<input type="file" accept=".csv,text/csv,.xlsx" data-imp="${k}" hidden></label>` : ""}`}</div></div>`).join("")}</div>
   ${!canImport() ? `<p class="hint" style="padding:0 4px">Only the admin can import.</p>` : ""}`;
 };
@@ -200,33 +237,118 @@ async function readFile(file) {
     const wb = window.XLSX.read(await file.arrayBuffer(), { type: "array" }); return window.XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: false, defval: "" }); }
   return parseCSV(await file.text());
 }
-function previewSheet(k, out, name) {
-  const t = T[k]; const ok = out.ops.length;
-  openSheet({ kind: "imp", k, out }, `<div class="sh-head"><h2 class="h">Import: ${esc(t.label)}</h2><button class="x" data-close aria-label="Close">×</button></div>
-  <p class="hint" style="margin-top:-4px">${esc(name)} · nothing has changed yet</p>
-  <div class="kpis" style="padding:0;margin-bottom:10px"><div class="kpi"><b>${out.adds}</b><span>to add</span></div><div class="kpi"><b>${out.updates}</b><span>to update</span></div><div class="kpi"><b>${out.skips.length}</b><span>skipped</span></div><div class="kpi"><b style="${out.errors.length ? "color:var(--due)" : ""}">${out.errors.length}</b><span>rows with problems</span></div></div>
+// The check screen: questions to answer first, problems, the changes, what's skipped. Answering a question re-checks the file.
+function startImport(k, recs, name, extra = {}) { const st = { kind: "imp", k, recs, name, dec: {}, ...extra }; st.out = T[k].plan(recs, st.dec, st); st.redraw = () => drawPreview(st); drawPreview(st); }
+function drawPreview(st) {
+  const t = T[st.k]; const out = st.out; const ok = out.ops.length; const pend = out.pend;
+  const opt = o => `<option value="${esc(o.v)}">${esc(o.label)}</option>`;
+  const select = p => { const groups = [...new Set(p.opts.map(o => o.group || ""))];
+    return `<select class="in" data-pend="${esc(p.key)}"><option value="">Choose…</option>${groups.map(g => g ? `<optgroup label="${esc(g)}">${p.opts.filter(o => o.group === g).map(opt).join("")}</optgroup>` : p.opts.filter(o => !o.group).map(opt).join("")).join("")}</select>`; };
+  openSheet(st, `<div class="sh-head"><h2 class="h">${esc(t.verb || "Import")}: ${esc(t.label)}</h2><button class="x" data-close aria-label="Close">×</button></div>
+  <p class="hint" style="margin-top:-4px">${esc(st.name)} · nothing has changed yet</p>
+  ${pend.length ? `<div class="banner warn">${pend.length} name${pend.length > 1 ? "s" : ""} to check before ${t.verb ? "continuing" : "importing"}. Each answer is checked against the whole file.</div>
+    <div class="kv pendlist">${pend.map(p => `<div><span><b>${esc(p.q)}</b></span>${select(p)}</div>`).join("")}</div>
+    ${pend.some(p => p.suggest) ? `<button class="btn btn-ghost" data-pendall>Use the closest match for ${pend.filter(p => p.suggest).length === pend.length ? "all" : "those with one"}</button>` : ""}` : ""}
+  <div class="kpis" style="padding:0;margin:10px 0"><div class="kpi"><b>${out.adds}</b><span>to add</span></div><div class="kpi"><b>${out.updates}</b><span>to update</span></div><div class="kpi"><b>${out.skips.length}</b><span>skipped or unchanged</span></div><div class="kpi"><b style="${out.errors.length ? "color:var(--due)" : ""}">${out.errors.length}</b><span>rows with problems</span></div></div>
   ${out.errors.length ? `<label class="f">Problems · these rows won’t be imported</label><div class="kv">${out.errors.slice(0, 40).map(e => `<div><span>${e.line ? `Line ${e.line}` : "File"}</span><span style="text-align:right">${esc(e.msg)}</span></div>`).join("")}${out.errors.length > 40 ? `<div><span>…and ${out.errors.length - 40} more</span></div>` : ""}</div>` : ""}
   ${ok ? `<label class="f">Changes</label><div class="kv">${out.ops.slice(0, 60).map(o => `<div><span>${esc(o.what)}</span><span class="tag ${o.kind === "add" ? "t-paid" : "t-part"}">${o.kind === "add" ? "Add" : "Update"}</span></div>`).join("")}${ok > 60 ? `<div><span>…and ${ok - 60} more</span></div>` : ""}</div>` : ""}
-  ${out.skips.length ? `<label class="f">Skipped</label><div class="kv">${out.skips.slice(0, 20).map(s => `<div><span>${esc(s)}</span></div>`).join("")}${out.skips.length > 20 ? `<div><span>…and ${out.skips.length - 20} more</span></div>` : ""}</div>` : ""}
-  ${ok ? `<button class="btn btn-primary" data-act="applyImport">Import ${ok} change${ok > 1 ? "s" : ""}${out.errors.length ? ` · skip ${out.errors.length} row${out.errors.length > 1 ? "s" : ""} with problems` : ""}</button>` : `<p class="hint">${out.errors.length ? "Nothing to import. Fix the rows above and try again." : "Nothing to change: the app already matches this file."}</p>`}`);
+  ${t.summary ? t.summary(out) : ""}
+  ${out.skips.length ? `<label class="f">Skipped or unchanged</label><div class="kv">${out.skips.slice(0, 20).map(x => `<div><span>${esc(x)}</span></div>`).join("")}${out.skips.length > 20 ? `<div><span>…and ${out.skips.length - 20} more</span></div>` : ""}</div>` : ""}
+  ${pend.length ? `<button class="btn btn-primary" disabled>Answer the ${pend.length} question${pend.length > 1 ? "s" : ""} above first</button>`
+    : t.finish ? `<button class="btn btn-primary" data-act="applyImport" ${t.ready && !t.ready(out) ? "disabled" : ""}>${esc(t.finishLabel(out))}</button>`
+    : ok ? `<button class="btn btn-primary" data-act="applyImport">Import ${ok} change${ok > 1 ? "s" : ""}${out.errors.length ? ` · skip ${out.errors.length} row${out.errors.length > 1 ? "s" : ""} with problems` : ""}</button>` : `<p class="hint">${out.errors.length ? "Nothing to import. Fix the rows above and try again." : "Nothing to change: the app already matches this file."}</p>`}`);
 }
+const replan = st => { st.out = T[st.k].plan(st.recs, st.dec, st); $sheetKeep(); drawPreview(st); };
+const $sheetKeep = () => { const el = document.getElementById("sheet"); if (el) el.dataset.keep = "1"; };
 A.applyImport = async el => {
-  const st = ui.sheet; if (!st || st.kind !== "imp" || !canImport()) return; el.disabled = true; el.textContent = "Importing…";
+  const st = ui.sheet; if (!st || st.kind !== "imp" || st.out.pend.length) return; const t = T[st.k]; if (!(t.finish ? R.can("stock.buy") : canImport())) return;
+  el.disabled = true; el.textContent = "Saving…";
   let n = 0; for (const op of st.out.ops) { await op.run(); n++; }
-  sync.soon(); closeSheet(); toast(`${T[st.k].label}: ${n} change${n === 1 ? "" : "s"} imported`);
+  sync.soon(); closeSheet(); if (t.finish) { t.finish(st.out, st); return; } toast(`${t.label}: ${n} change${n === 1 ? "" : "s"} imported`);
 };
+
+/* ---------- purchase invoice → GRN draft ---------- */
+// Supplier invoices come in their own layout: find the header row (item, qty, amount…), read lines until a total row.
+const INV = { item: /item|description|particular|product|material|goods|name/, qty: /^(qty|quantity|qnty|nos|no of)/, unit: /^(unit|uom|units)$/, rate: /rate|price|mrp/, amount: /taxable|amount|value|net|total/, tax: /gst|tax|igst/ };
+const QTYU = /^\s*(\d+(?:\.\d+)?)\s*([a-z]+)?\s*$/i;
+function invoiceLines(raw) {
+  const rows = raw.map(r => r.map(c => String(c ?? "").trim()));
+  const hi = rows.findIndex(r => r.some(c => INV.item.test(c.toLowerCase())) && r.some(c => INV.qty.test(c.toLowerCase())));
+  if (hi < 0) return { error: "Couldn’t find a header row with an item and a quantity column. Use the invoice template, or paste the lines instead." };
+  const h = rows[hi].map(c => c.toLowerCase()); const col = re => h.findIndex(c => re.test(c));
+  const ci = { item: col(INV.item), qty: col(INV.qty), unit: col(INV.unit), rate: col(INV.rate), amount: (() => { const a = h.findIndex(c => /taxable|amount/.test(c)); return a >= 0 ? a : col(INV.amount); })(), tax: h.findIndex(c => INV.tax.test(c) && /%|rate/.test(c)) };
+  const out = [];
+  for (let i = hi + 1; i < rows.length; i++) { const r = rows[i]; const name = r[ci.item] || ""; if (!name) continue; if (/^(sub ?total|total|grand total|round|cgst|sgst|igst|tax)/i.test(name)) break;
+    const qm = QTYU.exec(r[ci.qty] || ""); if (!qm) continue; const q = +qm[1]; const unit = (ci.unit >= 0 && r[ci.unit]) || qm[2] || "";
+    const rate = ci.rate >= 0 ? numOr(r[ci.rate]) : null, amt = ci.amount >= 0 ? numOr(r[ci.amount]) : null, tax = ci.tax >= 0 ? numOr(String(r[ci.tax]).replace("%", "")) : null;
+    out.push({ line: i + 1, item: name, qty: q, unit, amount: amt != null && !Number.isNaN(amt) ? amt : (rate != null && !Number.isNaN(rate) ? r4(rate * q) : 0), tax: tax != null && !Number.isNaN(tax) ? tax : null }); }
+  return { recs: out };
+}
+// Pasted text from a PDF or message, read from the end of each line: the last number is the amount; the quantity is the number before it,
+// or, with three numbers at the end, the first of a quantity × rate = amount pair. Pack sizes inside names ("Maida 50kg bag") stay in the name.
+const UNITW = /^(kg|kgs|g|gm|gms|grams?|l|ltr|litres?|liters?|ml|pcs|pc|pieces?|nos|no)$/i;
+const NUMW = /^\d[\d,]*(?:\.\d+)?$/; const GLUED = /^(\d+(?:\.\d+)?)(kg|kgs|g|gm|gms|l|ltr|ml|pcs|pc|nos)$/i;
+function pastedLines(text) {
+  const out = [];
+  text.split(/\r?\n/).forEach((ln, li) => { const l = ln.replace(/₹|rs\.?(?=\s|\d)/gi, " ").replace(/[|\t]/g, " ").trim(); if (!l || /^(sub ?total|total|grand|gst|cgst|sgst|igst|invoice|date|bill|tax)/i.test(l)) return;
+    const w = l.split(/\s+/); const items = []; let i = w.length - 1;
+    while (i >= 0 && items.length < 3) { const x = w[i];
+      if (UNITW.test(x) && i > 0 && NUMW.test(w[i - 1])) { items.unshift({ n: +w[i - 1].replace(/,/g, ""), u: x, at: i - 1 }); i -= 2; }
+      else if (NUMW.test(x)) { items.unshift({ n: +x.replace(/,/g, ""), u: "", at: i }); i--; }
+      else if (GLUED.test(x)) { const m = GLUED.exec(x); items.unshift({ n: +m[1], u: m[2], at: i }); i--; }
+      else break; }
+    if (items.length < 2) return; const amt = items[items.length - 1];
+    let q = items[items.length - 2]; if (items.length === 3 && Math.abs(items[0].n * items[1].n - amt.n) <= 0.02 * amt.n) q = items[0];
+    const name = w.slice(0, q.at).join(" ").replace(/[-–:]+$/, "").trim(); if (!/[a-z]/i.test(name)) return;
+    out.push({ line: li + 1, item: name, qty: q.n, unit: q.u, amount: amt.n, tax: null }); });
+  return out;
+}
+T.invoice = { label: "Purchase invoice", verb: "Read", hidden: true,
+  plan(recs, dec, st) { const out = newPlan(dec); const ings = M.ingredients().filter(i => i.type !== "sf"); const made = {}; out.lines = [];
+    recs.forEach(r => { const uu = r.unit ? unitIn(r.unit) : null; if (r.unit && !uu) return out.err(r, `Unit “${r.unit}” for ${r.item} isn’t g, kg, ml, L or pcs`);
+      const m = askMaterial(out, r.item, uu ? uu[0] : "", ings, made, `${r.qty}${r.unit ? " " + r.unit : ""}`, ["rm", "pm"]); if (m === undefined) return; if (!m) return out.skip(`${r.item} skipped`);
+      // No unit on the invoice: read the quantity in the item's larger unit (kg, L) or pieces.
+      const [u, f] = uu || [m.unit, (BIG[m.unit] || [m.unit, 1])[1]]; if (u !== m.unit) return out.err(r, `${r.item}: ${m.name} is measured in ${m.unit}, the invoice says ${r.unit}`);
+      out.lines.push({ ingId: m.id, name: m.name, from: r.item, qty: r.qty * f, f, amount: +r.amount || 0, taxPct: r.tax }); });
+    return out; },
+  summary: out => out.lines.length ? `<label class="f">GRN draft · ${out.lines.length} line${out.lines.length > 1 ? "s" : ""}</label><div class="kv">${out.lines.map(l => { const i = M.ingMap()[l.ingId]; return `<div><span>${esc(l.name)}${norm(l.from) !== norm(l.name) ? ` <small class="mut">from “${esc(l.from)}”</small>` : ""}</span><span>${i ? esc(qtyText(l.qty, i)) : l.qty} · ₹${l.amount}</span></div>`; }).join("")}</div>` : "",
+  ready: out => out.lines.length > 0,
+  finishLabel: out => `Open GRN with ${out.lines.length} line${out.lines.length === 1 ? "" : "s"}`,
+  finish: (out, st) => { H.grnSheet && H.grnSheet({ supplier: st.supplier, invoiceNo: st.invoiceNo, lines: out.lines }); toast("Check the GRN and save it to add the stock"); } };
+const qtyText = (q, i) => { const [u, f] = BIG[i.unit] || [i.unit, 1]; return `${r4(q / f)} ${u}`; };
+A.invoiceIn = () => { if (!R.can("stock.buy")) return toast("Your role can’t record purchases.");
+  openSheet({ kind: "invin" }, `<div class="sh-head"><h2 class="h">Purchase invoice</h2><button class="x" data-close aria-label="Close">×</button></div>
+  <p class="hint" style="margin-top:-4px">Load the supplier’s invoice as Excel or CSV, or paste its lines. Items the app doesn’t know are matched to inventory (and remembered), then a GRN opens for you to check and save.</p>
+  <div class="two"><div><label class="f" for="ivSup">Supplier</label><input class="in" id="ivSup" list="ivsups" placeholder="Name"><datalist id="ivsups">${M.suppliers().map(x => `<option value="${esc(x.name)}">`).join("")}</datalist></div><div><label class="f" for="ivNo">Invoice no.</label><input class="in" id="ivNo" placeholder="Optional"></div></div>
+  <label class="btn btn-primary" style="margin-top:14px">${ICON.inbox}Choose invoice file (.xlsx or .csv)<input type="file" accept=".csv,text/csv,.xlsx" data-invfile hidden></label>
+  <label class="f" for="ivText">Or paste the item lines</label><textarea class="in" id="ivText" style="height:140px" placeholder="Amul Butter 500g   4 kg   2200&#10;Maida 50kg bag   1   1850&#10;6pc box   100 pcs   1000"></textarea>
+  <button class="btn btn-ghost" data-invpaste>Read pasted lines</button>
+  <button class="btn btn-ghost" data-tpl="invoice">Download an invoice template</button>`); };
+T.invoice.cols = [{ label: "Item" }, { label: "Qty" }, { label: "Unit" }, { label: "Rate" }, { label: "Amount" }, { label: "GST %" }];
+T.invoice.notes = ["Any supplier layout works if it has a header row with an item and a quantity column. Reading stops at a Total row.", "Unit: g, kg, ml, L or pcs; blank = kg, L or pcs for that item. Amount is before tax; blank = Qty × Rate."];
+T.invoice.ex = ["Amul Butter 500g", 4, "kg", 550, 2200, 12];
+const invMeta = () => ({ supplier: (document.getElementById("ivSup") || {}).value || "", invoiceNo: (document.getElementById("ivNo") || {}).value || "" });
 
 H.click.push(async T0 => {
   const ex = T0.closest("[data-exp]"); if (ex) { if (!canExport()) return true; const t = T[ex.dataset.exp]; download(fileName(ex.dataset.exp, "export"), [t.cols.map(c => c.label), ...t.rows()]); toast(`${t.label} exported`); return true; }
   const tp = T0.closest("[data-tpl]"); if (tp) { const t = T[tp.dataset.tpl];
     download(fileName(tp.dataset.tpl, "template"), [[`# Batchwala template: ${t.label}. Lines starting with # are ignored. Fill one row per record under the header line.`], ...t.notes.map(n => ["# " + n]), ["# Example: " + t.ex.join(" | ")], t.cols.map(c => c.label)]);
     toast(`${t.label} template downloaded`); return true; }
+  if (T0.closest("[data-invpaste]")) { const recs = pastedLines((document.getElementById("ivText") || {}).value || ""); if (!recs.length) { toast("No item lines found. Each line needs a name and a quantity."); return true; }
+    startImport("invoice", recs, "Pasted lines", invMeta()); return true; }
+  const st = ui.sheet;
+  if (st && st.kind === "imp" && T0.closest("[data-pendall]")) { st.out.pend.forEach(p => { if (p.suggest) st.dec[p.key] = p.suggest; }); replan(st); return true; }
   return false;
 });
 H.change.push(async T0 => {
+  const st = ui.sheet;
+  if (st && st.kind === "imp" && T0.dataset && T0.dataset.pend != null) { if (T0.value) { st.dec[T0.dataset.pend] = T0.value; replan(st); } return true; }
+  if (T0.dataset && T0.dataset.invfile != null) { const f = T0.files && T0.files[0]; T0.value = ""; if (!f) return true; const meta = invMeta();
+    try { const { recs, error } = invoiceLines(await readFile(f)); if (error) { toast(error); return true; } if (!recs.length) { toast("No item lines found under the header"); return true; } startImport("invoice", recs, f.name, meta); }
+    catch (e) { toast(e.message || "Couldn’t read that file"); } return true; }
   if (!T0.dataset || T0.dataset.imp == null) return false; const k = T0.dataset.imp; const f = T0.files && T0.files[0]; T0.value = ""; if (!f || !canImport()) return true;
   try { const raw = await readFile(f); const { recs, error } = toRecords(raw, T[k].cols); if (error) { toast(error); return true; }
-    if (!recs.length) { toast("No rows under the header line"); return true; } previewSheet(k, T[k].plan(recs), f.name); }
+    if (!recs.length) { toast("No rows under the header line"); return true; } startImport(k, recs, f.name); }
   catch (e) { toast(e.message || "Couldn’t read that file"); }
   return true;
 });

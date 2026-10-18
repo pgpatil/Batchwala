@@ -19,7 +19,7 @@ It is a Progressive Web App: it opens from a link, installs to the home screen, 
 | Delivery run | Today’s pre-orders by wing and floor; Delivered + paid by UPI or cash in one confirm |
 | Bill summary | Per order: items with quantity, rate and amount, then Total, Discount and Total payable. Copy marks it “Bill summary sent”; editing the order afterwards flags it |
 | Payments | Balances by customer, one-tap UPI or cash, part payments oldest-first, reversals instead of edits, WhatsApp reminders with your UPI ID |
-| Stock | Raw materials (RM), packing materials (PM) and semi-finished items in g, ml or pieces; purchases with price and supplier, wastage, stock counts, reorder levels, shopping list, barcode search |
+| Inventory | Tabs for raw materials (RM), packing (PM) and semi-finished items, with categories; upload a supplier invoice to fill a GRN, matching their item names to yours. Raw materials (RM), packing materials (PM) and semi-finished items in g, ml or pieces; purchases with price and supplier, wastage, stock counts, reorder levels, shopping list, barcode search |
 | BOM | Multilevel bills of materials: menu items use raw, packing and semi-finished materials; semi-finished items have their own recipe and yield and can use other semi-finished items. Costs roll up through every level. Plan & explode turns a day’s bake into what to prepare and what to buy |
 | Menu | Prices, categories, short names for WhatsApp reading, par levels, recipes with cost and margin |
 | Reports | Sales by day and channel, best sellers with margin, wastage value, repeat customers |
@@ -28,6 +28,8 @@ It is a Progressive Web App: it opens from a link, installs to the home screen, 
 | Tax | Optional GST (or any name): default and per-item rates, inclusive or exclusive prices, CGST + SGST split, GSTIN; shown on every bill, message and GRN. Per material, the admin sets whether purchase tax is recoverable or added to cost |
 | Users & roles | Admin, Management, Manager, Kitchen, Delivery, Counter; each opens on its own home screen. Each person uses Restaurant, ERP or both. Optional 4-digit PIN for shared phones |
 | History | Every change records who made it and when; any order shows its full history |
+| Shelf life | Per item (cookies 30 days, others 3 by default); a prompt on opening the app to discard or recount anything unsold past its shelf life |
+| Checks | Before a new customer, item, material or supplier is created, similar existing ones are shown to confirm first |
 | Help | In-app help for every screen and module, searchable, opening on the screen you’re on |
 | Import & export | CSV export by data type; templates; import of menu, materials, BOM, stock and finished-goods counts, suppliers and orders with a check screen first |
 | Data | Saved on the phone first; optional sync through a shared Google Drive folder; daily Excel copy saved to that folder; backup file; Excel export |
@@ -103,7 +105,8 @@ No build step: plain HTML, CSS and JavaScript modules. Run locally with `python3
 | `js/bom.js` | BOM trees and the plan & explode view |
 | `js/erp.js` | Production, GRNs, transfers, finished goods, outlet bake board |
 | `js/help.js` | In-app Help topics |
-| `js/data.js` | Import & export by data type, templates |
+| `js/data.js` | Import & export by data type, templates, purchase invoices |
+| `js/match.js` | Name matching and checks before creating new records |
 | `js/ops.js` | Delivery run, WhatsApp import, New-order menu |
 | `js/waparse.js` | Reads a WhatsApp message into a draft order |
 | `js/admin.js` | More, first run, users, settings, sync, backup, Excel |

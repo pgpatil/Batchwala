@@ -1,4 +1,4 @@
-// Inventory and production: Stock tab, ingredients, purchases, wastage, counts, recipes, the bake board and shopping list.
+// Inventory and production: Inventory (RM, PM, semi-finished), purchases, wastage, counts, recipes, the bake board and shopping list.
 import * as ev from "./events.js";
 import * as sync from "./sync.js";
 import * as M from "./model.js";
@@ -6,12 +6,17 @@ import * as R from "./roles.js";
 import { S, A, V, H, guard, chipBar, searchBox, band, toran, clean } from "./core.js";
 import { $, esc, rs, rs2, num, uid, today, addDays, dLong, dLabel, qty, UNITS, ICON, copyText, waHref } from "./util.js";
 import { ui, toast, openSheet, closeSheet, ask, yesNo } from "./ui.js";
+import { confirmNew } from "./match.js";
 
 const big = u => UNITS[u] || null;
 const unitChips = (u, sel, attr) => big(u) ? `<div class="chips unitchips">${[[u, 1], [big(u).big, big(u).f]].map(([n, f]) => `<button class="chip" data-${attr}="${f}" aria-pressed="${sel === f}">${n}</button>`).join("")}</div>` : `<span class="unitlbl">pcs</span>`;
 export const putMove = m => ev.put("moves", { id: uid("v"), date: today(), businessId: M.config().businessId, outletId: M.here(), ...m }).then(() => sync.soon());
 const typeTag = i => `<span class="tag t-${i.type}">${{ rm: "RM", pm: "PM", sf: "Semi" }[i.type] || "RM"}</span>`;
 const perBig = (i, v) => rs2(v * (big(i.unit) ? big(i.unit).f : 1)) + "/" + (big(i.unit) ? big(i.unit).big : i.unit);
+export const catOf = i => (i.category || "").trim() || "Uncategorised";
+// Suggested categories per type, plus any already in use.
+const CAT_HINTS = { rm: ["Flour & grains", "Dairy", "Fats & oils", "Sweeteners", "Chocolate & cocoa", "Nuts & dry fruit", "Flavours & essences", "Leavening", "Fillings", "Fruit & vegetables"], pm: ["Boxes", "Bags", "Labels & stickers", "Containers", "Wrapping", "Cutlery & napkins"], sf: ["Doughs", "Fillings", "Glazes & icings", "Creams", "Sauces"] };
+const catList = t => [...new Set([...(CAT_HINTS[t] || []), ...M.ingredients().filter(i => i.type === t).map(i => (i.category || "").trim()).filter(Boolean)])];
 const stateTag = s => s === "out" ? `<span class="tag t-due">Out</span>` : s === "low" ? `<span class="tag t-part">Low</span>` : `<span class="tag t-paid">OK</span>`;
 export function lowCount() { const sm = M.stockMap(); return M.ingredients().filter(i => M.stockLevel(i, sm).state !== "ok").length; }
 H.lowCount = lowCount;
@@ -22,6 +27,7 @@ V.bake = () => {
   const d = S.bakeDate || today(); const t = today(); const rows = M.board(d); const baked = M.bakesOn(d);
   const totalToBake = rows.reduce((s, r) => s + r.toBake, 0), committed = rows.reduce((s, r) => s + r.committed, 0);
   let h = band("Bake board", "", `<div class="stats"><div class="st"><b>${totalToBake}</b><span>pieces to bake</span></div><div class="st"><b>${committed}</b><span>pre-ordered</span></div><div class="st"><b>${rows.reduce((s, r) => s + r.baked, 0)}</b><span>baked so far</span></div></div>`);
+  if (H.expiryBanner) h += `<div class="boardfoot" style="padding-bottom:0">${H.expiryBanner()}</div>`;
   h += `<div class="tools"><div class="chips">${[t, addDays(t, 1), addDays(t, 2)].map((x, i) => `<button class="chip" data-bakedate="${x}" aria-pressed="${d === x}">${i === 0 ? "Today" : i === 1 ? "Tomorrow" : esc(dLong(x))}</button>`).join("")}</div></div>`;
   if (!rows.length) return h + `<div class="empty"><strong>Nothing to bake for ${esc(dLong(d))}</strong>Pre-orders and par levels for this day appear here.</div>`;
   h += `<ul class="list">${rows.map(r => `<li class="row board${r.toBake ? "" : " done"}"><div class="who"><div class="nm big">${esc(r.item)}</div><div class="subl">${r.committed} pre-ordered${r.par ? ` · ${r.par} kept ready` : ""}${r.sold ? ` · ${r.sold} sold at counter` : ""}${r.baked ? ` · ${r.baked} baked` : ""}${r.spoiled ? ` · ${r.spoiled} spoiled` : ""}${r.baked ? ` · ${Math.max(0, r.left)} left` : ""}</div></div>
@@ -63,29 +69,36 @@ function drawBake(st) {
 }
 
 /* ---------- Stock (RM / PM / semi-finished) ---------- */
+// Inventory: one tab per material type (raw, packing, semi-finished), categories within it, filtered by level and, with ERP, location.
 V.stock = () => {
-  S.filter.stock = S.filter.stock || "all"; S.filter.stype = S.filter.stype || "all";
+  S.filter.stock = S.filter.stock || "all"; S.filter.stype = S.filter.stype || "rm"; const ty = S.filter.stype;
   const money = R.can("money") && R.role() !== "kitchen";
   const multi = M.erpOn() && M.locations().length > 1; if (multi && !S.filter.sloc) S.filter.sloc = M.here();
   const loc = multi && S.filter.sloc !== "all" ? S.filter.sloc : null;
   const sm = M.stockMap(loc); const all = M.ingredients().map(i => ({ ...i, lv: M.stockLevel(i, sm), uc: M.unitCost(i) }));
-  const ings = all.filter(i => S.filter.stype === "all" || i.type === S.filter.stype);
+  const ings = all.filter(i => ty === "all" || i.type === ty);
+  const cats = [...new Set(ings.map(catOf))].sort((a, b) => (a === "Uncategorised") - (b === "Uncategorised") || a.localeCompare(b));
+  if (S.filter.scat && !cats.includes(S.filter.scat)) S.filter.scat = "";
   const low = ings.filter(i => i.lv.state !== "ok"); const value = ings.reduce((s, i) => s + Math.max(0, i.lv.on) * i.uc, 0);
   const m0 = today().slice(0, 8) + "01"; const spent = M.moves().filter(m => m.type === "purchase" && m.date >= m0).reduce((s, m) => s + (+m.amount || 0), 0);
-  let h = band(loc ? `Stock · ${esc(M.locName(loc))}` : "Stock", `${R.can("stock.buy") ? `<button class="pillbtn" data-inv="shopping">${ICON.cart}Shopping list</button>` : ""}<button class="pillbtn" data-go="bom">${ICON.tree}BOM</button>`,
-    `<div class="stats"><div class="st"><b>${low.length}</b><span>low or out</span></div>${money ? `<div class="st"><b>${rs(value)}</b><span>stock value</span></div><div class="st"><b>${rs(spent)}</b><span>bought this month</span></div>` : `<div class="st"><b>${ings.length}</b><span>materials</span></div>`}</div>`);
+  let h = band(loc ? `Inventory · ${esc(M.locName(loc))}` : "Inventory", `${R.can("stock.buy") ? `<button class="pillbtn" data-act="invoiceIn">${ICON.inbox}Upload invoice</button><button class="pillbtn" data-inv="shopping">${ICON.cart}Shopping list</button>` : ""}<button class="pillbtn" data-go="bom">${ICON.tree}BOM</button>`,
+    `<div class="stats"><div class="st"><b>${low.length}</b><span>low or out</span></div>${money ? `<div class="st"><b>${rs(value)}</b><span>${ty === "all" ? "inventory" : esc(M.ING_TYPES[ty].toLowerCase())} value</span></div><div class="st"><b>${rs(spent)}</b><span>bought this month</span></div>` : `<div class="st"><b>${ings.length}</b><span>items</span></div>`}</div>`);
   const q = (S.query.stock || "").toLowerCase().trim();
-  const rows = ings.filter(i => !q || (i.name + " " + (i.barcode || "") + " " + (i.supplier || "")).toLowerCase().includes(q)).filter(i => S.filter.stock === "all" || (S.filter.stock === "low" ? i.lv.state !== "ok" : i.lv.state === "out"));
-  h += `<div class="tools">${searchBox("stock", "Search, scan a barcode or supplier")}${chipBar("stype", [["all", "All", all.length], ...Object.entries(M.ING_TYPES).map(([k, l]) => [k, l, all.filter(i => i.type === k).length])])}</div>
+  const rows = ings.filter(i => !q || (i.name + " " + (i.barcode || "") + " " + (i.supplier || "") + " " + (i.category || "") + " " + (i.aka || []).join(" ")).toLowerCase().includes(q))
+    .filter(i => !S.filter.scat || catOf(i) === S.filter.scat).filter(i => S.filter.stock === "all" || (S.filter.stock === "low" ? i.lv.state !== "ok" : i.lv.state === "out"));
+  h += `<div class="tools"><div class="seg invtabs" role="group" aria-label="Type">${[["rm", "Raw materials"], ["pm", "Packing"], ["sf", "Semi-finished"], ["all", "All"]].map(([k, l]) => `<button data-filter="stype:${k}" aria-pressed="${ty === k}">${l} <em>${k === "all" ? all.length : all.filter(i => i.type === k).length}</em></button>`).join("")}</div></div>
+  <div class="tools" style="padding-top:6px">${searchBox("stock", "Search, scan a barcode, supplier or category")}</div>
+  ${cats.length > 1 ? `<div class="tools" style="padding-top:2px"><div class="chips scroll"><button class="chip" data-filter="scat:" aria-pressed="${!S.filter.scat}">All categories</button>${cats.map(c => `<button class="chip" data-filter="scat:${esc(c)}" aria-pressed="${S.filter.scat === c}">${esc(c)}<span class="n">${ings.filter(i => catOf(i) === c).length}</span></button>`).join("")}</div></div>` : ""}
   ${multi ? `<div class="tools" style="padding-top:2px">${chipBar("sloc", [["all", "All locations"], ...M.locations().map(l => [l.id, l.name])])}</div>` : ""}
   <div class="tools" style="padding-top:2px">${chipBar("stock", [["all", "Any level", ings.length], ["low", "Low", low.length], ["out", "Out", ings.filter(i => i.lv.state === "out").length]])}</div>`;
-  if (!all.length) return h + `<div class="empty"><strong>Add your materials</strong>Raw materials and packing you buy, with a reorder level, and semi-finished items you make (dough, fillings, glazes) with their own recipe. Purchases and prep add stock; batches use it up.${R.can("stock.edit") ? `<button class="btn btn-primary" data-inv="newIng" style="margin-top:14px">${ICON.plus}Add material</button>` : ""}</div>`;
-  if (!rows.length) return h + `<div class="empty"><strong>Nothing matches</strong>Try another search or filter.</div>`;
-  h += `<ul class="list">${rows.map(i => { const pct = i.reorder ? Math.min(100, Math.max(0, i.lv.on / (i.reorder * 2) * 100)) : (i.lv.on > 0 ? 100 : 0);
-    return `<li class="row${i.lv.state === "out" ? " warn" : ""}"><button class="who" data-ing="${esc(i.id)}"><div class="nm">${esc(i.name)}</div>
-    <div class="subl">${typeTag(i)} ${stateTag(i.lv.state)} ${i.reorder ? (i.type === "sf" ? "make at " : "reorder at ") + qty(i.reorder, i.unit) : "no reorder level"}${money && i.uc ? " · " + perBig(i, i.uc) : ""}</div>
+  if (!all.length) return h + `<div class="empty"><strong>Add your inventory</strong>Raw materials and packing you buy, with a reorder level, and semi-finished items you make (dough, fillings, glazes) with their own recipe. Purchases and prep add stock; batches use it up.${R.can("stock.edit") ? `<button class="btn btn-primary" data-inv="newIng" style="margin-top:14px">${ICON.plus}Add item</button>` : ""}</div>`;
+  if (!rows.length) return h + `<div class="empty"><strong>Nothing here</strong>${ings.length ? "Try another search or filter." : `No ${esc(ty === "all" ? "items" : M.ING_TYPES[ty].toLowerCase() + "s")} yet.`}${R.can("stock.edit") && !ings.length ? `<button class="btn btn-primary" data-inv="newIng" style="margin-top:14px">${ICON.plus}Add ${esc(ty === "all" ? "item" : M.ING_TYPES[ty].toLowerCase())}</button>` : ""}</div>`;
+  let cur = null; h += `<ul class="list">${rows.sort((a, b) => cats.indexOf(catOf(a)) - cats.indexOf(catOf(b)) || a.name.localeCompare(b.name)).map(i => { const pct = i.reorder ? Math.min(100, Math.max(0, i.lv.on / (i.reorder * 2) * 100)) : (i.lv.on > 0 ? 100 : 0);
+    const head = cats.length > 1 && !S.filter.scat && catOf(i) !== cur ? `<li class="sectli">${esc(cur = catOf(i))}</li>` : "";
+    return head + `<li class="row${i.lv.state === "out" ? " warn" : ""}"><button class="who" data-ing="${esc(i.id)}"><div class="nm">${esc(i.name)}</div>
+    <div class="subl">${ty === "all" ? typeTag(i) + " " : ""}${stateTag(i.lv.state)} ${i.reorder ? (i.type === "sf" ? "make at " : "reorder at ") + qty(i.reorder, i.unit) : "no reorder level"}${money && i.uc ? " · " + perBig(i, i.uc) : ""}</div>
     <div class="lvl"><i class="${i.lv.state}" style="width:${pct}%"></i></div></button><div class="amt">${qty(i.lv.on, i.unit)}</div></li>`; }).join("")}</ul>
-  ${R.can("stock.edit") ? `<div class="boardfoot" style="padding-bottom:20px"><button class="btn btn-ghost" data-inv="newIng">${ICON.plus}Add material</button></div>` : ""}`;
+  ${R.can("stock.edit") ? `<div class="boardfoot" style="padding-bottom:20px"><button class="btn btn-ghost" data-inv="newIng">${ICON.plus}Add ${esc(ty === "all" ? "item" : M.ING_TYPES[ty].toLowerCase())}</button></div>` : ""}`;
   return h;
 };
 
@@ -96,7 +109,7 @@ export function ingSheet(id) {
   const usedIn = [...M.menu().filter(m => (m.recipe || []).some(r => r.ingId === id)).map(m => esc(m.name)), ...M.ingredients().filter(x => x.type === "sf" && x.recipe.some(r => r.ingId === id)).map(x => esc(x.name) + " <small class='mut'>(semi)</small>")];
   const label = { purchase: "Bought", transfer: "Transfer", bake: "Used in batch", make: "Made in batch", waste: "Wasted", count: "Stock count", adjust: "Adjusted" };
   openSheet({ kind: "ing", id, redraw: () => ingSheet(id) }, `<div class="sh-head"><h2 class="h">${esc(i.name)}</h2><button class="x" data-close aria-label="Close">×</button></div>
-  <div class="subl" style="margin:-4px 0 10px">${typeTag(i)} ${esc(M.ING_TYPES[i.type])}${i.supplier ? " · " + esc(i.supplier) : ""}</div>
+  <div class="subl" style="margin:-4px 0 10px">${typeTag(i)} ${esc(M.ING_TYPES[i.type])} · ${esc(catOf(i))}${i.supplier ? " · " + esc(i.supplier) : ""}${(i.aka || []).length ? ` · also “${(i.aka || []).map(esc).join("”, “")}”` : ""}</div>
   <div class="kpis" style="padding:0;margin-bottom:10px"><div class="kpi"><b>${qty(lv.on, i.unit)}</b><span>on hand ${stateTag(lv.state)}</span></div>${money ? `<div class="kpi"><b>${uc ? perBig(i, uc) : "–"}</b><span>${sf ? "rolled-up recipe cost" : "last price"}${uc ? " · value " + rs(Math.max(0, lv.on) * uc) : ""}</span></div>` : ""}</div>
   <div class="btnrow3">${sf ? (R.can("bake.record") ? `<button class="btn btn-ok" data-inv="makeThis">Make</button>` : "") : (R.can("stock.buy") ? `<button class="btn btn-ok" data-inv="buyThis">Bought</button>` : "")}${R.can("stock.waste") ? `<button class="btn btn-ghost" data-inv="wasteThis">Wasted</button>` : ""}${R.can("stock.count") ? `<button class="btn btn-ghost" data-inv="countThis">Count</button>` : ""}</div>
   ${sf ? `<label class="f" style="margin-top:12px">Recipe · makes ${qty(i.yield, i.unit)} per run</label><div class="kv">${i.recipe.map(r => { const c = ings[r.ingId]; return `<div><span>${esc(c ? c.name : "Removed material")} ${c ? typeTag(c) : ""}</span><span>${c ? qty(r.qty, c.unit) : r.qty}${money && c ? ` <small class="mut">${rs2(M.unitCost(c) * r.qty)}</small>` : ""}</span></div>`; }).join("") || "<div>No recipe yet</div>"}</div>` : ""}
@@ -109,7 +122,7 @@ export function ingSheet(id) {
 function recipeRows(st) {
   const x = st.x; const ings = M.ingredients().filter(i => i.id !== x.id);
   const opts = sel => Object.entries(M.ING_TYPES).map(([t, l]) => { const g = ings.filter(i => i.type === t); return g.length ? `<optgroup label="${l}">${g.map(i => `<option value="${esc(i.id)}" ${i.id === sel ? "selected" : ""}>${esc(i.name)}</option>`).join("")}</optgroup>` : ""; }).join("");
-  if (!ings.length) return `<p class="hint">Add materials on the Stock screen first, then build the recipe here.</p>`;
+  if (!ings.length) return `<p class="hint">Add materials in Inventory first, then build the recipe here.</p>`;
   return `<div class="kv">${x.recipe.map((r, ix) => { const ing = ings.find(i => i.id === r.ingId); return `<div style="align-items:center;gap:8px"><select class="in" data-rping="${ix}" style="flex:1;min-width:0">${opts(r.ingId)}</select><input class="rate" data-rpqty="${ix}" inputmode="decimal" value="${r.qty || ""}" placeholder="0" aria-label="Quantity"><span class="unitlbl">${ing ? ing.unit : ""}</span><button class="rm" data-rprm="${ix}" aria-label="Remove line">×</button></div>`; }).join("") || `<div class="mut">No lines yet</div>`}</div>
   <button class="add-line" data-inv="addRecipeLine">+ Add material</button>`;
 }
@@ -125,7 +138,9 @@ function drawIngEdit(st) {
   openSheet(st, `<div class="sh-head"><h2 class="h">${st.isNew ? "New material" : "Edit material"}</h2><button class="x" data-close aria-label="Close">×</button></div>
   <label class="f">Type</label><div class="chips">${Object.entries(M.ING_TYPES).map(([k, l]) => `<button class="chip" data-gtype="${k}" aria-pressed="${x.type === k}">${l}</button>`).join("")}</div>
   <p class="hint">${{ rm: "Bought and used in recipes: flour, butter, paneer.", pm: "Bought and used per piece or order: boxes, bags, labels.", sf: "Made in-house from its own recipe and kept in stock: dough, fillings, glazes. Can itself use other semi-finished items." }[x.type]}</p>
-  <label class="f" for="gName">Name</label><input class="in" id="gName" value="${esc(x.name)}" placeholder="${sf ? "e.g. Strudel dough" : x.type === "pm" ? "e.g. 6-piece box" : "e.g. Paneer"}">
+  <div class="two"><div><label class="f" for="gName">Name</label><input class="in" id="gName" value="${esc(x.name)}" placeholder="${sf ? "e.g. Strudel dough" : x.type === "pm" ? "e.g. 6-piece box" : "e.g. Paneer"}"></div>
+  <div><label class="f" for="gCat">Category</label><input class="in" id="gCat" list="gcats" value="${esc(x.category || "")}" placeholder="${esc((CAT_HINTS[x.type] || [""])[0])}"><datalist id="gcats">${catList(x.type).map(c => `<option value="${esc(c)}">`).join("")}</datalist></div></div>
+  ${(x.aka || []).length ? `<p class="hint">Also known as: ${(x.aka || []).map(esc).join(", ")} <button class="linkbtn" data-inv="clearAka">Forget these</button></p>` : ""}
   <label class="f">Measured in</label><div class="chips">${[["g", "Weight (g, kg)"], ["ml", "Volume (ml, L)"], ["pcs", "Pieces"]].map(([u, l]) => `<button class="chip" data-gunit="${u}" aria-pressed="${x.unit === u}">${l}</button>`).join("")}</div>
   ${sf ? `<label class="f" for="gYield">One run of the recipe makes</label><div class="two"><input class="in" id="gYield" inputmode="decimal" value="${x.yield ? +(x.yield / st.rf).toFixed(3) : ""}" placeholder="e.g. 1.2">${unitChips(x.unit, st.rf, "grf")}</div>
     <label class="f">Recipe for one run</label>${recipeRows(st)}
@@ -142,7 +157,7 @@ function drawIngEdit(st) {
   ${!st.isNew && R.isAdmin() ? `<button class="btn btn-danger" data-inv="deleteIng">Delete material</button>` : ""}`);
 }
 function syncIng() { const st = ui.sheet, x = st.x; const b = big(x.unit); const g = id => document.getElementById(id);
-  x.name = g("gName").value; x.reorder = num(g("gReorder").value) * st.rf;
+  x.name = g("gName").value; if (g("gCat")) x.category = g("gCat").value.trim(); x.reorder = num(g("gReorder").value) * st.rf;
   if (g("gCost")) x.cost = num(g("gCost").value) / (b ? b.f : 1); if (g("gCode")) x.barcode = g("gCode").value.trim(); if (g("gSupp")) x.supplier = g("gSupp").value.trim(); if (g("gTax")) x.taxPct = g("gTax").value.trim() === "" ? null : num(g("gTax").value);
   if (g("gYield")) x.yield = num(g("gYield").value) * st.rf; if (g("gOpen")) st.open = num(g("gOpen").value) * st.rf; }
 const syncHost = () => ui.sheet.kind === "item" ? syncItem() : syncIng();
@@ -199,6 +214,7 @@ function drawItem(st) {
   <div class="two"><div><label class="f" for="iPrice">Price ₹</label><input class="in" id="iPrice" inputmode="numeric" value="${x.price || ""}" ${prices ? "" : "disabled"}></div>
   <div><label class="f" for="iCat">Category</label><input class="in" id="iCat" list="catlist" value="${esc(x.category || "")}" placeholder="Fresh bake"><datalist id="catlist">${cats.map(c => `<option value="${esc(c)}">`).join("")}</datalist></div></div>
   <label class="f" for="iAlias">Short names customers use <small class="mut">(comma separated)</small></label><input class="in" id="iAlias" value="${esc(x.aliases || "")}" placeholder="e.g. strudel, ps">
+  <label class="f" for="iLife">Shelf life in days <small class="mut">(blank = ${M.shelfLife({ name: x.name, category: x.category })} for this item: cookies 30, others 3)</small></label><input class="in" id="iLife" inputmode="numeric" value="${x.shelfLife ?? ""}" placeholder="${M.shelfLife({ name: x.name, category: x.category })}">
   <div class="two"><div><label class="f" for="iPar">Keep ready each day${M.sellingLocs().length > 1 ? " (per outlet)" : ""}</label><input class="in" id="iPar" inputmode="numeric" value="${x.par || ""}" placeholder="0"></div>
   ${M.taxCfg().on ? `<div><label class="f" for="iTax">${esc(M.taxCfg().name)} % <small class="mut">(blank = ${M.taxCfg().rate}%)</small></label><input class="in" id="iTax" inputmode="decimal" value="${x.taxPct ?? ""}" placeholder="${M.taxCfg().rate}"></div>` : "<div></div>"}</div>
   <label class="f">BOM · per piece <small class="mut">(raw, packing and semi-finished materials)</small></label>
@@ -208,7 +224,7 @@ function drawItem(st) {
   <button class="btn btn-primary" data-inv="saveItem">${st.isNew ? "Add item" : "Save item"}</button>
   ${!st.isNew && R.isAdmin() ? `<button class="btn btn-danger" data-inv="deleteItem">Remove from menu</button>` : ""}`);
 }
-function syncItem() { const x = ui.sheet.x; x.name = $("#iName").value.trim(); if (R.can("prices")) x.price = num($("#iPrice").value); x.category = $("#iCat").value.trim(); x.aliases = $("#iAlias").value.trim(); x.par = num($("#iPar").value); if ($("#iTax")) x.taxPct = $("#iTax").value.trim() === "" ? null : num($("#iTax").value); }
+function syncItem() { const x = ui.sheet.x; x.name = $("#iName").value.trim(); if (R.can("prices")) x.price = num($("#iPrice").value); x.category = $("#iCat").value.trim(); x.aliases = $("#iAlias").value.trim(); x.par = num($("#iPar").value); x.shelfLife = $("#iLife").value.trim() === "" ? null : Math.max(1, Math.round(num($("#iLife").value))); if ($("#iTax")) x.taxPct = $("#iTax").value.trim() === "" ? null : num($("#iTax").value); }
 
 // Undoing keeps the batch in the register, marked undone; it leaves the bake board and its stock moves are reversed.
 export async function undoBatch(id) {
@@ -230,6 +246,7 @@ const I = {
   saveIng: async () => { syncIng(); const st = ui.sheet, x = st.x; x.name = x.name.trim();
     if (!x.name) { toast("Add the material name"); return; }
     if (M.ingredients().some(i => i.id !== x.id && i.name.toLowerCase() === x.name.toLowerCase())) { toast("That material already exists"); return; }
+    if (st.isNew) { const r = await confirmNew("material", x.name, M.ingredients()); if (!r) return; if (r !== "new") { ingSheet(r.id); toast(`Opened ${r.name}`); return; } }
     if (x.type === "sf") { x.recipe = x.recipe.filter(r => r.ingId && +r.qty > 0); x.cost = 0; x.barcode = ""; x.supplier = "";
       if (x.recipe.length && !(x.yield > 0)) { toast("Enter how much one run makes"); return; }
       if (M.makesCycle(x.id, x.recipe)) { toast("That recipe would use itself through another semi-finished item"); return; } }
@@ -265,9 +282,11 @@ const I = {
     sync.soon(); closeSheet(); toast(`Batch #${no} saved`, `<button data-batch="${esc(bakeId)}">View</button>`); },
   newItem: () => itemSheet(null),
   addRecipeLine: () => { syncHost(); const st = ui.sheet; const ings = M.ingredients().filter(i => i.id !== st.x.id); if (ings.length) st.x.recipe.push({ ingId: ings[0].id, qty: 0 }); drawHost(st); },
+  clearAka: () => { syncIng(); ui.sheet.x.aka = []; drawIngEdit(ui.sheet); },
   makeThis: () => { const id = ui.sheet.id; closeSheet(); bakeSheet(today(), { prep: { [id]: 1 } }); },
   saveItem: async () => { syncItem(); const st = ui.sheet, x = st.x; if (!x.name) { toast("Add the item name"); return; }
     if (M.menu().some(m => m.id !== x.id && m.name.toLowerCase() === x.name.toLowerCase())) { toast("That item is already on the menu"); return; }
+    if (st.isNew) { const r = await confirmNew("menu item", x.name, M.menu()); if (!r) return; if (r !== "new") { itemSheet(r); toast(`Opened ${r.name}`); return; } }
     x.recipe = x.recipe.filter(r => r.ingId && +r.qty > 0); const { _at, _by, ...rec } = x; await ev.put("menu", rec); sync.soon(); toast(st.isNew ? "Item added" : "Item saved"); menuSheet(); },
   deleteItem: async () => { const x = ui.sheet.x; if (!await yesNo(`<p class="cq">Remove ${esc(x.name)}?</p><div class="cdetail">Past orders keep it. To pause it, switch it off on the menu instead.</div>`, "Remove", "btn-danger-solid")) return;
     await ev.del("menu", x.id); sync.soon(); toast("Item removed"); menuSheet(); }

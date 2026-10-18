@@ -14,7 +14,7 @@ V.more = () => {
   const c = M.config(); const me = R.me(); const st = sync.status;
   const items = [
     ["menu", "menu", "Menu, prices & recipes", `${M.menuActive().length} items on sale`, R.can("menu.edit") || R.can("reports")],
-    ["@stock", "stock", "Stock · RM / PM / semi-finished", `${M.ingredients().length} materials`, !R.tabs().includes("stock") && (R.can("stock.buy") || R.can("stock.count"))],
+    ["@stock", "stock", "Inventory · RM / PM / semi-finished", `${M.ingredients().length} items`, !R.tabs().includes("stock") && (R.can("stock.buy") || R.can("stock.count"))],
     ["@bom", "tree", "BOM", "Multilevel bills of materials and the bake plan", !R.tabs().includes("bom") && (R.can("menu.edit") || R.can("reports") || R.can("bake.record"))],
     ["@batches", "batch", "Batches", `${M.batches().filter(b => !b.void).length} recorded · pieces, spoilage and cost`, !R.tabs().includes("batches") && R.tabs().includes("today")],
     ["customers", "people", "Customers", `${M.customers().length} saved`, R.can("customers")],
@@ -31,7 +31,7 @@ V.more = () => {
   return `<div class="band"><div class="top">${logoHtml(c)}<div class="biz"><div class="name">${esc(c.business)}</div><div class="sub">${esc(me ? me.name + " · " + R.ROLES[me.role].label : "")}</div></div></div>${toran()}</div>
   ${H.switchers ? `<div class="moresw">${H.switchers()}</div>` : ""}
   <div class="menu-list" style="margin-top:14px">${items.map(([a, ic, t, s]) => `<button class="mi" ${a[0] === "@" ? `data-go="${a.slice(1)}"` : `data-act="${a}"`}><span class="ic">${ICON[ic]}</span><span class="grow">${t}<small>${esc(s)}</small></span><span class="chev">${ICON.chev}</span></button>`).join("")}</div>
-  <p class="hint" style="padding:4px 18px">${APP_NAME} 2.6${R.mode() !== "classic" ? " · " + esc(M.MODES[R.mode()]) + " mode" : ""} · ${st.state === "off" ? "data saved on this phone only" : "synced through Google Drive"}${st.last ? " · last sync " + new Date(st.last).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" }) : ""}</p>`;
+  <p class="hint" style="padding:4px 18px">${APP_NAME} 2.7${R.mode() !== "classic" ? " · " + esc(M.MODES[R.mode()]) + " mode" : ""} · ${st.state === "off" ? "data saved on this phone only" : "synced through Google Drive"}${st.last ? " · last sync " + new Date(st.last).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" }) : ""}</p>`;
 };
 
 /* ---------- first run ---------- */
@@ -290,7 +290,7 @@ export function buildWorkbook() {
   const C = [["Customer", "Flat", "Phone", "Orders", "Total (₹)", "Received (₹)", "Balance (₹)", "Last order"]]; M.customers().sort(cmpFlat).forEach(c => C.push([c.customer, c.flat, c.phone, c.orders.length, c.spend, c.received, c.balance, c.last]));
   X.utils.book_append_sheet(wb, X.utils.aoa_to_sheet(C), "Customers");
   const sm = M.stockMap(); const I = [["Material", "Type", "Unit", "On hand", "Reorder at", "Cost per unit (₹)", "Stock value (₹)", "Supplier"]]; M.ingredients().forEach(i => { const c = M.unitCost(i); I.push([i.name, M.ING_TYPES[i.type], i.unit, sm[i.id] || 0, i.reorder, +c.toFixed(4), Math.round((sm[i.id] || 0) * c), i.supplier]); });
-  X.utils.book_append_sheet(wb, X.utils.aoa_to_sheet(I), "Stock");
+  X.utils.book_append_sheet(wb, X.utils.aoa_to_sheet(I), "Inventory");
   const ings = Object.fromEntries(M.ingredients().map(i => [i.id, i]));
   const Bm = [["Parent", "Parent type", "Per", "Component", "Component type", "Qty", "Unit", "Cost (₹)"]];
   M.menu().forEach(m => (m.recipe || []).forEach(r => { const i = ings[r.ingId]; if (i) Bm.push([m.name, "Finished item", "1 piece", i.name, M.ING_TYPES[i.type], r.qty, i.unit, Math.round(M.unitCost(i) * r.qty * 100) / 100]); }));

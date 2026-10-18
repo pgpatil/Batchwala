@@ -446,3 +446,16 @@ kbd{font:inherit;font-size:11px;font-weight:800;border:1px solid var(--line);bor
 .dc-btns{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
 .dc-btns .btn{width:auto;flex:1 1 120px;height:44px;margin:0;font-size:15px}
 @media (min-width:1024px){ .helplist{padding:8px 0 28px;max-width:900px} .datalist{grid-template-columns:repeat(auto-fill,minmax(400px,1fr));padding:8px 0 28px} .bandnote{padding:0 22px 18px} }
+
+/* v2.7: inventory tabs, checks, shelf life */
+.invtabs{grid-template-columns:repeat(4,1fr);flex:1 1 100%}
+.invtabs button{font-size:13.5px}
+.invtabs em{font-style:normal;opacity:.6;font-weight:700;margin-left:2px}
+.banner.warn{background:var(--warn-bg);color:var(--warn)}
+.pendlist>div{flex-direction:column;align-items:stretch;gap:6px}
+.pendlist select{height:44px}
+.expbanner{display:block;width:100%;text-align:left;border:0;cursor:pointer;margin:12px 0 0}
+.exprow{align-items:center}
+.exbtns{display:flex;align-items:center;gap:10px}
+.dangerbtn{background:var(--due)}
+@media (min-width:1024px){ .invtabs{max-width:640px} }

@@ -9,7 +9,7 @@ const TOPICS = [
     <p>Batchwala keeps orders, the counter, baking, stock, purchases and money for a bakery in one app. It runs in the browser on a phone, tablet or computer and keeps working offline.</p>
     <ol><li><b>Start fresh</b> with your name and the business name. You become Admin.</li>
     <li>In <b>More → Business settings</b> add your logo, UPI ID, tax and locations.</li>
-    <li>Add your <b>menu</b> (Menu & recipes) and <b>materials</b> (Stock), or load them in one go from <b>Import & export</b> using the templates.</li>
+    <li>Add your <b>menu</b> (Menu & recipes) and <b>materials</b> (Inventory), or load them in one go from <b>Import & export</b> using the templates.</li>
     <li>Give each item a <b>BOM</b> so batches take stock and show cost.</li>
     <li>Add your team in <b>Users & roles</b>.</li></ol>
     <p>Install it: in Chrome, menu → <i>Install app</i>; on iPhone, Share → <i>Add to Home Screen</i>.</p>` },
@@ -67,12 +67,26 @@ const TOPICS = [
     <ul><li><b>Finished items</b>: each item’s full tree with quantity and cost at every level, total cost and margin.</li>
     <li><b>Semi-finished</b>: each prep item’s recipe and where it’s used.</li>
     <li><b>Plan & explode</b>: for a day, the pieces to bake, the semi-finished runs to make (stock on hand used first) and the raw and packing materials needed, with what’s short and a buy list.</li></ul>
-    <p>Edit a menu item’s BOM in Menu & recipes; a semi-finished item’s recipe in its material page (Stock). A recipe that would use itself is refused.</p>` },
-  { id: "stock", view: "stock", title: "Stock: raw, packing and semi-finished", tags: "stock materials rm pm sf ingredient reorder low out bought wasted count barcode supplier location", body: `
-    <p>Materials are <b>Raw material</b> (bought), <b>Packing material</b> (bought) or <b>Semi-finished</b> (made here from a recipe). Each is measured in g, ml or pieces; quantities can be typed in kg or L.</p>
-    <p>Filter by type, level (low, out) and, with ERP and several locations, by location. Scanners in keyboard mode type into the search to find a barcode. Open a material for its stock, cost, where it’s used and its history; <b>Bought</b> (or a GRN in ERP), <b>Make</b> for semi-finished, <b>Wasted</b> and <b>Count</b>.</p>
+    <p>Edit a menu item’s BOM in Menu & recipes; a semi-finished item’s recipe in its page in Inventory. A recipe that would use itself is refused.</p>
+    <p><b>Upload BOM</b> (admin): load an Excel or CSV sheet with Parent, Component, Qty and Unit (Template gives the layout). Any component or parent not found in the app is asked about before saving: pick the inventory item it means (remembered for next time), add it as new, or skip those rows.</p>` },
+  { id: "shelf", title: "Shelf life and past-shelf-life pieces", tags: "shelf life expiry expired discard stale cookies 3 days month batch unsold", body: `
+    <p>Each menu item has a shelf life in days, counting the day it was baked. If you don’t set one, cookies keep 30 days and everything else 3 days (Menu & recipes → item → Shelf life).</p>
+    <p>The app follows each batch: delivered orders use up the oldest pieces first. When pieces of a batch are still unsold at the end of their shelf life, a <b>Past shelf life</b> prompt opens when the app opens, and again whenever it comes back after half an hour away, until every line is dealt with:</p>
+    <ul><li><b>Discard</b>: the pieces are thrown away and recorded as discarded on the batch.</li>
+    <li><b>Update count</b>: enter how many are really there; the rest are recorded as sold or used without a record. Any left still need discarding.</li></ul>
+    <p>The bake board shows a red banner while anything is waiting. A batch’s page shows unsold pieces and the last good day.</p>` },
+  { id: "stock", view: "stock", title: "Inventory: raw, packing and semi-finished", tags: "inventory stock materials rm pm sf ingredient reorder low out bought wasted count barcode supplier location category", body: `
+    <p>Inventory has a tab for each kind of item: <b>Raw materials</b> (bought), <b>Packing</b> (bought) and <b>Semi-finished</b> (made here from a recipe), plus <b>All</b>. Within a tab, items are grouped by <b>category</b> (Dairy, Flour & grains, Boxes…), which you set on each item. Each is measured in g, ml or pieces; quantities can be typed in kg or L.</p>
+    <p>Filter by category, level (low, out) and, with ERP and several locations, by location. Scanners in keyboard mode type into the search to find a barcode. Open a material for its stock, cost, where it’s used and its history; <b>Bought</b> (or a GRN in ERP), <b>Make</b> for semi-finished, <b>Wasted</b> and <b>Count</b>.</p>
     <p><b>Shopping list</b>: bought materials at or below their reorder level, brought back to twice that level.</p>
     <p>Costs: bought materials use the last purchase price; semi-finished cost rolls up through their recipe. With tax on, the admin sets per material whether purchase tax is recoverable or added to cost.</p>` },
+  { id: "invoice", title: "Upload a purchase invoice", tags: "invoice upload supplier bill purchase grn map match item names excel csv paste pdf", body: `
+    <p>Inventory, Purchases or Import & export → <b>Upload invoice</b>.</p>
+    <ol><li>Enter the supplier and invoice number.</li>
+    <li>Choose the supplier’s invoice as Excel or CSV (any layout with an item and a quantity column; reading stops at the Total row), or paste the item lines copied from a PDF or message (e.g. <i>Amul Butter 500g 4 kg 2200</i>).</li>
+    <li>Items the app doesn’t recognise are listed with the closest inventory items. Pick the item each one is, add it as a new raw or packing material, or skip it. Your choice is remembered, so the same supplier name matches by itself next time.</li>
+    <li>A GRN opens with the lines filled in. Check quantities and units, then save it to add the stock.</li></ol>
+    <p>With no unit on the invoice, quantities are read in kg, L or pieces. Photos and scanned PDFs can’t be read yet; copy the lines as text instead.</p>` },
   { id: "grn", view: "grn", title: "Purchases (GRN)", tags: "grn goods received note purchase supplier invoice tax receive stock", body: `
     <p>Record each delivery from a supplier as a <b>GRN</b>: supplier (new names are added to your supplier list), invoice number, date, the location receiving it, and each item’s quantity, amount and tax %. Saving adds the stock at that location.</p>
     <p>The list shows this month, 30 days or all, with totals and spend by supplier. <b>Undo</b> takes the stock back off and keeps the GRN marked undone.</p>` },
@@ -101,11 +115,16 @@ const TOPICS = [
     <ol><li>Download the template and fill one row per record below the header. Lines starting with # are notes and are ignored.</li>
     <li>Import it. A check screen shows what will be added, updated or skipped and any rows with problems.</li>
     <li>Confirm. Nothing changes until you do.</li></ol>
-    <p>Menu items, materials and suppliers are matched by name and updated; BOM import replaces the BOM of each item listed; stock and finished-goods imports are counts (they set the quantity); orders already in the app (same order number) are skipped. Import is for admins; export needs the export permission.</p>` },
+    <p>Menu items, materials and suppliers are matched by name (and remembered other names) and updated; a new name that looks like an existing one is asked about first; BOM import replaces the BOM of each item listed; stock and finished-goods imports are counts (they set the quantity); orders already in the app (same order number) are skipped. Import is for admins; export needs the export permission.</p>` },
   { id: "backup", title: "Backup, cloud sync and Excel", tags: "backup restore sync google drive excel export daily report", body: `
     <p><b>Backup & restore</b> saves a file with every change ever made; loading one adds to what is there. <b>Cloud sync</b> keeps phones up to date through a shared Google Drive folder (setup in the README). <b>Export to Excel</b> writes one workbook with orders, payments, customers, batches, BOM, GRNs, transfers, stock and menu; with sync on, a copy is saved to Drive daily.</p>` },
   { id: "keys", title: "Computer and keyboard", tags: "desktop keyboard shortcuts sidebar table", body: `
     <p>On a screen 1024 px or wider: a sidebar with every screen your role can open, forms open on the right, and lists show as tables. Keys: <b>N</b> new order (or new GRN / transfer on those screens), <b>/</b> search, <b>Enter</b> opens a highlighted row, <b>Esc</b> closes a form. At the Counter, type in the search and press Enter to add the first match.</p>` },
+  { id: "checks", title: "Checks before creating something new", tags: "duplicate similar same customer flat phone verify confirm new record", body: `
+    <p>Before a new record is created, the app looks for one that is probably the same and asks first:</p>
+    <ul><li><b>Customers</b> (new order, WhatsApp import, Counter takeaway with a name): a flat or phone number already used by someone else, or a very similar name. Choose that customer, or confirm it really is a new one (say, family in the same flat).</li>
+    <li><b>Menu items, materials and suppliers</b>: a similar name already exists (e.g. “Buttter” and “Butter”). Use the existing one, or add it as new.</li>
+    <li><b>Imports and invoices</b>: new names that look like existing ones, and names not found at all, must be answered on the check screen before anything is saved.</li></ul>` },
   { id: "faq", title: "Questions and fixes", tags: "help problem wrong negative stock sync update offline", body: `
     <ul><li><b>“A new version is ready”</b>: tap Update.</li>
     <li><b>Stock went negative</b>: something was used before its purchase was recorded. Record the GRN, or do a Count.</li>

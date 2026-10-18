@@ -27,13 +27,13 @@ V.bom = () => {
   const ings = M.ingMap(); const mm = M.menu(); const sfs = M.ingredients().filter(i => i.type === "sf");
   const q = (S.query.bom || "").toLowerCase().trim(); const k = S.filter.bom;
   const noBom = mm.filter(m => m.active !== false && !(m.recipe || []).length).length;
-  let h = band("BOM", R.can("menu.edit") ? `<button class="pillbtn" data-act="menu">${ICON.menu}Menu</button>` : "",
+  let h = band("BOM", `${R.isAdmin() ? `<label class="pillbtn">${ICON.inbox}Upload BOM<input type="file" accept=".csv,text/csv,.xlsx" data-imp="bom" hidden></label><button class="pillbtn" data-tpl="bom">Template</button>` : ""}${R.can("menu.edit") ? `<button class="pillbtn" data-act="menu">${ICON.menu}Menu</button>` : ""}`,
     `<div class="stats"><div class="st"><b>${mm.length - mm.filter(m => !(m.recipe || []).length).length}/${mm.length}</b><span>menu items with a BOM</span></div><div class="st"><b>${sfs.length}</b><span>semi-finished</span></div><div class="st"><b>${Math.max(0, ...mm.map(m => depthOf(m.recipe, ings)))}</b><span>deepest level</span></div></div>`);
   h += `<div class="tools">${k === "plan" ? "" : searchBox("bom", "Search item or material")}${chipBar("bom", [["fg", "Finished items", mm.length], ["sf", "Semi-finished", sfs.length], ["plan", "Plan & explode"]])}</div>`;
   if (k === "plan") return h + planView(ings);
   if (k === "sf") {
     const list = sfs.filter(i => !q || (i.name + " " + i.recipe.map(r => (ings[r.ingId] || {}).name).join(" ")).toLowerCase().includes(q));
-    if (!sfs.length) return h + `<div class="empty"><strong>No semi-finished materials yet</strong>Dough, fillings and glazes you make in-house. Add one on Stock with type Semi-finished, give it a recipe and what one run makes, then use it in menu BOMs.</div>`;
+    if (!sfs.length) return h + `<div class="empty"><strong>No semi-finished materials yet</strong>Dough, fillings and glazes you make in-house. Add one in Inventory → Semi-finished, give it a recipe and what one run makes, then use it in menu BOMs.</div>`;
     return h + `<div class="bomlist">${list.map(i => { const uc = M.unitCost(i); const used = [...mm.filter(m => (m.recipe || []).some(r => r.ingId === i.id)), ...sfs.filter(x => x.recipe.some(r => r.ingId === i.id))];
       return `<details class="bakecard bomcard"><summary><span class="grow">${esc(i.name)}<small class="mut" style="display:block;font-weight:600">makes ${qty(i.yield, i.unit)} per run${money() && uc ? " · " + rs2(uc * (i.unit === "pcs" ? 1 : 1000)) + "/" + (i.unit === "pcs" ? "pc" : i.unit === "g" ? "kg" : "L") : ""} · used in ${used.length ? used.map(x => esc(x.name)).join(", ") : "nothing yet"}</small></span><span class="cnt">${depthOf(i.recipe, ings)} level${depthOf(i.recipe, ings) === 1 ? "" : "s"}</span>${ICON.down}</summary>
         <div class="bthead"><span>Material · for one run</span><span>Qty</span><span>${money() ? "Cost" : ""}</span></div>${tree(i.recipe, 1, 0, ings, new Set([i.id])) || `<div class="bt"><span class="mut">No recipe yet</span></div>`}</details>`; }).join("") || `<div class="empty"><strong>Nothing matches</strong></div>`}</div>`;
