@@ -14,7 +14,9 @@ V.more = () => {
   const c = M.config(); const me = R.me(); const st = sync.status;
   const items = [
     ["menu", "menu", "Menu, prices & recipes", `${M.menuActive().length} items on sale`, R.can("menu.edit") || R.can("reports")],
-    ["batches", "batch", "Batches", `${M.batches().length} recorded · pieces, spoilage and cost`, R.tabs().includes("today")],
+    ["@stock", "stock", "Stock · RM / PM / semi-finished", `${M.ingredients().length} materials`, !R.tabs().includes("stock") && (R.can("stock.buy") || R.can("stock.count"))],
+    ["@bom", "tree", "BOM", "Multilevel bills of materials and the bake plan", !R.tabs().includes("bom") && (R.can("menu.edit") || R.can("reports") || R.can("bake.record"))],
+    ["@batches", "batch", "Batches", `${M.batches().filter(b => !b.void).length} recorded · pieces, spoilage and cost`, !R.tabs().includes("batches") && R.tabs().includes("today")],
     ["customers", "people", "Customers", `${M.customers().length} saved`, R.can("customers")],
     ["reports", "chart", "Sales & profit", "Sales by day and channel, best sellers, margins", R.can("reports")],
     ["users", "people", "Users & roles", `${R.members().length} people`, R.isAdmin()],
@@ -25,8 +27,8 @@ V.more = () => {
     ["switchUser", "people", "Switch user", "Hand this phone to someone else", true]
   ].filter(x => x[4]);
   return `<div class="band"><div class="top">${logoHtml(c)}<div class="biz"><div class="name">${esc(c.business)}</div><div class="sub">${esc(me ? me.name + " · " + R.ROLES[me.role].label : "")}</div></div></div>${toran()}</div>
-  <div class="menu-list" style="margin-top:14px">${items.map(([a, ic, t, s]) => `<button class="mi" data-act="${a}"><span class="ic">${ICON[ic]}</span><span class="grow">${t}<small>${esc(s)}</small></span><span class="chev">${ICON.chev}</span></button>`).join("")}</div>
-  <p class="hint" style="padding:4px 18px">${APP_NAME} 2.2 · ${st.state === "off" ? "data saved on this phone only" : "synced through Google Drive"}${st.last ? " · last sync " + new Date(st.last).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" }) : ""}</p>`;
+  <div class="menu-list" style="margin-top:14px">${items.map(([a, ic, t, s]) => `<button class="mi" ${a[0] === "@" ? `data-go="${a.slice(1)}"` : `data-act="${a}"`}><span class="ic">${ICON[ic]}</span><span class="grow">${t}<small>${esc(s)}</small></span><span class="chev">${ICON.chev}</span></button>`).join("")}</div>
+  <p class="hint" style="padding:4px 18px">${APP_NAME} 2.3 · ${st.state === "off" ? "data saved on this phone only" : "synced through Google Drive"}${st.last ? " · last sync " + new Date(st.last).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" }) : ""}</p>`;
 };
 
 /* ---------- first run ---------- */
@@ -50,7 +52,7 @@ A.setupStart = async () => {
   if (!name) { toast("Add your name"); $("#suName").focus(); return; }
   const m = await createMember(name, "admin"); await R.setMe(m.id);
   await ev.put("config", { ...M.DEFAULT_CONFIG, business: biz || "My Bakery", businessId: uid("b") });
-  H.render(); toast("You’re the admin. Add your menu in More.");
+  S.view = R.home(); H.render(); toast("You’re the admin. Add your menu and materials first.");
 };
 A.setupJoin = async el => {
   el.disabled = true; el.textContent = "Connecting…";
@@ -60,7 +62,7 @@ A.setupJoin = async el => {
     await ev.setMeta("drive", { clientId: GOOGLE_CLIENT_ID, folderName: DATA_FOLDER, folderId: a.folderId });
     await sync.use(a); await sync.syncNow();
     const m = R.matchEmail(email);
-    if (m) { await R.setMe(m.id); H.render(); toast(`Welcome, ${m.name}`); }
+    if (m) { await R.setMe(m.id); S.view = R.home(); H.render(); toast(`Welcome, ${m.name}`); }
     else { toast(`${email} isn’t on the team yet. Ask the admin to add you in Users & roles.`); el.disabled = false; el.textContent = "Sign in with Google"; }
   } catch (e) { toast(e.message || "Couldn’t connect"); el.disabled = false; el.textContent = "Sign in with Google"; }
 };
@@ -132,12 +134,13 @@ function drawSettings(st) {
   <div class="two"><div><label class="f" for="sUpi">UPI ID</label><input class="in" id="sUpi" value="${esc(c.upi || "")}" placeholder="name@okaxis" autocapitalize="off"></div>
   <div><label class="f" for="sPayee">Name on UPI</label><input class="in" id="sPayee" value="${esc(c.payee || "")}" placeholder="As shown in UPI app"></div></div>
   <p class="hint">The UPI ID goes into WhatsApp order messages and reminders.</p>
+  <label class="f" for="sTables">Dine-in tables at the counter</label><input class="in" id="sTables" inputmode="numeric" value="${esc(c.tables || 10)}" placeholder="10">
   <label class="f">Occasions</label><div class="chips">${(c.tags || []).map(g => `<span class="chip tagchip">${esc(g)}<button data-deltag="${esc(g)}" aria-label="Remove ${esc(g)}">×</button></span>`).join("") || `<span class="hint">None yet</span>`}</div>
   <div class="two" style="margin-top:8px"><input class="in" id="sNewTag" placeholder="e.g. Diwali 2026"><button class="btn btn-ghost" style="margin:0;height:48px" data-act="addTag">Add occasion</button></div>
   <label class="f" for="sActive">Tag new orders with</label><select class="in" id="sActive"><option value="">Nothing (regular orders)</option>${(c.tags || []).map(g => `<option ${g === c.activeTag ? "selected" : ""}>${esc(g)}</option>`).join("")}</select>
   <button class="btn btn-primary" data-act="saveSettings">Save settings</button>`);
 }
-function syncSettings() { const c = ui.sheet.c; const g = id => document.getElementById(id); c.business = g("sBiz").value.trim() || "My Bakery"; c.tagline = g("sTag").value.trim(); c.upi = g("sUpi").value.trim(); c.payee = g("sPayee").value.trim(); c.activeTag = g("sActive").value; c.accent = g("sAccent").value; }
+function syncSettings() { const c = ui.sheet.c; const g = id => document.getElementById(id); c.business = g("sBiz").value.trim() || "My Bakery"; c.tagline = g("sTag").value.trim(); c.upi = g("sUpi").value.trim(); c.payee = g("sPayee").value.trim(); c.activeTag = g("sActive").value; c.accent = g("sAccent").value; c.tables = Math.min(60, Math.max(0, Math.round(num(g("sTables").value)))) || 10; }
 async function shrinkImage(file, size = 256) {
   const url = URL.createObjectURL(file); const img = new Image(); img.src = url; await img.decode();
   const cv = document.createElement("canvas"); const s = Math.min(img.width, img.height); cv.width = cv.height = size;
@@ -235,7 +238,7 @@ H.change.push(async T => {
   try { const data = JSON.parse(await f.text());
     if (T.id === "suFile" && !R.members().length && !(data.app === "batchwala")) { const m = await createMember("Admin", "admin"); await R.setMe(m.id); }
     const n = await importFile(data); sync.soon();
-    if (!R.me()) { const admin = R.members().find(m => m.role === "admin"); if (admin) await R.setMe(admin.id); }
+    if (!R.me()) { const admin = R.members().find(m => m.role === "admin"); if (admin) { await R.setMe(admin.id); S.view = R.home(); } }
     closeSheet(); H.render(); toast(`Loaded ${n} records`); }
   catch (err) { toast(err.message || "Couldn’t read that file"); }
   return true;
@@ -252,13 +255,17 @@ export function buildWorkbook() {
   X.utils.book_append_sheet(wb, X.utils.aoa_to_sheet(P), "Payments");
   const C = [["Customer", "Flat", "Phone", "Orders", "Total (₹)", "Received (₹)", "Balance (₹)", "Last order"]]; M.customers().sort(cmpFlat).forEach(c => C.push([c.customer, c.flat, c.phone, c.orders.length, c.spend, c.received, c.balance, c.last]));
   X.utils.book_append_sheet(wb, X.utils.aoa_to_sheet(C), "Customers");
-  const sm = M.stockMap(); const I = [["Ingredient", "Unit", "On hand", "Reorder at", "Cost per unit (₹)", "Stock value (₹)"]]; M.ingredients().forEach(i => { const c = M.unitCost(i); I.push([i.name, i.unit, sm[i.id] || 0, i.reorder, +c.toFixed(4), Math.round((sm[i.id] || 0) * c)]); });
+  const sm = M.stockMap(); const I = [["Material", "Type", "Unit", "On hand", "Reorder at", "Cost per unit (₹)", "Stock value (₹)", "Supplier"]]; M.ingredients().forEach(i => { const c = M.unitCost(i); I.push([i.name, M.ING_TYPES[i.type], i.unit, sm[i.id] || 0, i.reorder, +c.toFixed(4), Math.round((sm[i.id] || 0) * c), i.supplier]); });
   X.utils.book_append_sheet(wb, X.utils.aoa_to_sheet(I), "Stock");
   const ings = Object.fromEntries(M.ingredients().map(i => [i.id, i]));
-  const V2 = [["Date", "Ingredient", "Type", "Qty", "Unit", "Amount (₹)", "Note"]]; M.moves().forEach(m => { const i = ings[m.ingId]; V2.push([m.date, i ? i.name : "?", m.type, m.qty, i ? i.unit : "", m.amount || "", m.note || ""]); });
+  const Bm = [["Parent", "Parent type", "Per", "Component", "Component type", "Qty", "Unit", "Cost (₹)"]];
+  M.menu().forEach(m => (m.recipe || []).forEach(r => { const i = ings[r.ingId]; if (i) Bm.push([m.name, "Finished item", "1 piece", i.name, M.ING_TYPES[i.type], r.qty, i.unit, Math.round(M.unitCost(i) * r.qty * 100) / 100]); }));
+  M.ingredients().filter(x => x.type === "sf").forEach(x => x.recipe.forEach(r => { const i = ings[r.ingId]; if (i) Bm.push([x.name, "Semi-finished", `1 run (${x.yield} ${x.unit})`, i.name, M.ING_TYPES[i.type], r.qty, i.unit, Math.round(M.unitCost(i) * r.qty * 100) / 100]); }));
+  X.utils.book_append_sheet(wb, X.utils.aoa_to_sheet(Bm), "BOM");
+  const V2 = [["Date", "Material", "Type", "Qty", "Unit", "Amount (₹)", "Note"]]; M.moves().forEach(m => { const i = ings[m.ingId]; V2.push([m.date, i ? i.name : "?", m.type, m.qty, i ? i.unit : "", m.amount || "", m.note || ""]); });
   X.utils.book_append_sheet(wb, X.utils.aoa_to_sheet(V2), "Stock movements");
   const Bt = [["Batch #", "Date", "Time", "Item", "Pieces", "Spoiled", "Batch cost (₹)", "Made by", "Note"]];
-  M.batches().slice().reverse().forEach(b => { const m = ev.get("members", b.madeBy || b._by); const at = b.at || b._at;
+  M.batches().filter(b => !b.void).reverse().forEach(b => { const m = ev.get("members", b.madeBy || b._by); const at = b.at || b._at;
     b.lines.forEach((l, ix) => Bt.push([b.no, b.date, ix || !at ? "" : new Date(at).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" }), l.item, l.qty, l.spoiled, ix ? "" : Math.round(M.batchCost(b) * 100) / 100, ix ? "" : (m ? m.name : ""), ix ? "" : b.notes])); });
   X.utils.book_append_sheet(wb, X.utils.aoa_to_sheet(Bt), "Batches");
   const Mn = [["Item", "Category", "Price (₹)", "Short names", "Keep ready", "Recipe cost (₹)", "Margin %", "On sale"]]; M.menu().forEach(m => { const rc = M.recipeCost(m); Mn.push([m.name, m.category, m.price, m.aliases, m.par, rc.lines ? Math.round(rc.cost * 100) / 100 : "", rc.lines && m.price ? Math.round((1 - rc.cost / m.price) * 100) : "", m.active !== false ? "Yes" : "No"]); });

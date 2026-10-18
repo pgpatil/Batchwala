@@ -35,5 +35,5 @@ export const searchBox = (key, ph) => `<input class="search" data-search="${key}
 export const matchQ = (key, o) => { const q = (S.query[key] || "").toLowerCase().trim(); return !q || ((o.customer || "") + " " + (o.flat || "") + " " + (o.phone || "") + " " + (o.no || "")).toLowerCase().includes(q); };
 export const band = (title, right = "", extra = "") => `<div class="band"><div class="page-title"><h1 class="h">${title}</h1>${right}</div>${extra}${toran()}</div>`;
 export function payTag(o) { if (o.status === "cancelled") return `<span class="tag t-due">Cancelled</span>`; const s = M.payState(o); return s === "paid" ? `<span class="tag t-paid">${ICON.check}Paid</span>` : s === "part" ? `<span class="tag t-part">${rs(M.bal(o))} due</span>` : `<span class="tag t-due">Unpaid</span>`; }
-export const chanTag = o => o.channel && o.channel !== "whatsapp" ? `<span class="tag t-chan">${esc(M.CHANNELS[o.channel] || o.channel)}</span>` : "";
+export const chanTag = o => o.channel && o.channel !== "whatsapp" ? `<span class="tag t-chan">${esc(M.chanLabel(o))}</span>` : "";
 export const noLabel = o => o.no ? "#" + esc(o.no) : "";

@@ -4,6 +4,9 @@ import { today, cmpFlat, flatKey } from "./util.js";
 
 export const CHANNELS = { whatsapp: "WhatsApp", phone: "Phone", instagram: "Instagram", bulk: "Bulk / event", other: "Other", walkin: "Walk-in", swiggy: "Swiggy", zomato: "Zomato" };
 export const PREORDER = ["whatsapp", "phone", "instagram", "bulk", "other"];
+export const SERVICE = { takeaway: "Takeaway", dinein: "Dine-in" };
+// Walk-in orders carry a service (takeaway or dine-in at a table); everything else shows its channel.
+export const chanLabel = o => o.channel === "walkin" && SERVICE[o.service] ? SERVICE[o.service] + (o.table ? " · T" + o.table : "") : (CHANNELS[o.channel] || o.channel);
 export const STATUSES = ["received", "confirmed", "baking", "ready", "out", "delivered"];
 export const STATUS_LABEL = { received: "Received", confirmed: "Confirmed", baking: "In a bake", ready: "Ready", out: "Out for delivery", delivered: "Delivered", cancelled: "Cancelled" };
 export const DEFAULT_CONFIG = { id: "app", business: "My Bakery", tagline: "Home bakery", logo: "", accent: "#F7B718", upi: "", payee: "", activeTag: "", tags: [], festive: false, businessId: "b1", outletId: "home", folderName: "Batchwala data", clientId: "" };
@@ -65,16 +68,26 @@ export const menuActive = () => menu().filter(m => m.active !== false);
 export const menuByName = name => menu().find(m => m.name.toLowerCase() === String(name).toLowerCase());
 
 /* ---------- inventory ---------- */
-export const ingredients = () => ev.all("ingredients").map(i => ({ unit: "g", reorder: 0, cost: 0, barcode: "", ...i })).sort((a, b) => a.name.localeCompare(b.name));
+// Materials: rm = raw material (bought), pm = packing material (bought), sf = semi-finished (made from a recipe that yields `yield` base units).
+export const ING_TYPES = { rm: "Raw material", pm: "Packing material", sf: "Semi-finished" };
+export const ingredients = () => ev.all("ingredients").map(i => ({ unit: "g", reorder: 0, cost: 0, barcode: "", type: "rm", supplier: "", recipe: [], yield: 0, ...i })).sort((a, b) => a.name.localeCompare(b.name));
+export const ingMap = () => Object.fromEntries(ingredients().map(i => [i.id, i]));
 export const moves = () => ev.all("moves").sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : a._at < b._at ? 1 : -1));
 export function stockMap() { const m = {}; ev.all("moves").forEach(v => { m[v.ingId] = (m[v.ingId] || 0) + (+v.qty || 0); }); return m; }
-export function stockLevel(i, sm = stockMap()) { const s = sm[i.id] || 0; return { on: s, state: s <= 0 ? "out" : (i.reorder && s <= i.reorder ? "low" : "ok") }; }
-export function unitCost(ing) {
+// Semi-finished made fresh (no "make when below" level) aren't flagged when they run out.
+export function stockLevel(i, sm = stockMap()) { const s = sm[i.id] || 0; return { on: s, state: s <= 0 ? (i.type === "sf" && !i.reorder ? "ok" : "out") : (i.reorder && s <= i.reorder ? "low" : "ok") }; }
+// Bought materials cost what the last purchase cost; semi-finished cost rolls up through their recipe, level by level.
+export function unitCost(ing, seen = new Set()) {
+  if (ing.type === "sf") {
+    if (seen.has(ing.id) || !(+ing.yield > 0)) return +ing.cost || 0;
+    const next = new Set(seen).add(ing.id); const ings = ingMap();
+    return (ing.recipe || []).reduce((c, r) => c + (ings[r.ingId] ? unitCost(ings[r.ingId], next) * (+r.qty || 0) : 0), 0) / ing.yield;
+  }
   const p = ev.all("moves").filter(m => m.ingId === ing.id && m.type === "purchase" && m.qty > 0 && m.amount > 0).sort((a, b) => (a.date + a._at) < (b.date + b._at) ? 1 : -1)[0];
   return p ? p.amount / p.qty : (+ing.cost || 0);
 }
 export function recipeCost(m) {
-  const ings = Object.fromEntries(ingredients().map(i => [i.id, i])); let cost = 0, missing = 0;
+  const ings = ingMap(); let cost = 0, missing = 0;
   (m.recipe || []).forEach(r => { const i = ings[r.ingId]; if (!i) { missing++; return; } const c = unitCost(i); if (!c) missing++; cost += c * (+r.qty || 0); });
   return { cost, missing, lines: (m.recipe || []).length };
 }
@@ -86,9 +99,9 @@ export function requirement(lines) {
 
 /* ---------- batches ---------- */
 // A batch is one recorded bake (kind "bakes"): numbered, with pieces and spoiled pieces per item and the stock it used.
-export const batches = () => ev.all("bakes").map(b => ({ no: "", notes: "", ...b, lines: (b.lines || []).map(l => ({ item: l.item, qty: +l.qty || 0, spoiled: +l.spoiled || 0 })) }))
+export const batches = () => ev.all("bakes").map(b => ({ no: "", notes: "", void: false, ...b, lines: (b.lines || []).map(l => ({ item: l.item, qty: +l.qty || 0, spoiled: +l.spoiled || 0 })), prep: (b.prep || []).map(p => ({ ingId: p.ingId, runs: +p.runs || 0, qty: +p.qty || 0 })) }))
   .sort((a, b) => (a.date + (a.at || a._at || "")) < (b.date + (b.at || b._at || "")) ? 1 : -1);
-export const bakesOn = date => batches().filter(b => b.date === date);
+export const bakesOn = date => batches().filter(b => b.date === date && !b.void);
 export const batchPcs = b => b.lines.reduce((s, l) => s + l.qty, 0);
 export const batchSpoiled = b => b.lines.reduce((s, l) => s + l.spoiled, 0);
 // Stock used, priced when the batch was saved; older batches are priced from their stock moves at today's cost.
@@ -98,7 +111,37 @@ export function batchStock(b) {
   ev.all("moves").filter(m => m.ref === b.id && m.type === "bake").forEach(m => { use[m.ingId] = (use[m.ingId] || 0) - (+m.qty || 0); });
   return Object.entries(use).map(([ingId, q]) => ({ ingId, qty: q, cost: ings[ingId] ? unitCost(ings[ingId]) * q : 0 }));
 }
-export const batchCost = b => batchStock(b).reduce((s, x) => s + (+x.cost || 0), 0);
+export const batchText = (b, ings = ingMap()) => [...b.lines.map(l => `${l.item} × ${l.qty}`), ...b.prep.map(p => `${(ings[p.ingId] || {}).name || "?"} × ${p.runs} run${p.runs === 1 ? "" : "s"}`)].join(", ");
+export const batchMadeValue = b => (b.made || []).reduce((s, x) => s + (+x.cost || 0), 0);
+// Net cost of the finished pieces: everything taken off stock, less the value of semi-finished stock this batch made.
+export const batchCost = b => Math.max(0, batchStock(b).reduce((s, x) => s + (+x.cost || 0), 0) - batchMadeValue(b));
+// What a batch takes off stock: finished pieces use their recipe one level down (semi-finished from stock); prep runs use the semi-finished recipe.
+export function batchNeed(lines, prep = []) {
+  const { need, unknown } = requirement(lines); const ings = ingMap(); const made = {};
+  prep.filter(p => p.runs > 0).forEach(p => { const i = ings[p.ingId]; if (!i) return; made[i.id] = (made[i.id] || 0) + i.yield * p.runs;
+    (i.recipe || []).forEach(r => { need[r.ingId] = (need[r.ingId] || 0) + (+r.qty || 0) * p.runs; }); });
+  return { need, made, unknown };
+}
+// Planning across every BOM level: semi-finished on hand is used first; only the shortfall is made, in whole recipe runs, and exploded further.
+// Each material is settled after all its parents (by its deepest level), so runs are counted once.
+export function explode(lines) {
+  const ings = ingMap(); const sm = stockMap(); const gross = {}; const make = {}; const unknown = [];
+  lines.forEach(l => { const m = menuByName(l.item); if (!m || !(m.recipe || []).length) { if (l.qty) unknown.push(l.item); return; }
+    m.recipe.forEach(r => { gross[r.ingId] = (gross[r.ingId] || 0) + (+r.qty || 0) * l.qty; }); });
+  const lvl = {}; const walk = (id, d, path) => { if (path.has(id) || d > 12) return; lvl[id] = Math.max(lvl[id] || 0, d); const i = ings[id];
+    if (i && i.type === "sf") (i.recipe || []).forEach(r => walk(r.ingId, d + 1, new Set(path).add(id))); };
+  Object.keys(gross).forEach(id => walk(id, 0, new Set()));
+  Object.keys(lvl).sort((a, b) => lvl[a] - lvl[b]).forEach(id => { const i = ings[id]; const q = gross[id] || 0;
+    if (!i || i.type !== "sf" || q <= 0 || !(+i.yield > 0)) return; const short = q - Math.max(0, sm[id] || 0); if (short <= 0) return;
+    const runs = Math.ceil(short / i.yield); make[id] = runs; (i.recipe || []).forEach(r => { gross[r.ingId] = (gross[r.ingId] || 0) + (+r.qty || 0) * runs; }); });
+  return { need: gross, make, level: lvl, unknown: [...new Set(unknown)], onHand: sm };
+}
+// True if `recipe` (for material `id`) reaches back to `id` through semi-finished recipes.
+export function makesCycle(id, recipe) {
+  const ings = ingMap(); const seen = new Set();
+  const hit = rid => { if (rid === id) return true; if (seen.has(rid)) return false; seen.add(rid); const i = ings[rid]; return !!(i && i.type === "sf" && (i.recipe || []).some(r => hit(r.ingId))); };
+  return (recipe || []).some(r => hit(r.ingId));
+}
 // Same idea as order numbers: each person's prefix keeps two phones from clashing offline.
 export function nextBatchNo(prefix) { const n = batches().map(b => +String(b.no || "").split("-").pop() || 0); return `${prefix || ""}B-${Math.max(0, ...n) + 1}`; }
 

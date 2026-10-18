@@ -1,4 +1,4 @@
-// Front-line screens: delivery run, quick sale, WhatsApp order import and the New-order menu.
+// Front-line screens: delivery run, WhatsApp order import and the New-order menu.
 import * as ev from "./events.js";
 import * as M from "./model.js";
 import * as R from "./roles.js";
@@ -27,39 +27,9 @@ V.run = () => {
   return h;
 };
 
-/* ---------- Quick sale ---------- */
-V.sale = () => {
-  S.sale = S.sale || { channel: "walkin", items: [], mode: "UPI" };
-  const sl = S.sale; const mm = M.menuActive(); const qOf = id => (sl.items.find(i => i.menuId === id) || {}).qty || 0;
-  const tot = sl.items.reduce((s, i) => s + i.qty * i.rate, 0);
-  const todays = M.orders(false).filter(o => o.date === today() && !M.PREORDER.includes(o.channel));
-  let h = band("Quick sale", "", `<div class="stats"><div class="st"><b>${todays.length}</b><span>sales today</span></div><div class="st"><b>${rs(todays.reduce((s, o) => s + M.total(o), 0))}</b><span>value today</span></div><div class="st"><b>${todays.reduce((s, o) => s + M.pcs(o), 0)}</b><span>pieces</span></div></div>`);
-  h += `<div class="salewrap"><div class="chips">${["walkin", "swiggy", "zomato"].map(k => `<button class="chip" data-salechan="${k}" aria-pressed="${sl.channel === k}">${M.CHANNELS[k]}</button>`).join("")}</div>
-  <div class="grid" style="margin-top:10px">${mm.map(m => { const n = qOf(m.id); return `<button class="tile${n ? " sel" : ""}" data-saleadd="${esc(m.id)}"><span class="tn">${esc(m.name)}</span><span class="tp">${rs(m.price)}</span>${n ? `<span class="q">${n}</span>` : ""}</button>`; }).join("")}</div>
-  ${!mm.length ? `<p class="hint">The menu is empty. An admin or management user adds items in More.</p>` : ""}
-  ${sl.items.length ? `<div class="cart">${sl.items.map((i, ix) => `<div class="cl"><div class="cn">${esc(i.item)}<small>${rs(i.qty * i.rate)}</small></div><div class="stepper"><button data-salestep="${ix}:-1" aria-label="One less">−</button><span>${i.qty}</span><button data-salestep="${ix}:1" aria-label="One more">+</button></div></div>`).join("")}</div>` : ""}
-  ${sl.channel === "walkin" ? `<label class="f">Paid by</label><div class="chips">${["UPI", "Cash"].map(m => `<button class="chip" data-salemode="${m}" aria-pressed="${sl.mode === m}">${m}</button>`).join("")}</div>` : `<p class="hint">${M.CHANNELS[sl.channel]} pays later; the amount shows under Payments until settled.</p>`}
-  <div class="totline"><small>${sl.items.reduce((s, i) => s + i.qty, 0)} pcs</small><b>${rs(tot)}</b></div>
-  <button class="btn btn-primary" data-act="saleDone" ${sl.items.length ? "" : "disabled"}>Done · ${rs(tot)}</button></div>
-  ${todays.length ? `<div class="sect">Today’s sales</div><ul class="list" style="padding-top:0">${todays.slice().sort((a, b) => a._at < b._at ? 1 : -1).slice(0, 15).map(o => `<li class="row"><button class="who" data-open="${esc(o.id)}"><div class="nm">${esc(M.CHANNELS[o.channel])} ${noLabel(o)}</div><div class="subl">${o.items.map(i => esc(i.item) + " ×" + i.qty).join(", ")} · ${payTag(o)}</div></button><div class="amt">${rs(M.total(o))}</div></li>`).join("")}</ul>` : ""}`;
-  return h;
-};
-A.saleDone = async el => {
-  if (!guard("sale")) return; const sl = S.sale; if (!sl.items.length) return;
-  el.disabled = true; const me = R.me();
-  const o = { id: uid("o"), no: M.nextNo((me && me.prefix) || ""), customer: M.CHANNELS[sl.channel], flat: "", phone: "", channel: sl.channel, date: today(), items: sl.items, discountPct: 0, status: "delivered", deliveredAt: new Date().toISOString(), notes: "", tag: M.config().activeTag || "", createdAt: new Date().toISOString() };
-  await saveOrder(o); if (sl.channel === "walkin") await payOrders([M.normOrder(o)], sl.mode);
-  const tot = sl.items.reduce((s, i) => s + i.qty * i.rate, 0);
-  S.sale = { channel: sl.channel, items: [], mode: sl.mode }; H.render();
-  toast(`Sale ${rs(tot)} saved`, `<button data-undosale="${esc(o.id)}">Undo</button>`);
-};
 H.click.push(async T => {
   const rd = T.closest("[data-rundate]"); if (rd) { S.runDate = rd.dataset.rundate; H.render(); return true; }
   const rv = T.closest("[data-rundeliver]"); if (rv) { const o = M.orders().find(x => x.id === rv.dataset.rundeliver); if (o) await confirmDeliver(o, true); return true; }
-  const sc = T.closest("[data-salechan]"); if (sc) { S.sale.channel = sc.dataset.salechan; H.render(); return true; }
-  const sm = T.closest("[data-salemode]"); if (sm) { S.sale.mode = sm.dataset.salemode; H.render(); return true; }
-  const sa = T.closest("[data-saleadd]"); if (sa) { const m = M.menu().find(x => x.id === sa.dataset.saleadd); const ex = S.sale.items.find(i => i.menuId === m.id); if (ex) ex.qty++; else S.sale.items.push({ item: m.name, qty: 1, rate: m.price, menuId: m.id }); H.render(); return true; }
-  const ss = T.closest("[data-salestep]"); if (ss) { const [ix, d] = ss.dataset.salestep.split(":").map(Number); S.sale.items[ix].qty += d; if (S.sale.items[ix].qty <= 0) S.sale.items.splice(ix, 1); H.render(); return true; }
   const us = T.closest("[data-undosale]"); if (us) { const o = M.orders().find(x => x.id === us.dataset.undosale); if (o) { await saveOrder({ ...o, status: "cancelled", cancelReason: "Undone at counter" }); for (const p of M.paymentsFor(o.id)) if (p.amount > 0) await addPayment(o, -p.amount, p.mode, "Sale undone", p.id); toast("Sale undone"); } return true; }
   return false;
 });
@@ -67,16 +37,16 @@ H.click.push(async T => {
 /* ---------- New-order menu ---------- */
 H.fab = async () => {
   if (S.view === "stock") { H.purchaseSheet && H.purchaseSheet(); return; }
-  if (S.view === "sale") return;
+  if (S.view === "pos") return;
   const opts = [];
   if (R.can("orders.edit")) opts.push({ label: `${ICON.plus}New order`, cls: "btn-primary", value: "new" });
   if (R.can("wa.import")) opts.push({ label: `${ICON.wa}From a WhatsApp message`, cls: "btn-wa", value: "wa" });
-  if (R.can("sale")) opts.push({ label: "Quick sale (walk-in, Swiggy, Zomato)", cls: "btn-ghost", value: "sale" });
+  if (R.can("sale")) opts.push({ label: `${ICON.cart}Counter (takeaway, dine-in, Swiggy, Zomato)`, cls: "btn-ghost", value: "sale" });
   if (opts.length === 1) { pick(opts[0].value); return; }
   opts.push({ label: "Cancel", cls: "btn-danger", value: null });
   pick(await ask(`<p class="cq">Add an order</p>`, opts));
 };
-function pick(v) { if (v === "new") compose(null); if (v === "wa") waSheet(""); if (v === "sale") { S.view = "sale"; H.render(); } }
+function pick(v) { if (v === "new") compose(null); if (v === "wa") waSheet(""); if (v === "sale") { S.view = "pos"; H.render(); } }
 
 /* ---------- WhatsApp import ---------- */
 export function waSheet(text) {

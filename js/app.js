@@ -8,18 +8,25 @@ import "./orders.js";
 import "./money.js";
 import "./inventory.js";
 import "./batches.js";
+import "./pos.js";
+import "./bom.js";
 import { waSheet } from "./ops.js";
 import { setupView, resumeSync, dailyReport } from "./admin.js";
 import { APP_NAME } from "./config.js";
 import { $, esc, ICON } from "./util.js";
 import { ui, toast, closeSheet, yesNo } from "./ui.js";
 
-const TAB = { today: ["Today", ICON.today], orders: ["Orders", ICON.orders], pay: ["Payments", ICON.pay], stock: ["Stock", ICON.stock], bake: ["Bake board", ICON.oven], batches: ["Batches", ICON.batch], run: ["Delivery run", ICON.run], sale: ["Quick sale", ICON.cart], more: ["More", ICON.more] };
-const SHORT = { bake: "Bake", run: "My run", sale: "Sale" };   // bottom-bar labels on phones
-const ORDER = ["today", "orders", "bake", "batches", "run", "sale", "pay", "stock", "more"];
+const TAB = { pos: ["Counter", ICON.cart], bom: ["BOM", ICON.tree], today: ["Today", ICON.today], orders: ["Orders", ICON.orders], pay: ["Payments", ICON.pay], stock: ["Stock", ICON.stock], bake: ["Bake board", ICON.oven], batches: ["Batches", ICON.batch], run: ["Delivery run", ICON.run], more: ["More", ICON.more] };
+const SHORT = { bake: "Bake", run: "My run" };   // bottom-bar labels on phones
+const ORDER = ["pos", "today", "orders", "bake", "batches", "bom", "run", "pay", "stock", "more"];
+// Screens a role may open, from its permissions; its phone tabs are a subset.
 function allowedViews() {
-  const t = R.tabs().slice();
-  if (t.includes("today")) { t.push("bake", "batches", "run"); if (R.can("sale")) t.push("sale"); }
+  const t = R.tabs().slice(); const c = R.can;
+  if (c("sale")) t.push("pos");
+  if (c("bake.record") || t.includes("today")) t.push("bake", "batches");
+  if (c("bake.record") || c("menu.edit") || c("stock.edit") || c("reports")) t.push("bom");
+  if (c("deliver") && t.includes("today")) t.push("run");
+  if (c("stock.buy") || c("stock.count")) t.push("stock");
   return [...new Set(t)];
 }
 // Wide screens get a sidebar, side drawers and table views.

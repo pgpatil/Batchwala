@@ -112,7 +112,7 @@ const statusTag = o => o.status === "cancelled" ? `<span class="tag t-due">Cance
 function ordersTable(list) {
   const money = R.can("money"); const live = list.filter(o => o.status !== "cancelled");
   return `<div class="card tablecard"><table class="reg"><thead><tr><th>#</th><th>Date</th><th>Customer</th><th>Channel</th><th>Items</th><th class="r">Pcs</th>${money ? `<th class="r">Total</th><th class="r">Due</th><th>Payment</th>` : ""}<th>Status</th></tr></thead>
-  <tbody>${list.map(o => `<tr data-open="${esc(o.id)}" tabindex="0"><td>${noLabel(o)}</td><td>${esc(dLong(o.date))}</td><td><b>${esc(o.customer || M.CHANNELS[o.channel])}</b>${o.flat ? ` <small class="mut">${esc(o.flat)}</small>` : ""}${o.tag ? ` <span class="tag t-camp">${esc(o.tag)}</span>` : ""}</td><td>${esc(M.CHANNELS[o.channel] || o.channel)}</td>
+  <tbody>${list.map(o => `<tr data-open="${esc(o.id)}" tabindex="0"><td>${noLabel(o)}</td><td>${esc(dLong(o.date))}</td><td><b>${esc(o.customer || M.CHANNELS[o.channel])}</b>${o.flat ? ` <small class="mut">${esc(o.flat)}</small>` : ""}${o.tag ? ` <span class="tag t-camp">${esc(o.tag)}</span>` : ""}</td><td>${esc(M.chanLabel(o))}</td>
     <td class="items">${o.items.map(i => esc(i.item) + " ×" + i.qty).join(", ")}</td><td class="r">${M.pcs(o)}</td>${money ? `<td class="r">${rs(M.total(o))}</td><td class="r">${M.bal(o) ? `<span class="due">${rs(M.bal(o))}</span>` : "–"}</td><td>${o.status === "cancelled" ? "" : payTag(o)} ${billTag(o)}</td>` : ""}<td>${statusTag(o)}</td></tr>`).join("")}</tbody>
   <tfoot><tr><td colspan="5">${list.length} order${list.length === 1 ? "" : "s"}${live.length < list.length ? ` · ${list.length - live.length} cancelled` : ""}</td><td class="r">${live.reduce((s, o) => s + M.pcs(o), 0)}</td>${money ? `<td class="r">${rs(live.reduce((s, o) => s + M.total(o), 0))}</td><td class="r">${rs(live.reduce((s, o) => s + M.bal(o), 0))}</td><td></td>` : ""}<td></td></tr></tfoot></table></div>`;
 }
@@ -138,7 +138,7 @@ export function openOrder(id) {
   const s = M.payState(o); const money = R.can("money"); const edit = R.can("orders.edit"); const cancelled = o.status === "cancelled";
   const steps = M.STATUSES.map(st => `<button class="step${o.status === st ? " on" : ""}${M.STATUSES.indexOf(st) < M.STATUSES.indexOf(o.status) ? " past" : ""}" data-status="${st}" ${edit && !cancelled ? "" : "disabled"}>${esc(M.STATUS_LABEL[st])}</button>`).join("");
   openSheet({ kind: "order", id, redraw: () => openOrder(id) }, `<div class="sh-head">${plate(o.flat)}<h2 class="h">${esc(o.customer || M.CHANNELS[o.channel])}</h2><button class="x" data-close aria-label="Close">×</button></div>
-  <div class="subl" style="margin:-4px 0 10px">Order ${noLabel(o)} · ${esc(dLong(o.date))} · ${esc(M.CHANNELS[o.channel] || "")}${o.phone && R.can("phone") ? " · " + esc(o.phone) : ""}${o.tag ? ` · <span class="tag t-camp">${esc(o.tag)}</span>` : ""}</div>
+  <div class="subl" style="margin:-4px 0 10px">Order ${noLabel(o)} · ${esc(dLong(o.date))} · ${esc(M.chanLabel(o))}${o.phone && R.can("phone") ? " · " + esc(o.phone) : ""}${o.tag ? ` · <span class="tag t-camp">${esc(o.tag)}</span>` : ""}</div>
   ${cancelled ? `<div class="banner bad">Cancelled${o.cancelReason ? ": " + esc(o.cancelReason) : ""}</div>` : `<div class="steps" role="group" aria-label="Order status">${steps}</div>`}
   <div class="kv">${o.items.map(i => `<div><span>${esc(i.item)} × ${i.qty}${money ? ` <small class="mut">@ ${rs(i.rate)}</small>` : ""}</span>${money ? `<span>${rs(i.qty * i.rate)}</span>` : ""}</div>`).join("")}
   ${money && o.discountPct ? `<div><span>Offer ${o.discountPct}% off</span><span>−${rs(M.disc(o))}</span></div>` : ""}${money ? `<div class="tot"><span>Total</span><span>${rs(M.total(o))}</span></div>` : ""}</div>
@@ -181,6 +181,7 @@ export function historySheet(kind, id, title, back) {
     else if (kind === "bakes") { const ch = []; const d = e.data, p = prev.data || {};
       if (JSON.stringify(d.lines) !== JSON.stringify(p.lines)) ch.push("pieces or spoiled changed");
       if ((d.notes || "") !== (p.notes || "")) ch.push(`note → ${d.notes || "blank"}`);
+      if (d.void && !p.void) ch.push("batch undone");
       what = ch.join("; ") || "Saved with no visible change"; }
     else { const ch = []; const d = e.data, p = prev.data || {};
       if (d.status !== p.status) ch.push(`status → ${M.STATUS_LABEL[d.status] || d.status}`);
