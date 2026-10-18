@@ -144,8 +144,8 @@ export function batchNeed(lines, prep = []) {
 }
 // Planning across every BOM level: semi-finished on hand is used first; only the shortfall is made, in whole recipe runs, and exploded further.
 // Each material is settled after all its parents (by its deepest level), so runs are counted once.
-export function explode(lines) {
-  const ings = ingMap(); const sm = stockMap(); const gross = {}; const make = {}; const unknown = [];
+export function explode(lines, loc = null) {
+  const ings = ingMap(); const sm = stockMap(loc); const gross = {}; const make = {}; const unknown = [];
   lines.forEach(l => { const m = menuByName(l.item); if (!m || !(m.recipe || []).length) { if (l.qty) unknown.push(l.item); return; }
     m.recipe.forEach(r => { gross[r.ingId] = (gross[r.ingId] || 0) + (+r.qty || 0) * l.qty; }); });
   const lvl = {}; const walk = (id, d, path) => { if (path.has(id) || d > 12) return; lvl[id] = Math.max(lvl[id] || 0, d); const i = ings[id];
@@ -155,6 +155,27 @@ export function explode(lines) {
     if (!i || i.type !== "sf" || q <= 0 || !(+i.yield > 0)) return; const short = q - Math.max(0, sm[id] || 0); if (short <= 0) return;
     const runs = Math.ceil(short / i.yield); make[id] = runs; (i.recipe || []).forEach(r => { gross[r.ingId] = (gross[r.ingId] || 0) + (+r.qty || 0) * runs; }); });
   return { need: gross, make, level: lvl, unknown: [...new Set(unknown)], onHand: sm };
+}
+// A saved production plan for a date and kitchen: { id, date, loc, lines: [{ item, qty }] }. Without one, planning starts from the suggestion.
+export const planId = (date, loc) => `${date}@${loc || ""}`;
+export const planOf = (date, loc) => ev.get("plans", planId(date, loc));
+// Every level of a recipe scaled to `qty` (pieces of a menu item, or g / ml / pcs of a semi-finished material).
+// scratch: semi-finished lines are made in the batch (their own steps, deepest first); otherwise they are taken from stock as a line.
+export function batchCard(rec, qty, scratch = true) {
+  const ings = ingMap(); const steps = []; const total = {};
+  const walk = (name, recipe, mult, made, path) => {
+    const lines = (recipe || []).map(r => ({ ing: ings[r.ingId], qty: (+r.qty || 0) * mult })).filter(l => l.ing && l.qty > 0);
+    lines.forEach(l => { const i = l.ing; if (scratch && i.type === "sf" && +i.yield > 0 && (i.recipe || []).length && !path.has(i.id)) walk(i.name, i.recipe, l.qty / i.yield, { ing: i, qty: l.qty, runs: l.qty / i.yield }, new Set(path).add(i.id));
+      else total[i.id] = (total[i.id] || 0) + l.qty; });
+    steps.push({ name, made, lines });
+  };
+  const sf = rec.type === "sf"; walk(rec.name, rec.recipe, sf ? qty / (+rec.yield || 1) : qty, sf ? { ing: rec, qty, runs: qty / (+rec.yield || 1) } : null, new Set(sf ? [rec.id] : []));
+  // The same semi-finished used in two places is one step making the sum.
+  const merged = []; steps.forEach(s => { const m = s.made && merged.find(x => x.made && x.made.ing.id === s.made.ing.id);
+    if (!m) { merged.push({ ...s, lines: s.lines.map(l => ({ ...l })) }); return; } m.made.qty += s.made.qty; m.made.runs += s.made.runs;
+    s.lines.forEach(l => { const x = m.lines.find(y => y.ing.id === l.ing.id); if (x) x.qty += l.qty; else m.lines.push({ ...l }); }); });
+  const cost = Object.entries(total).reduce((s, [id, q]) => s + unitCost(ings[id]) * q, 0);
+  return { steps: merged, total: Object.entries(total).map(([id, q]) => ({ ing: ings[id], qty: q })), cost };
 }
 // True if `recipe` (for material `id`) reaches back to `id` through semi-finished recipes.
 export function makesCycle(id, recipe) {

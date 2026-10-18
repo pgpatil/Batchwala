@@ -3,6 +3,7 @@ import * as ev from "./events.js";
 import * as sync from "./sync.js";
 import * as M from "./model.js";
 import * as R from "./roles.js";
+import { asLines, layoutSwitch } from "./table.js";
 import { S, A, V, H, guard, chipBar, searchBox, band, clean } from "./core.js";
 import { bakeSheet, undoBatch } from "./inventory.js";
 import { historySheet } from "./orders.js";
@@ -26,12 +27,12 @@ V.batches = () => {
   const pcs = live.reduce((s, b) => s + M.batchPcs(b), 0), sp = live.reduce((s, b) => s + M.batchSpoiled(b), 0), cost = live.reduce((s, b) => s + M.batchCost(b), 0);
   let h = band("Batches", R.can("bake.record") ? `<button class="pillbtn" data-batchnew>${ICON.plus}New batch</button>` : "",
     `<div class="stats"><div class="st"><b>${live.length}</b><span>batch${live.length === 1 ? "" : "es"}${list.length > live.length ? ` · ${list.length - live.length} undone` : ""}</span></div><div class="st"><b>${pcs - sp}</b><span>good pieces${sp ? ` · ${sp} spoiled` : ""}</span></div>${money ? `<div class="st"><b>${rs(cost)}</b><span>ingredient cost${pcs - sp > 0 ? ` · ${rs2(cost / (pcs - sp))}/pc` : ""}</span></div>` : ""}</div>`);
-  h += `<div class="tools">${searchBox("batches", "Search item, batch # or note")}${chipBar("batches", Object.entries(PERIOD).map(([key, [l]]) => [key, l, all.filter(b => inPeriod(b, key, t)).length]))}</div>`;
+  h += `<div class="tools">${searchBox("batches", "Search item, batch # or note")}${layoutSwitch("batches")}${chipBar("batches", Object.entries(PERIOD).map(([key, [l]]) => [key, l, all.filter(b => inPeriod(b, key, t)).length]))}</div>`;
   if (!all.length) return h + `<div class="empty"><strong>No batches yet</strong>Record a batch when it goes into the oven. Each one gets a number, takes its ingredients off stock by recipe and shows its cost here.${R.can("bake.record") ? `<button class="btn btn-primary" data-batchnew style="margin-top:14px">${ICON.oven}Record a batch</button>` : ""}</div>`;
   if (!list.length) return h + `<div class="empty"><strong>Nothing matches</strong>Try another search or period.</div>`;
-  if (S.wide) return h + `<div class="card tablecard"><table class="reg"><thead><tr><th>Batch</th><th>Date</th><th>Time</th><th>Items</th><th class="r">Pieces</th><th class="r">Spoiled</th>${money ? `<th class="r">Cost</th><th class="r">Per piece</th>` : ""}<th>Made by</th><th>Note</th></tr></thead>
+  if (asLines("batches")) return h + `<div class="card tablecard"><table class="reg"><thead><tr><th>Batch</th><th>Date</th><th>Time</th><th>Items</th><th class="r">Pieces</th><th class="r">Spoiled</th>${money ? `<th class="r">Cost</th><th class="r">Per piece</th>` : ""}<th>Made by</th><th>Note</th></tr></thead>
     <tbody>${list.map(b => { const p = M.batchPcs(b), s = M.batchSpoiled(b), c = M.batchCost(b);
-      return `<tr data-batch="${esc(b.id)}" tabindex="0"${b.void ? ` class="void"` : ""}><td><b>${noOf(b)}</b>${b.void ? ` <span class="tag t-due">Undone</span>` : ""}</td><td>${esc(dLong(b.date))}</td><td>${esc(time(b))}</td><td class="items">${esc(M.batchText(b, ings))}</td><td class="r">${p}</td><td class="r">${s ? `<span class="due">${s}</span>` : "–"}</td>${money ? `<td class="r">${c ? rs2(c) : "–"}</td><td class="r">${c && p - s > 0 ? rs2(c / (p - s)) : "–"}</td>` : ""}<td>${esc(who(b))}</td><td class="items">${esc(b.notes)}</td></tr>`; }).join("")}</tbody>
+      return `<tr data-batch="${esc(b.id)}" tabindex="0"${b.void ? ` class="void"` : ""}><td><b>${noOf(b)}</b>${b.void ? ` <span class="tag t-due">Undone</span>` : ""}</td><td data-v="${esc(b.date)}">${esc(dLong(b.date))}</td><td>${esc(time(b))}</td><td class="items">${esc(M.batchText(b, ings))}</td><td class="r">${p}</td><td class="r">${s ? `<span class="due">${s}</span>` : "–"}</td>${money ? `<td class="r">${c ? rs2(c) : "–"}</td><td class="r">${c && p - s > 0 ? rs2(c / (p - s)) : "–"}</td>` : ""}<td>${esc(who(b))}</td><td class="items">${esc(b.notes)}</td></tr>`; }).join("")}</tbody>
     <tfoot><tr><td colspan="4">${live.length} batch${live.length === 1 ? "" : "es"}${list.length > live.length ? ` · ${list.length - live.length} undone not counted` : ""}</td><td class="r">${pcs}</td><td class="r">${sp || "–"}</td>${money ? `<td class="r">${rs2(cost)}</td><td></td>` : ""}<td colspan="2"></td></tr></tfoot></table></div>`;
   let cur = ""; h += "<div>";
   list.forEach(b => {

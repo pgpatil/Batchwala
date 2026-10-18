@@ -2,6 +2,7 @@
 import * as ev from "./events.js";
 import * as M from "./model.js";
 import * as R from "./roles.js";
+import { asLines, layoutSwitch } from "./table.js";
 import { S, A, V, H, render, guard, saveOrder, payOrders, reversePayments, logoHtml, toran, chipBar, searchBox, matchQ, band, payTag, chanTag, noLabel } from "./core.js";
 import { $, esc, rs, rs2, num, uid, today, addDays, dObj, dLabel, dLong, plate, cmpFlat, ICON, copyText, waHref } from "./util.js";
 import { ui, toast, openSheet, closeSheet, ask, yesNo } from "./ui.js";
@@ -105,11 +106,11 @@ V.orders = () => {
   const list = group.filter(o => !tagF || o.tag === tagF).filter(o => !chanF || o.channel === chanF).filter(o => matchQ("orders", o))
     .sort((a, b) => S.filter.orders === "past" ? (a.date < b.date ? 1 : a.date > b.date ? -1 : cmpFlat(a, b)) : (a.date < b.date ? -1 : a.date > b.date ? 1 : cmpFlat(a, b)));
   let h = band("Orders", R.can("export") ? `<button class="pillbtn" data-act="export">${ICON.dl}Excel</button>` : "");
-  h += `<div class="tools">${searchBox("orders", "Search name, flat, phone or #")}${chipBar("orders", [["upcoming", "Upcoming", all.filter(g.upcoming).length], ["past", "Past", all.filter(g.past).length], ["cancelled", "Cancelled", all.filter(g.cancelled).length], ["all", "All", all.length]])}</div>`;
+  h += `<div class="tools">${searchBox("orders", "Search name, flat, phone or #")}${layoutSwitch("orders")}${chipBar("orders", [["upcoming", "Upcoming", all.filter(g.upcoming).length], ["past", "Past", all.filter(g.past).length], ["cancelled", "Cancelled", all.filter(g.cancelled).length], ["all", "All", all.length]])}</div>`;
   if (chans.length > 1) h += `<div class="tools" style="padding-top:2px"><div class="chips scroll"><button class="chip" data-chanf="" aria-pressed="${!chanF}">All channels</button>${chans.map(k => `<button class="chip" data-chanf="${esc(k)}" aria-pressed="${chanF === k}">${esc(M.CHANNELS[k] || k)}<span class="n">${group.filter(o => o.channel === k).length}</span></button>`).join("")}</div></div>`;
   if (tags.length) h += `<div class="tools" style="padding-top:2px"><div class="chips"><button class="chip" data-tagf="" aria-pressed="${!tagF}">All occasions</button>${tags.map(x => `<button class="chip" data-tagf="${esc(x)}" aria-pressed="${tagF === x}">${esc(x)}</button>`).join("")}</div></div>`;
   if (!list.length) return h + `<div class="empty"><strong>No orders here</strong>${all.length ? "Try another filter or search." : "Tap New order to take your first one."}</div>`;
-  if (S.wide) return h + ordersTable(list);
+  if (asLines("orders")) return h + ordersTable(list);
   let cur = ""; h += "<div>";
   list.forEach(o => {
     if (o.date !== cur) { if (cur) h += "</ul>"; cur = o.date; const d = list.filter(x => x.date === cur); h += `<div class="sect">${esc(dLong(cur))}${cur === t ? " · Today" : ""}<span>${d.length} orders${R.can("money") ? " · " + rs(d.reduce((s, x) => s + M.total(x), 0)) : ""}</span></div><ul class="list" style="padding-top:0">`; }
@@ -123,7 +124,7 @@ const statusTag = o => o.status === "cancelled" ? `<span class="tag t-due">Cance
 function ordersTable(list) {
   const money = R.can("money"); const live = list.filter(o => o.status !== "cancelled");
   return `<div class="card tablecard"><table class="reg"><thead><tr><th>#</th><th>Date</th><th>Customer</th><th>Channel</th><th>Items</th><th class="r">Pcs</th>${money ? `<th class="r">Total</th><th class="r">Due</th><th>Payment</th>` : ""}<th>Status</th></tr></thead>
-  <tbody>${list.map(o => `<tr data-open="${esc(o.id)}" tabindex="0"><td>${noLabel(o)}</td><td>${esc(dLong(o.date))}</td><td><b>${esc(o.customer || M.CHANNELS[o.channel])}</b>${o.flat ? ` <small class="mut">${esc(o.flat)}</small>` : ""}${o.tag ? ` <span class="tag t-camp">${esc(o.tag)}</span>` : ""}</td><td>${esc(M.chanLabel(o))}</td>
+  <tbody>${list.map(o => `<tr data-open="${esc(o.id)}" tabindex="0"><td>${noLabel(o)}</td><td data-v="${esc(o.date)}">${esc(dLong(o.date))}</td><td><b>${esc(o.customer || M.CHANNELS[o.channel])}</b>${o.flat ? ` <small class="mut">${esc(o.flat)}</small>` : ""}${o.tag ? ` <span class="tag t-camp">${esc(o.tag)}</span>` : ""}</td><td>${esc(M.chanLabel(o))}</td>
     <td class="items">${o.items.map(i => esc(i.item) + " ×" + i.qty).join(", ")}</td><td class="r">${M.pcs(o)}</td>${money ? `<td class="r">${rs(M.total(o))}</td><td class="r">${M.bal(o) ? `<span class="due">${rs(M.bal(o))}</span>` : "–"}</td><td>${o.status === "cancelled" ? "" : payTag(o)} ${billTag(o)}</td>` : ""}<td>${statusTag(o)}</td></tr>`).join("")}</tbody>
   <tfoot><tr><td colspan="5">${list.length} order${list.length === 1 ? "" : "s"}${live.length < list.length ? ` · ${list.length - live.length} cancelled` : ""}</td><td class="r">${live.reduce((s, o) => s + M.pcs(o), 0)}</td>${money ? `<td class="r">${rs(live.reduce((s, o) => s + M.total(o), 0))}</td><td class="r">${rs(live.reduce((s, o) => s + M.bal(o), 0))}</td><td></td>` : ""}<td></td></tr></tfoot></table></div>`;
 }

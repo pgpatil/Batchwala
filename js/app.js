@@ -10,6 +10,8 @@ import "./inventory.js";
 import "./batches.js";
 import "./pos.js";
 import "./bom.js";
+import "./plan.js";
+import { enhance } from "./table.js";
 import "./erp.js";
 import "./help.js";
 import "./data.js";
@@ -17,11 +19,17 @@ import { waSheet } from "./ops.js";
 import { setupView, resumeSync, dailyReport } from "./admin.js";
 import { APP_NAME } from "./config.js";
 import { $, esc, ICON } from "./util.js";
-import { ui, toast, closeSheet, yesNo } from "./ui.js";
+import { ui, toast, closeSheet, yesNo, focusKey, refocus } from "./ui.js";
 
-const TAB = { help: ["Help", ICON.help], data: ["Import & export", ICON.dl], pos: ["Counter", ICON.cart], bom: ["BOM", ICON.tree], prod: ["Production", ICON.oven], grn: ["Purchases (GRN)", ICON.inbox], xfer: ["Transfers", ICON.truck], fg: ["Finished goods", ICON.batch], today: ["Today", ICON.today], orders: ["Orders", ICON.orders], pay: ["Payments", ICON.pay], stock: ["Inventory", ICON.stock], bake: ["Bake board", ICON.oven], batches: ["Batches", ICON.batch], run: ["Delivery run", ICON.run], more: ["More", ICON.more] };
-const SHORT = { bake: "Bake", run: "My run", grn: "GRN", fg: "FG stock", prod: "Make" };   // bottom-bar labels on phones
+const TAB = { help: ["Help", ICON.help], data: ["Import & export", ICON.dl], pos: ["Counter", ICON.cart], bom: ["BOM", ICON.tree], plan: ["Planning", ICON.plan], prod: ["Production", ICON.oven], grn: ["Purchases (GRN)", ICON.inbox], xfer: ["Transfers", ICON.truck], fg: ["Finished goods", ICON.batch], today: ["Today", ICON.today], orders: ["Orders", ICON.orders], pay: ["Payments", ICON.pay], stock: ["Inventory", ICON.stock], bake: ["Bake board", ICON.oven], batches: ["Batches", ICON.batch], run: ["Delivery run", ICON.run], more: ["More", ICON.more] };
+const SHORT = { plan: "Plan", bake: "Bake", run: "My run", grn: "GRN", fg: "FG stock", prod: "Make" };   // bottom-bar labels on phones
 const ORDER = ["pos", "today", "orders", "bake", "prod", "grn", "stock", "xfer", "fg", "batches", "bom", "run", "pay", "more"];
+// Screens grouped into buckets: one bottom-bar button per bucket on phones, a strip of its screens on top of each page, sections in the sidebar.
+const BUCKETS = { orders: ["Orders", ICON.orders, ["today", "orders", "run", "pay"]], make: ["Make", ICON.oven, ["plan", "prod", "bake", "batches", "bom"]], stores: ["Stores", ICON.store, ["grn", "stock", "xfer", "fg"]] };
+const bucketOf = v => Object.keys(BUCKETS).find(k => BUCKETS[k][2].includes(v));
+const inBucket = k => BUCKETS[k][2].filter(v => allowedViews().includes(v));
+const onBar = v => R.bar().includes(v) || R.bar().includes("@" + bucketOf(v));
+H.onBar = onBar;
 // Screens a role may open in the current mode, from its permissions; its phone tabs are a subset.
 // Classic (nobody has ERP) shows restaurant and production screens together, as before.
 function allowedViews() {
@@ -29,7 +37,7 @@ function allowedViews() {
   if (rest) { if (c("sale")) t.push("pos"); if (c("deliver") && t.includes("today")) t.push("run"); if (t.includes("today") || c("bake.record")) t.push("bake"); }
   if (erp) {
     if (c("bake.record") || c("orders.edit")) t.push("batches");
-    if (c("bake.record") || c("menu.edit") || c("stock.edit") || c("reports")) t.push("bom");
+    if (c("bake.record") || c("menu.edit") || c("stock.edit") || c("reports")) t.push("bom", "plan");
     if (c("stock.buy") || c("stock.count")) t.push("stock");
     if (md === "erp") { if (c("bake.record") || c("orders.edit")) t.push("prod"); if (c("stock.buy")) t.push("grn"); if (c("transfer")) t.push("xfer"); t.push("fg"); }
   }
@@ -62,9 +70,16 @@ function navHtml() {
   const tabs = R.tabs(); const views = allowedViews(); const owe = R.can("money") ? M.customers().filter(c => c.balance > 0).length : 0; const low = H.lowCount ? H.lowCount() : 0;
   const c = M.config(); const me = R.me();
   const links = [["customers", ICON.people, "Customers", R.can("customers")], ["reports", ICON.chart, "Sales & profit", R.can("reports")], ["menu", ICON.menu, "Menu & recipes", R.can("menu.edit") || R.can("reports")], ["data", ICON.dl, "Import & export", R.can("export") || R.isAdmin()], ["help", ICON.help, "Help", true]].filter(x => x[3]);
-  const btn = t => `<button class="nb${tabs.includes(t) ? "" : " dx"}" data-view="${t}" aria-current="${S.view === t ? "page" : "false"}"><span class="dot">${TAB[t][1]}${t === "pay" && owe ? `<em>${owe}</em>` : ""}${t === "stock" && low ? `<em>${low}</em>` : ""}</span><span class="nl">${S.wide ? TAB[t][0] : SHORT[t] || TAB[t][0]}</span></button>`;
+  const badge = vs => `${vs.includes("pay") && owe ? `<em>${owe}</em>` : ""}${vs.includes("stock") && low ? `<em>${low}</em>` : ""}`;
+  const btn = (t, cls) => `<button class="nb ${cls}" data-view="${t}" aria-current="${S.view === t ? "page" : "false"}"><span class="dot">${TAB[t][1]}${badge([t])}</span><span class="nl">${cls === "dx" ? TAB[t][0] : SHORT[t] || TAB[t][0]}</span></button>`;
+  // Phone bar: a bucket with one screen is that screen; with several, it opens the one used last.
+  const bar = R.bar().map(t => { if (t[0] !== "@") return views.includes(t) || t === "more" ? btn(t, "mx") : ""; const k = t.slice(1); const vs = inBucket(k); if (!vs.length) return ""; if (vs.length === 1) return btn(vs[0], "mx");
+    const go = vs.includes(S.lastIn[k]) ? S.lastIn[k] : vs[0];
+    return `<button class="nb mx" data-view="${go}" aria-current="${vs.includes(S.view) ? "page" : "false"}"><span class="dot">${BUCKETS[k][1]}${badge(vs)}</span><span class="nl">${BUCKETS[k][0]}</span></button>`; }).filter(Boolean);
+  const loose = ORDER.filter(v => views.includes(v) && !bucketOf(v) && v !== "more");
+  const side = loose.map(v => btn(v, "dx")).join("") + Object.keys(BUCKETS).map(k => { const vs = inBucket(k); return vs.length ? `<div class="nav-sep dx">${BUCKETS[k][0]}</div>` + vs.map(v => btn(v, "dx")).join("") : ""; }).join("");
   return `<div class="nav-brand">${logoHtml(c)}<div><b>${esc(c.business)}</b><small>${esc(me.name + " · " + R.ROLES[me.role].label)}</small></div></div><div class="nav-sw dx">${switchersHtml()}</div>
-  <div class="nav-in" style="grid-template-columns:repeat(${tabs.length},1fr)">${ORDER.filter(v => views.includes(v)).map(btn).join("")}
+  <div class="nav-in" style="grid-template-columns:repeat(${bar.length},1fr)">${bar.join("")}${side}${views.includes("more") || tabs.includes("more") ? btn("more", "dx") : ""}
   ${links.length ? `<div class="nav-sep dx">Records</div>${links.map(([a, ic, l]) => `<button class="nb dx" data-act="${a}"><span class="dot">${ic}</span><span class="nl">${l}</span></button>`).join("")}` : ""}</div>
   <p class="nav-keys dx">Keys: <kbd>N</kbd> new · <kbd>/</kbd> search</p>`;
 }
@@ -78,11 +93,20 @@ export function render() {
   $("#fab").style.display = fabOn ? "" : "none";
   $("#fab").innerHTML = `${ICON.plus}${v === "grn" || (v === "stock" && R.mode() === "erp") ? "New GRN" : v === "stock" ? "Add stock" : v === "xfer" ? "New transfer" : "New order"}`;
   $("#nav").innerHTML = navHtml();
-  const a = document.activeElement; const sk = a && a.dataset && a.dataset.search; const pos = sk ? a.selectionStart : 0;
+  const fk = focusKey($("#main"));
   const sx = $("#days") ? $("#days").scrollLeft : null;
-  const back = !R.tabs().includes(v) ? `<button class="backbar" data-go="${R.home()}">${ICON.back}Back to ${SHORT[R.home()] || TAB[R.home()][0]}</button>` : "";
+  const bk = bucketOf(v); if (bk) S.lastIn[bk] = v; const sibs = bk ? inBucket(bk) : [];
+  const back = sibs.length > 1 ? `<nav class="bucketbar" aria-label="${BUCKETS[bk][0]}">${sibs.map(x => `<button data-view="${x}" aria-current="${x === v ? "page" : "false"}">${SHORT[x] || TAB[x][0]}</button>`).join("")}</nav>`
+    : !onBar(v) && !R.tabs().includes(v) ? `<button class="backbar" data-go="${R.home()}">${ICON.back}Back to ${SHORT[R.home()] || TAB[R.home()][0]}</button>` : "";
+  // A redraw of the same page keeps open cards and the place in inner scrolling panes (ticket, chip rows, wide tables).
+  const same = S.lastView === v; S.lastView = v; const PANES = ".pos-ticket, .chips.scroll, .tablecard";
+  const opened = same ? [...document.querySelectorAll("#main details[open][id]")].map(d => d.id) : [];
+  const panes = same ? [...document.querySelectorAll("#main " + PANES.split(", ").join(", #main "))].map(e => [e.scrollTop, e.scrollLeft]) : [];
   $("#main").innerHTML = back + (V[v] ? V[v]() : "");
-  if (sk) { const el = document.querySelector(`[data-search="${sk}"]`); if (el) { el.focus(); el.setSelectionRange(pos, pos); } }
+  opened.forEach(id => { const d = document.getElementById(id); if (d) d.open = true; });
+  enhance($("#main"), v);
+  if (panes.length) document.querySelectorAll("#main " + PANES.split(", ").join(", #main ")).forEach((e, i) => { if (panes[i]) [e.scrollTop, e.scrollLeft] = panes[i]; });
+  if (fk) refocus($("#main"), fk);
   const days = $("#days");
   if (days) { if (sx != null && !S.center) days.scrollLeft = sx; else { const sel = days.querySelector('[aria-pressed="true"]'); if (sel) days.scrollLeft = sel.offsetLeft - days.clientWidth / 2 + sel.offsetWidth / 2; } S.center = false; }
 }
@@ -98,7 +122,7 @@ document.addEventListener("click", async e => {
   // Date inputs styled as chips are invisible; desktop browsers only open their picker from the calendar icon, so open it explicitly.
   const dl = T.closest && T.closest("label"); const di = T.matches && T.matches('input[type="date"]') ? T : dl && dl.querySelector('input[type="date"]');
   if (di && di.showPicker && e.isTrusted) { try { di.showPicker(); } catch (_) {} if (T !== di) e.preventDefault(); }
-  const nb = T.closest(".nb[data-view]"); if (nb) { S.view = nb.dataset.view; if (S.view === "today") S.center = true; render(); window.scrollTo({ top: 0 }); return; }
+  const nb = T.closest(".nb[data-view], .bucketbar [data-view]"); if (nb) { S.view = nb.dataset.view; if (S.view === "today") S.center = true; render(); window.scrollTo({ top: 0 }); return; }
   const go = T.closest("[data-go]"); if (go) { if (ui.sheet) closeSheet(); S.view = go.dataset.go; if (go.dataset.stockfilter) S.filter.stock = go.dataset.stockfilter; render(); window.scrollTo({ top: 0 }); return; }
   if (T.closest("#fab")) { H.fab && H.fab(); return; }
   if (T.closest("[data-close]")) { const st = ui.sheet;
@@ -129,7 +153,7 @@ document.addEventListener("change", async e => {
 document.addEventListener("keydown", e => {
   if (e.key === "Escape" && ui.sheet && !ui.confirmOpen) { const x = document.querySelector("[data-close]"); x ? x.click() : closeSheet(); return; }
   const T = e.target;
-  if (e.key === "Enter" && T.matches && T.matches("tr[data-open],tr[data-batch]")) { T.click(); return; }
+  if (e.key === "Enter" && T.matches && T.matches("tr[data-open],tr[data-batch],tr[data-ing],tr[data-grn],tr[data-xfer]")) { T.click(); return; }
   // Desktop shortcuts, only when nothing is being typed and no drawer or dialog is open
   if (!R.me() || ui.sheet || ui.confirmOpen || e.ctrlKey || e.metaKey || e.altKey || (T.closest && T.closest("input,textarea,select,[contenteditable]"))) return;
   if (e.key === "/") { const sb = document.querySelector("#main [data-search]"); if (sb) { e.preventDefault(); sb.focus(); } }

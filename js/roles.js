@@ -31,6 +31,10 @@ export const setMode = m => { modePick = m; };
 export function myModes() { const m = me(); if (!m) return ["restaurant"]; return m.role === "admin" && !Array.isArray(m.modes) ? ["restaurant", "erp"] : (m.modes && m.modes.length ? m.modes : ["restaurant"]); }
 const erpOn = () => ev.all("members").some(x => Array.isArray(x.modes) && x.modes.includes("erp"));
 export function mode() { if (!erpOn()) return "classic"; const mm = myModes(); return mm.includes(modePick) ? modePick : mm[0]; }
+// The phone's bottom bar: views, or "@bucket" for a group (Orders, Make, Stores) that opens its last-used screen.
+const BAR = { boss: { classic: ["pos", "@orders", "@make", "@stores", "more"], restaurant: ["pos", "@orders", "@make", "more"], erp: ["@make", "@stores", "more"] },
+  kitchen: { classic: ["@make", "@stores", "more"], restaurant: ["@make", "more"], erp: ["@make", "@stores", "more"] } };
+export const bar = () => { const r = role(); const b = BAR[["admin", "management", "manager"].includes(r) ? "boss" : r]; return b ? b[mode()] : tabs(); };
 export const tabs = () => (ROLES[role()] || ROLES.counter).tabs[mode()];
 export const home = () => (ROLES[role()] || ROLES.counter).home[mode()];
 export function matchEmail(email) { const e = String(email || "").toLowerCase(); return members().find(m => (m.email || "").toLowerCase() === e) || null; }

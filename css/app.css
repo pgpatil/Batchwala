@@ -466,3 +466,49 @@ kbd{font:inherit;font-size:11px;font-weight:800;border:1px solid var(--line);bor
 .ivclaude,.ivtext{margin-top:14px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:10px 14px}
 .ivclaude summary,.ivtext summary{font-weight:700;cursor:pointer}
 .ivtext pre{max-height:220px;overflow:auto;font-size:13px}
+
+/* ---------- v2.8: planning, buckets, batch cards ---------- */
+.stepin{width:52px;border:0;background:none;text-align:center;font:inherit;font-weight:800;color:var(--ink);padding:0}
+.stepin:focus{outline:2px solid var(--accent);border-radius:6px}
+.bucketbar{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;padding:10px 12px 0;background:var(--bg)}
+.bucketbar button{flex:0 0 auto;border:1px solid var(--line);background:var(--card);border-radius:999px;padding:7px 14px;font-weight:700;color:var(--muted)}
+.bucketbar button[aria-current="page"]{background:var(--ink);border-color:var(--ink);color:var(--bg)}
+.datechip{position:relative;cursor:pointer;display:inline-flex;align-items:center}
+.datechip input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%}
+.plan tr.grp td{background:var(--surface);font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+.plan .rate{width:72px}
+.plan .cardform{padding:12px 14px}
+.bcard{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px;margin:10px 0}
+.bc-head{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;border-bottom:2px solid var(--ink);padding-bottom:8px;margin-bottom:6px}
+.bc-head h3{margin:2px 0 0;font-size:19px}
+.bc-meta{display:flex;flex-direction:column;align-items:flex-end;font-size:13px;gap:2px}
+.bc-step h4{margin:12px 0 4px;font-size:15px}
+.bc-step table{width:100%;border-collapse:collapse}
+.bc-step td,.bc-step th{padding:6px 4px;border-bottom:1px solid var(--line);text-align:left;font-size:14px}
+.bc-step .num{text-align:right;white-space:nowrap}
+.bc-step .tick{width:60px;text-align:center;font-size:18px}
+.bc-sign{display:grid;grid-template-columns:repeat(3,1fr);gap:16px 10px;margin-top:22px;font-size:13px}
+.nmform{margin-top:10px;border:1px dashed var(--line);border-radius:14px;padding:10px 12px;background:var(--surface)}
+#printArea{display:none}
+@media print{
+  body.printing > *:not(#printArea){display:none !important}
+  body.printing #printArea{display:block;color:#000;font:13px/1.4 system-ui,sans-serif}
+  #printArea .bcard{border:0;padding:0}
+  #printArea .tag{border:0;padding:0;font-size:10px;color:#555;background:none}
+  #printArea .shortrow td{background:none}
+}
+@media (min-width:1024px){
+  .nav .nb.mx{display:none}
+  .bucketbar{display:none}
+}
+/* sortable, filterable tables; grid / lines switch */
+th[data-tsort]{cursor:pointer;user-select:none;white-space:nowrap}
+th[data-tsort]::after{content:"↕";opacity:.3;margin-left:4px;font-size:.85em}
+th[aria-sort="ascending"]::after{content:"↑";opacity:1}
+th[aria-sort="descending"]::after{content:"↓";opacity:1}
+tr.tfilter th{padding:2px 4px 6px;background:none}
+tr.tfilter input{width:100%;min-width:52px;border:1px solid var(--line);border-radius:8px;padding:4px 6px;font:inherit;font-size:12.5px;font-weight:500;background:var(--bg);color:var(--ink)}
+.tshown:empty{display:none}
+.tshown{margin:6px 4px 0}
+.tools .layoutsw{display:inline-flex;width:auto;flex:0 0 auto}
+.layoutsw button{padding:6px 12px}

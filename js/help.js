@@ -12,6 +12,7 @@ const TOPICS = [
     <li>Add your <b>menu</b> (Menu & recipes) and <b>materials</b> (Inventory), or load them in one go from <b>Import & export</b> using the templates.</li>
     <li>Give each item a <b>BOM</b> so batches take stock and show cost.</li>
     <li>Add your team in <b>Users & roles</b>.</li></ol>
+    <p><b>Finding screens</b>: on a phone the bottom bar groups screens into <b>Orders</b> (Today, Orders, Delivery run, Payments), <b>Make</b> (Planning, Production or Bake board, Batches, BOM) and <b>Stores</b> (GRNs, Inventory, Transfers, Finished goods). Each opens the screen used last, with the others in a strip at the top. On a computer the sidebar lists them under the same headings.</p>
     <p>Install it: in Chrome, menu → <i>Install app</i>; on iPhone, Share → <i>Add to Home Screen</i>.</p>` },
   { id: "modes", title: "Roles, modes and locations", tags: "admin management manager kitchen delivery counter restaurant erp toggle switch location outlet", body: `
     <p>Each person has a <b>role</b> that decides what they can do, and the admin decides whether they use <b>Restaurant</b>, <b>ERP</b> or <b>both</b>.</p>
@@ -55,20 +56,29 @@ const TOPICS = [
     <p><b>Outlet board (Restaurant mode with ERP)</b>: what is on hand at this outlet, pre-orders still to hand over, kept-ready levels, what is short, and what is on the way from the kitchen. <b>Receive</b> confirms a delivery; <b>Ask kitchen</b> copies a message listing what’s short.</p>` },
   { id: "prod", view: "prod", title: "Production", tags: "production kitchen to bake need outlets erp send", body: `
     <p>The ERP home for a kitchen. For the chosen day it shows, per item, what each outlet is short of (pre-orders plus kept-ready levels, minus what it holds and what is already on the way), what is ready at the kitchen, and how many to bake.</p>
-    <p><b>Record a batch</b> uses those quantities. <b>Send to outlets</b> opens a transfer suggested from each outlet’s shortfall. <b>Plan & explode</b> shows the materials needed.</p>` },
+    <p><b>Record a batch</b> uses those quantities. <b>Send to outlets</b> opens a transfer suggested from each outlet’s shortfall. <b>Planning</b> shows the semi-finished to make, the indent and batch cards.</p>` },
   { id: "batches", view: "batches", title: "Batches", tags: "batch record new batch prep runs spoiled undo cost per piece", body: `
     <p>Each bake is a numbered batch (e.g. PB-12, where P is the maker’s letter) with what was baked, any <b>prep runs</b> of semi-finished items (dough, filling), a note, who made it, the stock it used and made, and its cost.</p>
     <ol><li>Open <b>New batch</b> (Bake board, Production or here). Pieces are suggested from what’s needed; prep runs from what’s short.</li>
     <li>Adjust with − and +, add a note, <b>Save batch</b>. Stock is taken off by BOM at this location.</li>
     <li>Later, open the batch to <b>Record spoiled</b> pieces or edit the note.</li></ol>
     <p><b>Undo</b> reverses its stock moves and keeps it in the list marked undone. Cost per good piece = materials used, less the value of prep made, divided by pieces not spoiled.</p>` },
-  { id: "bom", view: "bom", title: "BOM and Plan & explode", tags: "bom bill of materials multilevel tree semi-finished recipe yield cost margin plan explode requirement buy list", body: `
+  { id: "bom", view: "bom", title: "BOM", tags: "bom bill of materials multilevel tree semi-finished recipe yield cost margin new material", body: `
     <p>A <b>BOM</b> lists what goes into one piece of a menu item: raw materials, packing and semi-finished items. A semi-finished item has its own recipe for one <b>run</b> and says how much a run makes, and can use other semi-finished items, so BOMs can be several levels deep.</p>
-    <ul><li><b>Finished items</b>: each item’s full tree with quantity and cost at every level, total cost and margin.</li>
-    <li><b>Semi-finished</b>: each prep item’s recipe and where it’s used.</li>
-    <li><b>Plan & explode</b>: for a day, the pieces to bake, the semi-finished runs to make (stock on hand used first) and the raw and packing materials needed, with what’s short and a buy list.</li></ul>
-    <p>Edit a menu item’s BOM in Menu & recipes; a semi-finished item’s recipe in its page in Inventory. A recipe that would use itself is refused.</p>
+    <ul><li><b>Finished items</b>: each item’s full tree with quantity and cost at every level, total cost and margin. <b>Edit BOM</b> opens the item.</li>
+    <li><b>Semi-finished</b>: each prep item’s recipe and where it’s used.</li></ul>
+    <p>In the BOM editor, <b>+ Add material</b> adds a line from inventory; <b>+ New material</b> creates a material that isn’t in inventory yet (name, type, unit) and adds it as a line, after checking for similar names. Price, supplier and reorder level can be filled in later in Inventory. A recipe that would use itself is refused.</p>
     <p><b>Upload BOM</b> (admin): load an Excel or CSV sheet with Parent, Component, Qty and Unit (Template gives the layout). Any component or parent not found in the app is asked about before saving: pick the inventory item it means (remembered for next time), add it as new, or skip those rows.</p>` },
+  { id: "plan", view: "plan", title: "Planning: what to make, indent and batch cards", tags: "planning plan production fg sfg semi-finished indent requisition store issue purchase batch card batch size scale print explode mrp", body: `
+    <p>Planning works out, for a day, everything the kitchen needs. Pick Today, Tomorrow or any date; the tabs follow the same plan.</p>
+    <ul><li><b>Finished goods</b>: the pieces to make. The suggestion is pre-orders plus kept-ready levels less what’s baked (in ERP: what the outlets need less what the kitchen holds). Type any quantity, or add an item, to plan your own; the plan is saved for everyone. <b>Back to the suggestion</b> drops your changes.</li>
+    <li><b>Semi-finished</b>: the dough, fillings and sauces needed for that plan, level by level, what’s in stock, and how much to make in whole recipe runs.</li>
+    <li><b>Indent</b>: every raw and packing material the plan needs, through every BOM level, grouped by category. <b>To buy</b> shows only the shortfall (a purchase indent); <b>Store issue</b> shows full quantities to hand to the kitchen. Share, copy or print it.</li>
+    <li><b>Batch card</b>: choose a product and type a batch size (pieces, or kg / L for semi-finished). Every ingredient is recalculated at once, step by step (semi-finished first) with a total. Choose whether semi-finished items are made in the batch or taken from stock. <b>Print card</b> gives a sheet with tick boxes and sign-offs; <b>Record this batch</b> opens New batch with these quantities.</li></ul>
+    <p>Example: 40 Pizza Pinwheels at 60 g dough each need 2.4 kg dough (1.6 runs of a 1.5 kg recipe), which needs 1.6 kg maida and 32 g yeast, plus onion, corn, sauce, oregano, cheese, chilli flakes and boxes for 40 pieces.</p>` },
+  { id: "views", title: "Grid or lines, sorting and filters", tags: "grid lines list table view layout sort filter column", body: `
+    <p>Orders, batches, inventory, production, GRNs and transfers have a <b>Grid · Lines</b> switch. Lines shows a table; the choice is kept on this device.</p>
+    <p>In any table, tap a column heading to sort (up, down, then off). Tables with more than a few rows have a filter box under each heading: type text to match, or compare numbers with <b>&gt;</b>, <b>&lt;</b>, <b>&gt;=</b>, <b>&lt;=</b> or <b>=</b> (for example “&gt; 2 kg” on On hand). “Showing x of y” says when rows are hidden.</p>` },
   { id: "shelf", title: "Shelf life and past-shelf-life pieces", tags: "shelf life expiry expired discard stale cookies 3 days month batch unsold", body: `
     <p>Each menu item has a shelf life in days, counting the day it was baked. If you don’t set one, cookies keep 30 days and everything else 3 days (Menu & recipes → item → Shelf life).</p>
     <p>The app follows each batch: delivered orders use up the oldest pieces first. When pieces of a batch are still unsold at the end of their shelf life, a <b>Past shelf life</b> prompt opens when the app opens, and again whenever it comes back after half an hour away, until every line is dealt with:</p>
