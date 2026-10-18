@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.11.0 — 18 Oct 2026
+- Requirement calculator (Planning): any mix of menu items and semi-finished, typed in or pulled from an order, worked out through every BOM level into semi-finished to make and raw and packing materials. Net of stock and open POs (what to buy) or full quantity; whole runs or exact quantities; a by-product breakdown when combining products; print, share, copy or draft purchase orders. Nothing is recorded
+- Batch card: one compact table per step (semi-finished made in the batch marked "from step n", stock shown on screen); the repeated "all materials" list is gone (a short list of materials used in more than one step remains on screen); the printed card is tightly spaced on a white page and the PDF is named after the card
+
 ## 2.10.0 — 18 Oct 2026
 - Editing locks: opening a saved order, menu item, material, PO, work order, transfer receipt, batch, person or the business settings locks it for everyone else until it's saved or closed. Others see who is editing and since when (and a 🔒 line on the record's page); the admin can take over. Locks lapse 8 minutes after the editor's app goes quiet. Because devices sync about once a minute, saving also checks whether someone else saved the record after it was opened and asks before overwriting
 - Day book in Tally's shape: Sales, Receipt, Purchase and Payment vouchers with ledger entries (party, sales/purchase, CGST/SGST per rate, round off, cash/bank), a Day Book view, Tally XML for ledgers (Sundry Debtors/Creditors with GSTIN, account ledgers) and for vouchers, and an Excel copy in Day Book columns. Ledger names are set once to match the Tally company

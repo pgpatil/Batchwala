@@ -154,8 +154,8 @@ async function complete(st) {
 /* ---------- printing ---------- */
 function printWo(id) {
   const w = ev.get("wos", id); const ings = M.ingMap(); const { use } = stdUse(w.lines, w.prep || []); const issued = w.issued || {};
-  printHtml(`Work order ${w.no} · ${dLong(w.date)}`, `<div class="bcard"><div class="bc-step"><h4>Make</h4><table><tbody>${w.lines.filter(l => l.qty > 0).map(l => `<tr><td>${esc(l.item)}</td><td class="num">${l.qty}</td><td class="tick">Made ____</td></tr>`).join("")}
-    ${(w.prep || []).filter(p => p.runs > 0).map(p => `<tr><td>${esc((ings[p.ingId] || {}).name || "?")}</td><td class="num">${runsTxt(p.runs)}</td><td class="tick">☐</td></tr>`).join("")}</tbody></table></div>
+  printHtml(`Work order ${w.no} · ${dLong(w.date)}`, `<div class="bcard"><div class="bc-step"><h4>Make</h4><table><tbody>${w.lines.filter(l => l.qty > 0).map(l => `<tr><td>${esc(l.item)}</td><td class="num">${l.qty}</td><td class="chk">Made ____</td></tr>`).join("")}
+    ${(w.prep || []).filter(p => p.runs > 0).map(p => `<tr><td>${esc((ings[p.ingId] || {}).name || "?")}</td><td class="num">${runsTxt(p.runs)}</td><td class="chk">☐</td></tr>`).join("")}</tbody></table></div>
     <div class="bc-step"><h4>Materials from the store</h4><table><thead><tr><th>Material</th><th class="num">Standard</th><th class="num">Issued</th><th class="num">Returned</th></tr></thead><tbody>${Object.keys(use).filter(x => ings[x]).map(x => `<tr><td>${esc(ings[x].name)}</td><td class="num">${qty(use[x], ings[x].unit)}</td><td class="num">${issued[x] ? qty(issued[x], ings[x].unit) : "______"}</td><td class="num">______</td></tr>`).join("")}</tbody></table></div>
     <div class="bc-sign"><span>Issued by ________</span><span>Received by ________</span><span>Start __:__</span><span>End __:__</span><span>Checked by ________</span></div></div>`);
 }

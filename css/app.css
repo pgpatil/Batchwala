@@ -486,7 +486,7 @@ kbd{font:inherit;font-size:11px;font-weight:800;border:1px solid var(--line);bor
 .bc-step table{width:100%;border-collapse:collapse}
 .bc-step td,.bc-step th{padding:6px 4px;border-bottom:1px solid var(--line);text-align:left;font-size:14px}
 .bc-step .num{text-align:right;white-space:nowrap}
-.bc-step .tick{width:60px;text-align:center;font-size:18px}
+.bc-step .chk{width:60px;text-align:center;font-size:18px}
 .bc-sign{display:grid;grid-template-columns:repeat(3,1fr);gap:16px 10px;margin-top:22px;font-size:13px}
 .nmform{margin-top:10px;border:1px dashed var(--line);border-radius:14px;padding:10px 12px;background:var(--surface)}
 #printArea{display:none}
@@ -536,3 +536,20 @@ table.cards tfoot td{border:0;padding:0}
 table.cards tfoot td:empty{display:none}
 .tablecard:has(table.cards){background:none;border:0;box-shadow:none;overflow:visible}
 table.reg td:not(.items){white-space:nowrap}
+/* batch card: compact, and tighter still in print */
+.bc-step table td{padding:4px 4px}
+.bc-step details summary,.bcard details summary{cursor:pointer;font-weight:700;font-size:14px;margin-top:10px}
+.bc-meta{gap:2px}
+@media print{
+  #printArea .bcard.tight{font-size:11.5px;line-height:1.25}
+  #printArea .bcard.tight .bc-head{padding-bottom:4px;margin-bottom:2px;border-bottom-width:1.5px}
+  #printArea .bcard.tight .bc-head h3{font-size:15px;margin:0}
+  #printArea .bcard.tight .bc-step h4{font-size:12.5px;margin:7px 0 1px}
+  #printArea .bcard.tight .bc-step td{padding:1.5px 3px;font-size:11.5px;border-bottom:.5px solid #ccc}
+  #printArea .bcard.tight .bc-step .chk{width:22px;font-size:12px}
+  #printArea .bcard.tight .bc-sign{grid-template-columns:repeat(6,auto);gap:4px 10px;margin-top:10px;font-size:10.5px}
+  #printArea h2{font-size:14px;margin:0 0 6px}
+  @page{margin:10mm}
+}
+@media print{ html,body.printing{background:#fff !important} #printArea{background:#fff} #printArea .bc-step td.chk{width:22px;text-align:center} }
+@media print{ #printArea tr.tfilter,#printArea .tshown,#printArea .layoutsw{display:none !important} #printArea th[data-tsort]::after{content:none} #printArea .card{border:0;box-shadow:none;margin:0 0 8px;padding:0} #printArea .card h3{font-size:13px;margin:6px 0 2px;padding:0} #printArea .card td,#printArea .card th{padding:1.5px 4px;font-size:11.5px} }

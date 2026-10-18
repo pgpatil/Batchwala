@@ -169,16 +169,18 @@ export function batchNeed(lines, prep = []) {
 }
 // Planning across every BOM level: semi-finished on hand is used first; only the shortfall is made, in whole recipe runs, and exploded further.
 // Each material is settled after all its parents (by its deepest level), so runs are counted once.
-export function explode(lines, loc = null) {
-  const ings = ingMap(); const sm = stockMap(loc); const gross = {}; const make = {}; const unknown = [];
+// opts.extra: { [semi-finished id]: base units } wanted directly. opts.ignoreStock: work out the full quantity, not net of stock.
+// opts.exact: semi-finished in the exact quantity needed rather than whole recipe runs.
+export function explode(lines, loc = null, opts = {}) {
+  const ings = ingMap(); const sm = stockMap(loc); const avail = opts.ignoreStock ? {} : sm; const gross = { ...(opts.extra || {}) }; const make = {}; const unknown = [];
   lines.forEach(l => { const m = menuByName(l.item); if (!m || !(m.recipe || []).length) { if (l.qty) unknown.push(l.item); return; }
     m.recipe.forEach(r => { gross[r.ingId] = (gross[r.ingId] || 0) + (+r.qty || 0) * l.qty; }); });
   const lvl = {}; const walk = (id, d, path) => { if (path.has(id) || d > 12) return; lvl[id] = Math.max(lvl[id] || 0, d); const i = ings[id];
     if (i && i.type === "sf") (i.recipe || []).forEach(r => walk(r.ingId, d + 1, new Set(path).add(id))); };
   Object.keys(gross).forEach(id => walk(id, 0, new Set()));
   Object.keys(lvl).sort((a, b) => lvl[a] - lvl[b]).forEach(id => { const i = ings[id]; const q = gross[id] || 0;
-    if (!i || i.type !== "sf" || q <= 0 || !(+i.yield > 0)) return; const short = q - Math.max(0, sm[id] || 0); if (short <= 0) return;
-    const runs = Math.ceil(short / i.yield); make[id] = runs; (i.recipe || []).forEach(r => { gross[r.ingId] = (gross[r.ingId] || 0) + (+r.qty || 0) * runs; }); });
+    if (!i || i.type !== "sf" || q <= 0 || !(+i.yield > 0)) return; const short = q - Math.max(0, avail[id] || 0); if (short <= 1e-9) return;
+    const runs = opts.exact ? short / i.yield : Math.ceil(short / i.yield - 1e-9); make[id] = runs; (i.recipe || []).forEach(r => { gross[r.ingId] = (gross[r.ingId] || 0) + (+r.qty || 0) * runs; }); });
   return { need: gross, make, level: lvl, unknown: [...new Set(unknown)], onHand: sm };
 }
 // A saved production plan for a date and kitchen: { id, date, loc, lines: [{ item, qty }] }. Without one, planning starts from the suggestion.
