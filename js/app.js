@@ -21,7 +21,7 @@ import "./data.js";
 import { waSheet } from "./ops.js";
 import { setupView, resumeSync, dailyReport } from "./admin.js";
 import { APP_NAME } from "./config.js";
-import { $, esc, ICON } from "./util.js";
+import { $, esc, ICON, today } from "./util.js";
 import { ui, toast, closeSheet, yesNo, focusKey, refocus } from "./ui.js";
 
 const TAB = { help: ["Help", ICON.help], data: ["Import & export", ICON.dl], pos: ["Counter", ICON.cart], bom: ["BOM", ICON.tree], plan: ["Planning", ICON.plan], wo: ["Work orders", ICON.oven], po: ["Purchase orders", ICON.orders], sup: ["Suppliers & payables", ICON.people], insights: ["Cost & stock reports", ICON.chart], prod: ["Production", ICON.oven], grn: ["Purchases (GRN)", ICON.inbox], xfer: ["Transfers", ICON.truck], fg: ["Finished goods", ICON.batch], today: ["Today", ICON.today], orders: ["Orders", ICON.orders], pay: ["Payments", ICON.pay], stock: ["Inventory", ICON.stock], bake: ["Bake board", ICON.oven], batches: ["Batches", ICON.batch], run: ["Delivery run", ICON.run], more: ["More", ICON.more] };
@@ -87,7 +87,10 @@ function navHtml() {
   ${links.length ? `<div class="nav-sep dx">Records</div>${links.map(([a, ic, l]) => `<button class="nb dx" data-act="${a}"><span class="dot">${ic}</span><span class="nl">${l}</span></button>`).join("")}` : ""}</div>
   <p class="nav-keys dx">Keys: <kbd>N</kbd> new · <kbd>/</kbd> search</p>`;
 }
+let dayOpen = today();
 export function render() {
+  // Left open past midnight: screens still on "today" move to the new day.
+  if (today() !== dayOpen) { if (S.date === dayOpen) { S.date = today(); S.center = true; } dayOpen = today(); }
   applyTheme();
   if (!R.me()) { $("#nav").style.display = "none"; $("#fab").style.display = "none"; $("#main").innerHTML = setupView(); return; }
   $("#nav").style.display = "";
@@ -171,7 +174,7 @@ $("#scrim").addEventListener("click", () => { const x = document.querySelector("
   await R.loadMe(); R.setMode(await ev.getMeta("mode")); M.setHere(await ev.getMeta("here") || (R.me() || {}).loc || null);
   ev.setActor(() => (R.me() || {}).id || "setup");
   if (R.me()) S.view = R.home();
-  ev.onChange(() => { if (ui.sheet && ui.sheet.redraw && !["compose", "waConfirm", "settings", "member", "ingEdit", "item", "move", "bake", "part", "batchSpoil", "grn", "xfer", "fgAdj", "xferRecv", "imp", "invin", "expiry"].includes(ui.sheet.kind)) rerenderSheet(); render(); });
+  ev.onChange(() => { if (ui.sheet && ui.sheet.redraw && !["compose", "waConfirm", "settings", "member", "ingEdit", "item", "move", "bake", "part", "batchSpoil", "grn", "xfer", "fgAdj", "xferRecv", "imp", "invin", "expiry", "poEdit", "woNew", "woIssue", "woDone", "spay", "sup"].includes(ui.sheet.kind)) rerenderSheet(); render(); });
   sync.onStatus(async st => {
     let joined = false;
     if (st.state === "ok" && !R.me()) { const a = sync.current(); const m = a && R.matchEmail(a.account); if (m) { await R.setMe(m.id); S.view = R.home(); joined = true; toast(`Welcome, ${m.name}`); } }

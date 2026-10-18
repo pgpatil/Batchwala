@@ -44,23 +44,25 @@ V.more = () => {
 export function setupView() {
   return `<div class="band"><div class="top"><div class="logo"><span class="mark">${APP_NAME[0]}</span></div><div class="biz"><div class="name">${APP_NAME}</div><div class="sub">Orders, bakes, deliveries and payments</div></div></div><div class="bandedge"></div></div>
   <div class="setup">
-    <div class="card pad"><h3 class="h">Start fresh on this phone</h3><p class="hint">You become the admin. You can load your existing orders from a backup file afterwards.</p>
+    ${R.members().length ? `<div class="card pad"><h3 class="h">This app already has a team</h3><p class="hint">Ask an admin to add you in Users & roles, then join with Google above.</p></div>` : `<div class="card pad"><h3 class="h">Start fresh on this phone</h3><p class="hint">You become the admin. You can load your existing orders from a backup file afterwards.</p>
       <label class="f" for="suName">Your name</label><input class="in" id="suName" placeholder="e.g. Pankaj" autocomplete="name">
       <label class="f" for="suBiz">Business name</label><input class="in" id="suBiz" placeholder="e.g. Neena’s Magic">
-      <button class="btn btn-primary" data-act="setupStart">Start</button></div>
+      <button class="btn btn-primary" data-act="setupStart">Start</button></div>`}
     <div class="card pad"><h3 class="h">Join with Google</h3><p class="hint">For a second phone once the admin has turned on cloud sync and shared the data folder with you.</p>
       ${GOOGLE_CLIENT_ID ? `<button class="btn btn-ghost" data-act="setupJoin">Sign in with Google</button>` : `<p class="hint">Not available until the Google client ID is set in <code>js/config.js</code> (see README).</p>`}</div>
     <div class="card pad"><h3 class="h">Restore a backup</h3><p class="hint">A backup file saved from this app, or from the earlier tracker.</p>
       <label class="btn btn-ghost" style="position:relative">Choose backup file<input type="file" accept="application/json,.json" id="suFile" style="position:absolute;inset:0;opacity:0"></label></div>
   </div>`;
 }
-const prefixFor = name => { const used = new Set(R.members().map(m => m.prefix)); const base = (name.trim()[0] || "X").toUpperCase(); if (!used.has(base)) return base; for (const ch of name.toUpperCase().replace(/[^A-Z]/g, "").slice(1)) if (!used.has(base + ch)) return base + ch; return base + (used.size + 1); };
+const prefixFor = name => { const used = new Set(R.members().map(m => m.prefix)); const base = (name.trim()[0] || "X").toUpperCase(); if (!used.has(base)) return base; for (const ch of name.toUpperCase().replace(/[^A-Z]/g, "").slice(1)) if (!used.has(base + ch)) return base + ch; for (const a of "ABCDEFGHIJKLMNOPQRSTUVWXYZ") for (const b of "ABCDEFGHIJKLMNOPQRSTUVWXYZ") if (!used.has(base + a + b)) return base + a + b; return base + "Z"; };
 async function createMember(name, role, email = "") { const m = { id: uid("u"), name: name.trim(), role, email: email.trim().toLowerCase(), prefix: prefixFor(name), pin: "" }; await ev.put("members", m); return m; }
 A.setupStart = async () => {
   const name = $("#suName").value.trim(), biz = $("#suBiz").value.trim();
   if (!name) { toast("Add your name"); $("#suName").focus(); return; }
+  // A device that already holds a team's data (synced or restored) must not start a new business over it.
+  if (R.members().length) { toast("This app already belongs to a team. Ask an admin to add you, then join with Google."); return; }
   const m = await createMember(name, "admin"); await R.setMe(m.id);
-  await ev.put("config", { ...M.DEFAULT_CONFIG, business: biz || "My Bakery", businessId: uid("b") });
+  if (!ev.get("config", "app")) await ev.put("config", { ...M.DEFAULT_CONFIG, business: biz || "My Bakery", businessId: uid("b") });
   S.view = R.home(); H.render(); toast("You’re the admin. Add your menu and materials first.");
 };
 A.setupJoin = async el => {
@@ -134,6 +136,8 @@ H.click.push(async T => {
   const mm = T.closest("[data-mmode]"); if (mm && st && st.kind === "member") { const k = mm.dataset.mmode; st.x.modes = k === "both" ? ["restaurant", "erp"] : [k]; document.querySelectorAll("[data-mmode]").forEach(b => b.setAttribute("aria-pressed", b.dataset.mmode === k)); return true; }
   const mr = T.closest("[data-mrole]"); if (mr && st && st.kind === "member") { st.x.role = mr.dataset.mrole; document.querySelectorAll("[data-mrole]").forEach(b => b.setAttribute("aria-pressed", b.dataset.mrole === st.x.role)); $("#mbNote").textContent = R.ROLES[st.x.role].note; return true; }
   const sw = T.closest("[data-switch]"); if (sw) { const m = ev.get("members", sw.dataset.switch);
+    // Switching into an admin or management login needs that person's PIN; without one set, only they can use it on their own phone.
+    if (["admin", "management"].includes(m.role) && !m.pin && m.id !== (R.me() || {}).id) { toast(`${m.name} has no PIN yet. They can set one in Users & roles to allow switching here.`); return true; }
     if (m.pin) { const v = await ask(`<p class="cq">PIN for ${esc(m.name)}</p><input class="in" id="pinIn" inputmode="numeric" maxlength="4" style="margin-top:12px;text-align:center;font-size:24px;letter-spacing:8px">`, [{ label: "Cancel", cls: "btn-ghost", value: false }, { label: "Unlock", cls: "btn-primary", value: true }], true);
       if (!v) return true; if (($("#pinIn") || {}).value !== m.pin) { toast("Wrong PIN"); return true; } }
     await R.setMe(m.id); R.setMode(null); await ev.setMeta("mode", null); if (m.loc) { M.setHere(m.loc); await ev.setMeta("here", m.loc); } S.view = R.home(); closeSheet(); toast(`Now using as ${m.name}`); return true; }
@@ -260,7 +264,8 @@ A.saveBackup = async () => { const data = { app: "batchwala", version: 2, export
 function aliasesFor(name) { const w = name.replace(/^[A-Z]\.\s*/, "").toLowerCase().replace(/[^a-z\s]/g, " ").replace(/\s+/g, " ").trim(); const parts = w.split(" "); const out = new Set([w]);
   if (parts[0] && parts[0].length >= 4) out.add(parts[0]); const last = parts.at(-1); if (last && last.length >= 4) out.add(last.endsWith("s") ? last.slice(0, -1) : last); if (parts.length >= 2) out.add(parts[0] + parts[1]); return [...out].join(", "); }
 export async function importFile(data) {
-  if (data && data.app === "batchwala" && Array.isArray(data.events)) return ev.ingest(data.events);
+  // Restored events keep the device they came from; the next sync publishes them, so other devices and a new folder get them too.
+  if (data && data.app === "batchwala" && Array.isArray(data.events)) { const n = await ev.ingest(data.events); await ev.setMeta("sync.publishForeign", true); sync.soon(); return n; }
   if (!data || !Array.isArray(data.records)) throw new Error("This isn’t a backup file from this app");
   let n = 0; const c = M.config();
   for (const r of data.records) {

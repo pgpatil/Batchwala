@@ -46,8 +46,9 @@ function partSheet(c, due) {
   <p class="hint">Applied to the oldest unpaid order first.</p><button class="btn btn-ok" data-act="savePart">Save payment</button>`);
 }
 A.savePart = async () => {
-  const st = ui.sheet; const amt = num($("#pAmt").value); if (!amt) { toast("Enter the amount received"); return; }
+  const st = ui.sheet; const amt = Math.round(num($("#pAmt").value) * 100) / 100; if (!(amt > 0)) { toast("Enter the amount received"); return; }
   const due = M.orders(false).filter(o => st.ids.includes(o.id)); const owe = due.reduce((s, o) => s + M.bal(o), 0); const c = due[0];
+  if (amt > owe + 0.005) { toast(`That’s more than the ${rs(owe)} owed. Record ${rs(owe)} and give back the change.`); return; }
   if (!await yesNo(`${plate(c.flat)}<p class="cq">Record ${rs(amt)}?</p><div class="cname">${esc(c.customer)}</div><div class="cdetail">${st.mode ? "Paid by " + esc(st.mode) + ". " : ""}Balance after this: ${rs(Math.max(0, owe - amt))}</div>`, "Yes, record", "btn-ok")) return;
   await payOrders(due, st.mode, amt); closeSheet(); toast(rs(amt) + " from " + c.customer + " recorded");
 };

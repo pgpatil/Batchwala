@@ -20,7 +20,7 @@ const td = (v, right, sort) => `<td${right ? ' class="r"' : ""}${sort != null ? 
 
 V.insights = () => {
   S.filter.ins = S.filter.ins || "cost"; S.filter.insp = S.filter.insp || "month"; const k = S.filter.ins; const [a, b] = range(S.filter.insp);
-  let h = band("Cost & stock reports", "", `<p class="bandnote">${esc(dLong(a === "0000" ? (M.orders()[M.orders().length - 1] || {}).date || today() : a))} – ${esc(dLong(b))}</p>`);
+  let h = band("Cost & stock reports", "", `<p class="bandnote">${esc(dLong(a === "0000" ? M.orders().map(o => o.date).sort()[0] || today() : a))} – ${esc(dLong(b))}</p>`);
   h += `<div class="tools">${chipBar("insp", Object.entries(PERIODS))}</div><div class="tools" style="padding-top:0">${layoutSwitch("insights")}${chipBar("ins", [["cost", "Food cost"], ["waste", "Wastage"], ["var", "Variance"], ["age", "Stock ageing"], ["buy", "Buying"], ["tax", "Tax"], ["book", "Day book"]])}</div>`;
   return h + (({ cost, waste, variance, age, buy, tax, book })[k === "var" ? "variance" : k] || cost)(a, b);
 };
@@ -102,11 +102,13 @@ function tax(a, b) {
 // Ledger names are set once to match the company in Tally; parties become Sundry Debtors / Sundry Creditors.
 export const TALLY = { company: "", sales: "Sales", purchase: "Purchase", outTax: "Output GST", inTax: "Input GST", cash: "Cash", bank: "Bank", roundOff: "Round Off", walkin: "Counter Sales" };
 const tcfg = () => ({ ...TALLY, ...(M.config().tally || {}) });
-const custLedger = o => o.channel === "walkin" || !o.customer ? tcfg().walkin : `${o.customer.trim()}${o.flat ? ` (${o.flat.trim()})` : ""}`;
+// A party named like one of the account ledgers ("Cash", "Sales") gets a suffix so it can't post into that ledger.
+const partyName = (n, tag) => { const c = tcfg(); const x = String(n || "").trim(); return Object.entries(c).some(([k, v]) => k !== "company" && String(v).toLowerCase() === x.toLowerCase()) ? `${x} (${tag})` : x; };
+const custLedger = o => o.channel === "walkin" || !o.customer ? tcfg().walkin : partyName(`${o.customer.trim()}${o.flat ? ` (${o.flat.trim()})` : ""}`, "customer");
 // Tax ledgers per rate, split into central and state halves when bills split them: "Output CGST 2.5%".
 function taxEntries(by, base, sign) { const t = M.taxCfg(); const out = [];
   Object.keys(by).sort((x, y) => x - y).forEach(r => { const v = r2(by[r]); if (!v) return; const nm = base.replace(/GST$/, "");
-    if (t.split) { const h = r2(v / 2); out.push({ ledger: `${nm}CGST ${+r / 2}%`, amt: sign * h }, { ledger: `${nm}SGST ${+r / 2}%`, amt: sign * r2(v - h) }); } else out.push({ ledger: `${base} ${+r}%`, amt: sign * v }); });
+    if (t.split) { const h = r2(v / 2); out.push({ ledger: `${nm}CGST ${+r / 2}%`, amt: sign * h, tax: 1 }, { ledger: `${nm}SGST ${+r / 2}%`, amt: sign * r2(v - h), tax: 1 }); } else out.push({ ledger: `${base} ${+r}%`, amt: sign * v, tax: 1 }); });
   return out; }
 // Each voucher: { date, type, no, party, narration, entries: [{ ledger, amt }] } with amt > 0 a debit and amt < 0 a credit; entries balance to zero.
 export function vouchers(a, b) {
@@ -115,16 +117,19 @@ export function vouchers(a, b) {
     const party = custLedger(o); const ent = [{ ledger: party, amt: total }, { ledger: c.sales, amt: -taxable }, ...taxEntries(x.by, c.outTax, -1)];
     const diff = r2(ent.reduce((s, e) => s + e.amt, 0)); if (diff) ent.push({ ledger: c.roundOff, amt: -diff });
     out.push({ date: o.date, type: "Sales", no: o.no, party, narration: `${M.chanLabel(o)} · ${o.items.map(i => i.item + " × " + i.qty).join(", ")}`, entries: ent }); });
-  ev.all("payments").filter(p => p.date >= a && p.date <= b && +p.amount).forEach(p => { const o = M.normOrder(ev.get("orders", p.orderId) || {}); const party = custLedger(o); const v = +p.amount;
+  // A payment whose order was deleted still belongs to its customer (kept on the payment); otherwise it goes to an unallocated ledger to sort out.
+  const custs = Object.fromEntries(M.customers(M.orders()).map(x => [x.key, x]));
+  ev.all("payments").filter(p => p.date >= a && p.date <= b && +p.amount).forEach(p => { const raw = ev.get("orders", p.orderId); const o = M.normOrder(raw || {}); const cu = !raw && custs[p.customerKey];
+    const party = raw ? custLedger(o) : cu ? custLedger({ customer: cu.customer, flat: cu.flat, channel: "whatsapp" }) : "Unallocated receipts"; const v = +p.amount;
     out.push({ date: p.date, type: "Receipt", no: "", party, narration: `Order #${o.no || "?"}${p.mode ? " · " + p.mode : ""}${v < 0 ? " · reversal" : ""}`, entries: [{ ledger: bankOf(p.mode), amt: v }, { ledger: party, amt: -v }] }); });
   const ings = M.ingMap();
   M.grns().filter(g => !g.void && g.date >= a && g.date <= b).forEach(g => { const rec = {}; let blocked = 0;
     g.lines.forEach(l => { const t = (+l.amount || 0) * (+l.taxPct || 0) / 100; if (!t) return; if (ings[l.ingId] && ings[l.ingId].taxInCost) blocked += t; else rec[l.taxPct] = (rec[l.taxPct] || 0) + t; });
-    const ent = [{ ledger: c.purchase, amt: r2((+g.amount || 0) + blocked) }, ...taxEntries(rec, c.inTax, 1), { ledger: g.supplier, amt: -(+g.total || 0) }];
+    const ent = [{ ledger: c.purchase, amt: r2((+g.amount || 0) + blocked) }, ...taxEntries(rec, c.inTax, 1), { ledger: partyName(g.supplier, "supplier"), amt: -(+g.total || 0) }];
     const diff = r2(ent.reduce((s, e) => s + e.amt, 0)); if (diff) ent.push({ ledger: c.roundOff, amt: -diff });
-    out.push({ date: g.date, type: "Purchase", no: g.invoiceNo || g.no, party: g.supplier, narration: `${g.no}${g.invoiceNo ? " · supplier invoice " + g.invoiceNo : ""}`, entries: ent }); });
+    out.push({ date: g.date, type: "Purchase", no: g.invoiceNo || g.no, party: partyName(g.supplier, "supplier"), narration: `${g.no}${g.invoiceNo ? " · supplier invoice " + g.invoiceNo : ""}`, entries: ent }); });
   M.spays().filter(p => p.date >= a && p.date <= b && +p.amount).forEach(p => { const v = +p.amount;
-    out.push({ date: p.date, type: "Payment", no: "", party: p.supplier, narration: [p.mode, p.ref].filter(Boolean).join(" ") + (v < 0 ? " · reversal" : ""), entries: [{ ledger: p.supplier, amt: v }, { ledger: bankOf(p.mode), amt: -v }] }); });
+    out.push({ date: p.date, type: "Payment", no: "", party: partyName(p.supplier, "supplier"), narration: [p.mode, p.ref].filter(Boolean).join(" ") + (v < 0 ? " · reversal" : ""), entries: [{ ledger: partyName(p.supplier, "supplier"), amt: v }, { ledger: bankOf(p.mode), amt: -v }] }); });
   return out.sort((x, y) => x.date < y.date ? -1 : x.date > y.date ? 1 : 0);
 }
 // Day Book columns as Tally shows them: the party under Particulars, its amount as debit or credit.
@@ -142,9 +147,9 @@ function vouchersXml(a, b) {
 function mastersXml(a, b) {
   const c = tcfg(); const vs = vouchers(a, b); const groups = new Map(); const set = (n, g, extra = "") => { if (n && !groups.has(n)) groups.set(n, [g, extra]); };
   set(c.sales, "Sales Accounts"); set(c.purchase, "Purchase Accounts"); set(c.cash, "Cash-in-Hand"); set(c.bank, "Bank Accounts"); set(c.roundOff, "Indirect Expenses");
-  vs.forEach(v => v.entries.forEach(e => { if (/GST|Tax/i.test(e.ledger) && e.ledger !== c.sales && e.ledger !== c.purchase) set(e.ledger, "Duties & Taxes"); }));
-  vs.filter(v => ["Sales", "Receipt"].includes(v.type)).forEach(v => set(v.party, "Sundry Debtors"));
-  vs.filter(v => ["Purchase", "Payment"].includes(v.type)).forEach(v => { const s = M.supplierByName(v.party) || {}; set(v.party, "Sundry Creditors", s.gstin ? `<PARTYGSTIN>${xe(s.gstin)}</PARTYGSTIN>` : ""); });
+  vs.filter(v => ["Purchase", "Payment"].includes(v.type)).forEach(v => { const s = M.supplierByName(v.party.replace(/ \(supplier\)$/, "")) || {}; set(v.party, "Sundry Creditors", s.gstin ? `<PARTYGSTIN>${xe(s.gstin)}</PARTYGSTIN>` : ""); });
+  vs.filter(v => ["Sales", "Receipt"].includes(v.type)).forEach(v => set(v.party, v.party === "Unallocated receipts" ? "Suspense A/c" : "Sundry Debtors"));
+  vs.forEach(v => v.entries.forEach(e => { if (e.tax) set(e.ledger, "Duties & Taxes"); }));
   return envelope("All Masters", [...groups].map(([n, [g, extra]]) => `   <TALLYMESSAGE xmlns:UDF="TallyUDF">\n    <LEDGER NAME="${xe(n)}" ACTION="Create">\n     <NAME.LIST><NAME>${xe(n)}</NAME></NAME.LIST>\n     <PARENT>${xe(g)}</PARENT>${["Sundry Debtors", "Sundry Creditors"].includes(g) ? "<ISBILLWISEON>No</ISBILLWISEON>" : ""}${extra}\n    </LEDGER>\n   </TALLYMESSAGE>\n`).join(""));
 }
 function saveText(name, text, type) { const blob = new Blob([text], { type }); const el = document.createElement("a"); el.href = URL.createObjectURL(blob); el.download = name; document.body.appendChild(el); el.click(); el.remove(); setTimeout(() => URL.revokeObjectURL(el.href), 2000); }
@@ -163,6 +168,7 @@ function book(a, b) {
 }
 H.click.push(async T => {
   const [a, b] = range(S.filter.insp || "month"); const tag = `${(M.config().business || "bakery").replace(/[^\w]+/g, "_")}_${a === "0000" ? "all" : a}_${b}`;
+  if (T.closest("[data-daybook],[data-tallyxml]") && !R.can("export")) { toast("Your role can’t export. Ask an admin."); return true; }
   if (T.closest("[data-daybook]")) { const rows = bookRows(a, b); download(`${tag}_daybook.csv`, rows); toast(`${rows.length - 1} vouchers downloaded`); return true; }
   const x = T.closest("[data-tallyxml]"); if (x) { const m = x.dataset.tallyxml === "masters"; saveText(`${tag}_tally_${m ? "ledgers" : "vouchers"}.xml`, m ? mastersXml(a, b) : vouchersXml(a, b), "application/xml"); toast(m ? "Ledgers XML downloaded" : `${vouchers(a, b).length} vouchers in XML`); return true; }
   if (T.closest("[data-tallysave]")) { if (!R.isAdmin()) return true; const t = { ...tcfg() }; document.querySelectorAll("[data-tally]").forEach(el => { t[el.dataset.tally] = el.value.trim() || TALLY[el.dataset.tally]; });

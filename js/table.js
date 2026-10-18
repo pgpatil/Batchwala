@@ -18,6 +18,8 @@ function test(c, f) {
 }
 function apply(t, st) {
   const body = t.tBodies[0]; const n = t.tHead.rows[0].cells.length; const rows = [...body.rows];
+  // State saved for a table that now has fewer columns (a toggle changed it) is dropped rather than read past the end.
+  if (st.col >= n) st.col = -1; Object.keys(st.f).forEach(i => { if (+i >= n) delete st.f[i]; });
   rows.forEach((r, i) => { if (r.dataset.ord == null) r.dataset.ord = i; });
   const data = rows.filter(r => r.cells.length === n); const active = st.col >= 0 || Object.values(st.f).some(v => v && v.trim());
   rows.filter(r => r.cells.length !== n).forEach(r => { r.hidden = active; });   // group headings and notes only make sense unsorted
