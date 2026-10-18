@@ -28,6 +28,8 @@ It is a Progressive Web App: it opens from a link, installs to the home screen, 
 | Tax | Optional GST (or any name): default and per-item rates, inclusive or exclusive prices, CGST + SGST split, GSTIN; shown on every bill, message and GRN. Per material, the admin sets whether purchase tax is recoverable or added to cost |
 | Users & roles | Admin, Management, Manager, Kitchen, Delivery, Counter; each opens on its own home screen. Each person uses Restaurant, ERP or both. Optional 4-digit PIN for shared phones |
 | History | Every change records who made it and when; any order shows its full history |
+| Help | In-app help for every screen and module, searchable, opening on the screen you’re on |
+| Import & export | CSV export by data type; templates; import of menu, materials, BOM, stock and finished-goods counts, suppliers and orders with a check screen first |
 | Data | Saved on the phone first; optional sync through a shared Google Drive folder; daily Excel copy saved to that folder; backup file; Excel export |
 
 ## Roles
@@ -100,6 +102,8 @@ No build step: plain HTML, CSS and JavaScript modules. Run locally with `python3
 | `js/pos.js` | Counter: takeaway, dine-in tables, Swiggy and Zomato |
 | `js/bom.js` | BOM trees and the plan & explode view |
 | `js/erp.js` | Production, GRNs, transfers, finished goods, outlet bake board |
+| `js/help.js` | In-app Help topics |
+| `js/data.js` | Import & export by data type, templates |
 | `js/ops.js` | Delivery run, WhatsApp import, New-order menu |
 | `js/waparse.js` | Reads a WhatsApp message into a draft order |
 | `js/admin.js` | More, first run, users, settings, sync, backup, Excel |

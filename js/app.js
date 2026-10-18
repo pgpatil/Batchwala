@@ -11,13 +11,15 @@ import "./batches.js";
 import "./pos.js";
 import "./bom.js";
 import "./erp.js";
+import "./help.js";
+import "./data.js";
 import { waSheet } from "./ops.js";
 import { setupView, resumeSync, dailyReport } from "./admin.js";
 import { APP_NAME } from "./config.js";
 import { $, esc, ICON } from "./util.js";
 import { ui, toast, closeSheet, yesNo } from "./ui.js";
 
-const TAB = { pos: ["Counter", ICON.cart], bom: ["BOM", ICON.tree], prod: ["Production", ICON.oven], grn: ["Purchases (GRN)", ICON.inbox], xfer: ["Transfers", ICON.truck], fg: ["Finished goods", ICON.batch], today: ["Today", ICON.today], orders: ["Orders", ICON.orders], pay: ["Payments", ICON.pay], stock: ["Stock", ICON.stock], bake: ["Bake board", ICON.oven], batches: ["Batches", ICON.batch], run: ["Delivery run", ICON.run], more: ["More", ICON.more] };
+const TAB = { help: ["Help", ICON.help], data: ["Import & export", ICON.dl], pos: ["Counter", ICON.cart], bom: ["BOM", ICON.tree], prod: ["Production", ICON.oven], grn: ["Purchases (GRN)", ICON.inbox], xfer: ["Transfers", ICON.truck], fg: ["Finished goods", ICON.batch], today: ["Today", ICON.today], orders: ["Orders", ICON.orders], pay: ["Payments", ICON.pay], stock: ["Stock", ICON.stock], bake: ["Bake board", ICON.oven], batches: ["Batches", ICON.batch], run: ["Delivery run", ICON.run], more: ["More", ICON.more] };
 const SHORT = { bake: "Bake", run: "My run", grn: "GRN", fg: "FG stock", prod: "Make" };   // bottom-bar labels on phones
 const ORDER = ["pos", "today", "orders", "bake", "prod", "grn", "stock", "xfer", "fg", "batches", "bom", "run", "pay", "more"];
 // Screens a role may open in the current mode, from its permissions; its phone tabs are a subset.
@@ -31,8 +33,10 @@ function allowedViews() {
     if (c("stock.buy") || c("stock.count")) t.push("stock");
     if (md === "erp") { if (c("bake.record") || c("orders.edit")) t.push("prod"); if (c("stock.buy")) t.push("grn"); if (c("transfer")) t.push("xfer"); t.push("fg"); }
   }
+  t.push("help"); if (c("export") || R.isAdmin()) t.push("data");
   return [...new Set(t)];
 }
+H.canOpen = v => allowedViews().includes(v);
 // Mode switch (people the admin gave both modes) and this device's location (when there is more than one).
 export function switchersHtml() {
   const both = R.mode() !== "classic" && R.myModes().length > 1; const locs = M.locations();
@@ -57,7 +61,7 @@ function applyTheme() {
 function navHtml() {
   const tabs = R.tabs(); const views = allowedViews(); const owe = R.can("money") ? M.customers().filter(c => c.balance > 0).length : 0; const low = H.lowCount ? H.lowCount() : 0;
   const c = M.config(); const me = R.me();
-  const links = [["customers", ICON.people, "Customers", R.can("customers")], ["reports", ICON.chart, "Sales & profit", R.can("reports")], ["menu", ICON.menu, "Menu & recipes", R.can("menu.edit") || R.can("reports")]].filter(x => x[3]);
+  const links = [["customers", ICON.people, "Customers", R.can("customers")], ["reports", ICON.chart, "Sales & profit", R.can("reports")], ["menu", ICON.menu, "Menu & recipes", R.can("menu.edit") || R.can("reports")], ["data", ICON.dl, "Import & export", R.can("export") || R.isAdmin()], ["help", ICON.help, "Help", true]].filter(x => x[3]);
   const btn = t => `<button class="nb${tabs.includes(t) ? "" : " dx"}" data-view="${t}" aria-current="${S.view === t ? "page" : "false"}"><span class="dot">${TAB[t][1]}${t === "pay" && owe ? `<em>${owe}</em>` : ""}${t === "stock" && low ? `<em>${low}</em>` : ""}</span><span class="nl">${S.wide ? TAB[t][0] : SHORT[t] || TAB[t][0]}</span></button>`;
   return `<div class="nav-brand">${logoHtml(c)}<div><b>${esc(c.business)}</b><small>${esc(me.name + " · " + R.ROLES[me.role].label)}</small></div></div><div class="nav-sw dx">${switchersHtml()}</div>
   <div class="nav-in" style="grid-template-columns:repeat(${tabs.length},1fr)">${ORDER.filter(v => views.includes(v)).map(btn).join("")}

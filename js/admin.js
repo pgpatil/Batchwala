@@ -24,12 +24,14 @@ V.more = () => {
     ["syncSettings", "cloud", "Cloud sync (Google Drive)", st.state === "off" ? "Off · this phone only" : st.state === "ok" ? "On · up to date" : st.state === "error" ? "Needs attention" : "On", true],
     ["backup", "backup", "Backup & restore", "Save a backup file or load one", R.isAdmin()],
     ["export", "dl", "Export to Excel", "Orders, payments, batches, stock and menu", R.can("export")],
+    ["data", "dl", "Import & export", "CSV by data type, with templates", R.can("export") || R.isAdmin()],
+    ["help", "help", "Help", "How every screen and module works", true],
     ["switchUser", "people", "Switch user", "Hand this phone to someone else", true]
   ].filter(x => x[4]);
   return `<div class="band"><div class="top">${logoHtml(c)}<div class="biz"><div class="name">${esc(c.business)}</div><div class="sub">${esc(me ? me.name + " · " + R.ROLES[me.role].label : "")}</div></div></div>${toran()}</div>
   ${H.switchers ? `<div class="moresw">${H.switchers()}</div>` : ""}
   <div class="menu-list" style="margin-top:14px">${items.map(([a, ic, t, s]) => `<button class="mi" ${a[0] === "@" ? `data-go="${a.slice(1)}"` : `data-act="${a}"`}><span class="ic">${ICON[ic]}</span><span class="grow">${t}<small>${esc(s)}</small></span><span class="chev">${ICON.chev}</span></button>`).join("")}</div>
-  <p class="hint" style="padding:4px 18px">${APP_NAME} 2.5${R.mode() !== "classic" ? " · " + esc(M.MODES[R.mode()]) + " mode" : ""} · ${st.state === "off" ? "data saved on this phone only" : "synced through Google Drive"}${st.last ? " · last sync " + new Date(st.last).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" }) : ""}</p>`;
+  <p class="hint" style="padding:4px 18px">${APP_NAME} 2.6${R.mode() !== "classic" ? " · " + esc(M.MODES[R.mode()]) + " mode" : ""} · ${st.state === "off" ? "data saved on this phone only" : "synced through Google Drive"}${st.last ? " · last sync " + new Date(st.last).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" }) : ""}</p>`;
 };
 
 /* ---------- first run ---------- */

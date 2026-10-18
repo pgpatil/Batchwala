@@ -428,3 +428,21 @@ kbd{font:inherit;font-size:11px;font-weight:800;border:1px solid var(--line);bor
 .rm{border:0;background:var(--surface);width:36px;height:36px;border-radius:18px;font-size:18px;flex:0 0 auto}
 .reg td.due{color:var(--due);font-weight:800}
 @media (min-width:1024px){ .moresw{display:none} .nav .nav-sw.dx{display:block} .nav-sw .locsel{margin-top:8px} .nav-sw .seg button{height:36px;font-size:13.5px} }
+
+/* v2.6: help, import & export */
+.bandnote{margin:0;padding:0 22px 16px;font-weight:600;font-size:14px;opacity:.8;max-width:760px}
+.helplist,.datalist{display:grid;gap:10px;padding:8px 12px 28px}
+.helplist .bakecard,.datalist .datacard{margin:0}
+.helpbody{padding:4px 16px 14px;border-top:1px solid var(--line);font-size:15px;line-height:1.55}
+.helpbody p{margin:10px 0}.helpbody ul,.helpbody ol{margin:8px 0;padding-left:22px}.helpbody li{margin:4px 0}
+.helpbody table{margin:8px 0;border:1px solid var(--line);border-radius:10px;overflow:hidden;font-size:14px}
+.helpbody th,.helpbody td{text-align:left;padding:8px 10px}
+.helpbody .btn{margin-top:6px}
+.datacard{background:var(--card);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);padding:12px 14px}
+.dc-head{display:flex;align-items:center;gap:12px}
+.dc-head .ic{width:38px;height:38px;border-radius:12px;background:var(--surface);display:grid;place-items:center;flex:0 0 auto}
+.dc-head .ic svg{width:20px;height:20px}
+.dc-head b{display:block}.dc-head small{display:block;color:var(--muted);font-size:13px}
+.dc-btns{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.dc-btns .btn{width:auto;flex:1 1 120px;height:44px;margin:0;font-size:15px}
+@media (min-width:1024px){ .helplist{padding:8px 0 28px;max-width:900px} .datalist{grid-template-columns:repeat(auto-fill,minmax(400px,1fr));padding:8px 0 28px} .bandnote{padding:0 22px 18px} }

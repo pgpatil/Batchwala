@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.6.0 — 18 Oct 2026
+- Help: every screen and module explained (setup, roles and modes, Counter, orders, payments, bake board, production, batches, BOM, stock, GRNs, transfers, finished goods, settings, import & export, backup, keys, fixes). Searchable; opens on the topic for the screen you're on; each topic links to its screen. In the sidebar and More
+- Import & export by data type: Export (CSV) for menu items, materials, BOM, material stock, finished goods, suppliers, orders, customers, payments, batches, GRNs and transfers. Template download for each importable type, with notes and an example. Import (CSV or .xlsx) for menu items, materials, BOM (multilevel), stock counts, finished-goods counts, suppliers and orders, with a check screen listing what will be added, updated, skipped or rejected (by line) before anything changes. Admin only for import
+
 ## 2.5.0 — 18 Oct 2026
 - Transfers have a receive step: sending takes stock off the sender and marks it in transit; the receiving location confirms what arrived line by line, with a note for anything short. Only received quantities count at the destination; shortfalls stay on the transfer and show as "Received short". The outlet bake board lists what's on the way with a Receive button, and pieces on the way aren't asked for twice
 - Purchase tax per material (admin only, in the material editor): recoverable (kept out of stock cost) or not recoverable (added to the cost of stock, recipes and batches). GRN lines say which applies
