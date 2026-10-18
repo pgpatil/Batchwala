@@ -15,7 +15,7 @@ export const config = () => ({ ...DEFAULT_CONFIG, ...(ev.get("config", "app") ||
 /* ---------- orders and payments ---------- */
 export function normOrder(o) {
   const x = { no: "", customer: "", flat: "", phone: "", channel: "whatsapp", date: today(), items: [], discountPct: 0, status: "received", notes: "", tag: "", ...o };
-  x.items = (x.items || []).map(i => ({ item: i.item || "", qty: +i.qty || 0, rate: +i.rate || 0, ...(i.menuId ? { menuId: i.menuId } : {}) }));
+  x.items = (x.items || []).map(i => ({ item: i.item || "", qty: +i.qty || 0, rate: +i.rate || 0, ...(i.menuId ? { menuId: i.menuId } : {}), ...(i.taxPct != null ? { taxPct: +i.taxPct || 0 } : {}) }));
   x.discountPct = +x.discountPct || 0;
   return x;
 }
@@ -29,7 +29,26 @@ export const orders = (withCancelled = true) => ev.all("orders").map(normOrder).
 export const paymentsFor = id => (payIndex()[id] || []).slice().sort((a, b) => a._at < b._at ? -1 : 1);
 export const sub = o => o.items.reduce((s, i) => s + i.qty * i.rate, 0);
 export const disc = o => Math.round(sub(o) * (o.discountPct || 0) / 100);
-export const total = o => o.status === "cancelled" ? 0 : sub(o) - disc(o);
+export const total = o => o.status === "cancelled" ? 0 : Math.round(sub(o) - disc(o) + (o.taxIncl ? 0 : taxOf(o).tax));
+
+/* ---------- tax ---------- */
+// Business setting; each order line keeps the rate it was sold at (taxPct), and the order keeps whether prices included tax (taxIncl),
+// so changing the setting never changes old bills. Lines without taxPct are untaxed.
+export const taxCfg = () => ({ on: false, name: "GST", incl: false, split: true, rate: 5, gstin: "", ...(config().tax || {}) });
+export function taxRateFor(line) { const t = taxCfg(); if (!t.on) return 0; const m = (line.menuId && menu().find(x => x.id === line.menuId)) || menuByName(line.item); return m && m.taxPct != null && m.taxPct !== "" ? +m.taxPct : +t.rate || 0; }
+// Stamps current rates on lines that have none; used when saving and to preview totals before saving.
+export function withTax(o) { const t = taxCfg(); return { ...o, items: (o.items || []).map(i => i.taxPct != null ? i : { ...i, taxPct: taxRateFor(i) }), taxIncl: o.taxIncl ?? (t.on && t.incl) }; }
+const r2 = v => Math.round(v * 100) / 100;
+// Tax per rate on the discounted line amounts; inclusive prices have the tax taken out of them.
+export function taxOf(o) {
+  const f = 1 - (o.discountPct || 0) / 100; const by = {}; let tax = 0;
+  (o.items || []).forEach(i => { const r = +i.taxPct || 0; if (!r) return; const amt = i.qty * i.rate * f; const t = o.taxIncl ? amt - amt / (1 + r / 100) : amt * r / 100; by[r] = (by[r] || 0) + t; tax += t; });
+  Object.keys(by).forEach(k => by[k] = r2(by[k])); return { tax: r2(tax), by };
+}
+// Lines for a bill: "CGST 2.5%" + "SGST 2.5%" when split, else "GST 5%".
+export function taxLines(o) { const t = taxCfg(); const { by } = taxOf(o); const out = [];
+  Object.keys(by).sort((a, b) => a - b).forEach(r => { if (t.split) { const h = r2(by[r] / 2); out.push([`C${t.name} ${+r / 2}%`, h], [`S${t.name} ${+r / 2}%`, r2(by[r] - h)]); } else out.push([`${t.name} ${+r}%`, by[r]]); });
+  return out; }
 export const received = o => paymentsFor(o.id).reduce((s, p) => s + (+p.amount || 0), 0);
 export const bal = o => Math.max(0, total(o) - received(o));
 export const pcs = o => o.items.reduce((s, i) => s + i.qty, 0);
@@ -73,7 +92,8 @@ export const ING_TYPES = { rm: "Raw material", pm: "Packing material", sf: "Semi
 export const ingredients = () => ev.all("ingredients").map(i => ({ unit: "g", reorder: 0, cost: 0, barcode: "", type: "rm", supplier: "", recipe: [], yield: 0, ...i })).sort((a, b) => a.name.localeCompare(b.name));
 export const ingMap = () => Object.fromEntries(ingredients().map(i => [i.id, i]));
 export const moves = () => ev.all("moves").sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : a._at < b._at ? 1 : -1));
-export function stockMap() { const m = {}; ev.all("moves").forEach(v => { m[v.ingId] = (m[v.ingId] || 0) + (+v.qty || 0); }); return m; }
+// Stock by material; with a location, only that location's moves (records from before locations count at the first one).
+export function stockMap(loc = null) { const m = {}; const home = locations()[0].id; ev.all("moves").forEach(v => { if (loc && (v.outletId || home) !== loc) return; m[v.ingId] = (m[v.ingId] || 0) + (+v.qty || 0); }); return m; }
 // Semi-finished made fresh (no "make when below" level) aren't flagged when they run out.
 export function stockLevel(i, sm = stockMap()) { const s = sm[i.id] || 0; return { on: s, state: s <= 0 ? (i.type === "sf" && !i.reorder ? "ok" : "out") : (i.reorder && s <= i.reorder ? "low" : "ok") }; }
 // Bought materials cost what the last purchase cost; semi-finished cost rolls up through their recipe, level by level.
@@ -154,3 +174,51 @@ export function board(date) {
   bakesOn(date).forEach(b => b.lines.forEach(l => { const r = row(l.item); r.baked += l.qty - l.spoiled; r.spoiled += l.spoiled; }));
   return [...rows.values()].map(r => ({ ...r, toBake: Math.max(0, r.committed + r.par - r.baked), left: r.baked - r.committed - r.sold })).sort((a, b) => b.toBake - a.toBake || b.committed - a.committed);
 }
+
+/* ---------- locations and ERP ---------- */
+// The first location is where records made before locations existed belong. Kitchens make; outlets sell (a lone kitchen sells too).
+export const locations = () => { const l = (config().locations || []).filter(x => x && x.id); return l.length ? l : [{ id: config().outletId || "home", name: "Main kitchen", kind: "kitchen" }]; };
+export const locName = id => (locations().find(l => l.id === id) || { name: id || "?" }).name;
+export const kitchens = () => locations().filter(l => l.kind === "kitchen");
+export const sellingLocs = () => { const o = locations().filter(l => l.kind === "outlet"); return o.length ? o : locations().slice(0, 1); };
+let hereId = null;
+export const setHere = id => { hereId = id; };
+export const here = () => locations().some(l => l.id === hereId) ? hereId : locations()[0].id;
+// Restaurant = counter, orders, payments, deliveries, outlet board. ERP = purchases (GRN), stock by location, BOM, production, batches, transfers, finished goods.
+export const MODES = { restaurant: "Restaurant", erp: "ERP" };
+export const modesOf = m => m && Array.isArray(m.modes) && m.modes.length ? m.modes : ["restaurant"];
+export const erpOn = () => ev.all("members").some(m => modesOf(m).includes("erp"));
+const since = () => config().erpStart || "0000";
+const locOf = x => x.outletId || locations()[0].id;
+// Finished goods on hand, by location and item, counted from the day ERP started:
+// good pieces from batches + transfers in − transfers out − delivered sales + adjustments.
+export function fgStock() {
+  const out = {}; const add = (loc, item, q) => { const L = out[loc] = out[loc] || {}; L[item] = (L[item] || 0) + q; }; const s0 = since();
+  batches().filter(b => !b.void && b.date >= s0).forEach(b => b.lines.forEach(l => add(locOf(b), l.item, l.qty - l.spoiled)));
+  ev.all("transfers").filter(t => !t.void && t.date >= s0).forEach(t => (t.lines || []).filter(l => l.item).forEach(l => { add(t.from, l.item, -(+l.qty || 0)); add(t.to, l.item, +l.qty || 0); }));
+  orders(false).filter(o => isDelivered(o) && o.date >= s0).forEach(o => o.items.forEach(i => add(locOf(o), i.item, -i.qty)));
+  ev.all("fg").filter(f => f.date >= s0).forEach(f => add(f.loc, f.item, +f.qty || 0));
+  return out;
+}
+// Outlet board for a date: per item, pre-orders still to hand over, kept-ready level, on hand here, sold here today, and what to ask the kitchen for.
+export function outletBoard(date, loc = here()) {
+  const fg = fgStock()[loc] || {}; const rows = new Map(); const row = n => { if (!rows.has(n)) rows.set(n, { item: n, committed: 0, par: 0, onHand: 0, sold: 0 }); return rows.get(n); };
+  orders(false).filter(o => o.date === date && locOf(o) === loc).forEach(o => o.items.forEach(i => { const r = row(i.item); if (isDelivered(o)) r.sold += i.qty; else r.committed += i.qty; }));
+  if (sellingLocs().some(l => l.id === loc)) menuActive().filter(m => m.par > 0).forEach(m => { row(m.name).par = m.par; });
+  Object.entries(fg).forEach(([n, q]) => { if (q) row(n).onHand = q; });
+  return [...rows.values()].map(r => ({ ...r, short: Math.max(0, r.committed + r.par - Math.max(0, r.onHand)) })).sort((a, b) => b.short - a.short || a.item.localeCompare(b.item));
+}
+// Production for a kitchen and date: what every selling location is short of, less finished goods already at the kitchen.
+export function production(date, kitchen = (kitchens()[0] || locations()[0]).id) {
+  const fg = fgStock(); const k = fg[kitchen] || {}; const rows = new Map();
+  sellingLocs().forEach(l => outletBoard(date, l.id).forEach(r => { if (!r.short && l.id !== kitchen) return; const x = rows.get(r.item) || { item: r.item, need: 0, byLoc: {}, atKitchen: 0 };
+    const n = l.id === kitchen ? r.committed + r.par : r.short; if (n) { x.need += n; x.byLoc[l.id] = n; } rows.set(r.item, x); }));
+  const baked = bakesOn(date).filter(b => locOf(b) === kitchen).reduce((m, b) => { b.lines.forEach(l => m[l.item] = (m[l.item] || 0) + l.qty - l.spoiled); return m; }, {});
+  return [...rows.values()].map(x => ({ ...x, atKitchen: Math.max(0, k[x.item] || 0), baked: baked[x.item] || 0, toBake: Math.max(0, x.need - Math.max(0, k[x.item] || 0)) }))
+    .filter(x => x.need).sort((a, b) => b.toBake - a.toBake || a.item.localeCompare(b.item));
+}
+export const suppliers = () => ev.all("suppliers").sort((a, b) => a.name.localeCompare(b.name));
+export const grns = () => ev.all("grns").sort((a, b) => (b.date + b._at).localeCompare(a.date + a._at));
+export const transfers = () => ev.all("transfers").sort((a, b) => (b.date + b._at).localeCompare(a.date + a._at));
+// GRN-P12, T-P4: the document type, then the person's prefix so two phones never clash offline.
+export function nextDocNo(kind, prefix, tag) { const n = ev.all(kind).map(x => +((/(\d+)$/.exec(String(x.no || "")) || [])[1] || 0)); return `${tag}-${prefix || ""}${Math.max(0, ...n) + 1}`; }

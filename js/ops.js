@@ -37,6 +37,8 @@ H.click.push(async T => {
 /* ---------- New-order menu ---------- */
 H.fab = async () => {
   if (S.view === "stock") { H.purchaseSheet && H.purchaseSheet(); return; }
+  if (S.view === "grn") { H.grnSheet && H.grnSheet(); return; }
+  if (S.view === "xfer") { H.transferSheet && H.transferSheet(); return; }
   if (S.view === "pos") return;
   const opts = [];
   if (R.can("orders.edit")) opts.push({ label: `${ICON.plus}New order`, cls: "btn-primary", value: "new" });

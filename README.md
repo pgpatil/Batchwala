@@ -23,7 +23,10 @@ It is a Progressive Web App: it opens from a link, installs to the home screen, 
 | BOM | Multilevel bills of materials: menu items use raw, packing and semi-finished materials; semi-finished items have their own recipe and yield and can use other semi-finished items. Costs roll up through every level. Plan & explode turns a day’s bake into what to prepare and what to buy |
 | Menu | Prices, categories, short names for WhatsApp reading, par levels, recipes with cost and margin |
 | Reports | Sales by day and channel, best sellers with margin, wastage value, repeat customers |
-| Users & roles | Admin, Management, Manager, Kitchen, Delivery, Counter; each opens on its own home screen. Optional 4-digit PIN for shared phones |
+| ERP mode | For people the admin gives ERP: Production per kitchen, Purchases as GRNs, Stock by location, Transfers kitchen → outlets, Finished goods by location, Batches and BOM. Restaurant mode keeps the counter, orders, payments, deliveries and the outlet’s bake board. Nobody on ERP = the original single app |
+| Locations | One central kitchen and any number of outlets; each device chooses where it is |
+| Tax | Optional GST (or any name): default and per-item rates, inclusive or exclusive prices, CGST + SGST split, GSTIN; shown on every bill, message and GRN |
+| Users & roles | Admin, Management, Manager, Kitchen, Delivery, Counter; each opens on its own home screen. Each person uses Restaurant, ERP or both. Optional 4-digit PIN for shared phones |
 | History | Every change records who made it and when; any order shows its full history |
 | Data | Saved on the phone first; optional sync through a shared Google Drive folder; daily Excel copy saved to that folder; backup file; Excel export |
 
@@ -37,6 +40,8 @@ It is a Progressive Web App: it opens from a link, installs to the home screen, 
 | Kitchen | Bake board | Batches with prep, spoiled pieces, BOM (no costs), wastage and stock counts; no money or phone numbers |
 | Delivery | My run | Mark delivered, collect payment |
 | Counter | Counter | Takeaway, dine-in and aggregator sales |
+
+In ERP mode the homes are Production (Admin, Management, Manager, Kitchen) and Finished goods (Delivery, Counter).
 
 With Google Drive sync, these rules are enforced by the app, not by Drive: anyone with access to the shared folder could edit its files directly. That is fine while the team is the owners. Before staff join, move the data to a database with enforced permissions (see “Moving the data later”).
 
@@ -94,6 +99,7 @@ No build step: plain HTML, CSS and JavaScript modules. Run locally with `python3
 | `js/batches.js` | Batches register and batch detail |
 | `js/pos.js` | Counter: takeaway, dine-in tables, Swiggy and Zomato |
 | `js/bom.js` | BOM trees and the plan & explode view |
+| `js/erp.js` | Production, GRNs, transfers, finished goods, outlet bake board |
 | `js/ops.js` | Delivery run, WhatsApp import, New-order menu |
 | `js/waparse.js` | Reads a WhatsApp message into a draft order |
 | `js/admin.js` | More, first run, users, settings, sync, backup, Excel |

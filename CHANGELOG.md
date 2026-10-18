@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.4.0 — 18 Oct 2026
+- ERP mode alongside Restaurant mode. The admin sets each person to Restaurant, ERP or both (Users & roles); people with both get a switch in the sidebar or More. While nobody has ERP, the app works exactly as before
+- Locations: a central kitchen and any number of outlets (Business settings → Locations). Each device picks where it is; orders, batches and stock moves belong to that location
+- Purchases as GRNs: supplier, invoice number, receiving location, items with quantity, amount and tax; adds stock at that location; undo keeps it in the list marked undone; spend by supplier
+- Production (ERP home): per kitchen and day, what every outlet is short of (pre-orders + kept-ready levels − what it holds) less finished goods already at the kitchen; record a batch from it or send to an outlet
+- Transfers: finished goods and materials from one location to another, suggested from what the outlet is short of; reversible
+- Finished-goods stock by location, counted from the day ERP started: batches in, transfers, delivered orders out, with counts and wastage adjustments
+- Outlet bake board in Restaurant mode: what's on hand at this outlet, pre-orders to hand over, kept-ready levels, what's short, and a message to ask the kitchen
+- Tax: on/off, name, default rate, per-item and per-material rates, prices inclusive or exclusive, CGST + SGST split, GSTIN. Order messages, bill summaries, the order screen, the counter ticket and GRNs show it; old bills keep the rates they were made with
+- Fixed: on desktop the sidebar covered the New-order button; a drawer could reappear after saving
+
 ## 2.3.0 — 18 Oct 2026
 - Counter (first screen for admin, management, manager and counter): punch walk-in orders as Takeaway (paid by UPI, cash or card in one tap) or Dine-in at a table. A table keeps an open bill you can add to and settle later; busy tables show their running total. Swiggy and Zomato sales moved here. Menu search: type and press Enter to add. Replaces Quick sale
 - Materials split into raw materials (RM), packing materials (PM) and semi-finished items. Stock filters by type; purchases and the shopping list cover RM and PM only

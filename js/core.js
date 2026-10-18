@@ -16,7 +16,8 @@ export const rerenderSheet = () => hooks.rerenderSheet();
 
 export function guard(perm) { if (can(perm)) return true; toast("Your role can’t do this. Ask an admin."); return false; }
 export const clean = o => { const { _at, _by, ...r } = o; return JSON.parse(JSON.stringify(r)); };
-export async function saveOrder(o) { const c = M.config(); await ev.put("orders", clean({ businessId: c.businessId, outletId: c.outletId, ...o })); sync.soon(); return true; }
+// New orders belong to this device's location; tax rates are stamped on lines the first time they're saved.
+export async function saveOrder(o) { const c = M.config(); await ev.put("orders", clean(M.withTax({ businessId: c.businessId, outletId: M.here(), ...o }))); sync.soon(); return true; }
 export async function addPayment(o, amount, mode, note = "", reverses = "") {
   await ev.put("payments", { id: uid("p"), orderId: o.id, customerKey: M.ckey(o), amount: Math.round(amount * 100) / 100, mode: mode || "", date: today(), note, ...(reverses ? { reverses } : {}), businessId: M.config().businessId });
   sync.soon();

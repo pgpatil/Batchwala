@@ -336,7 +336,7 @@ kbd{font:inherit;font-size:11px;font-weight:800;border:1px solid var(--line);bor
   .nav .nb .dot em{top:-6px;right:-8px}
   .nav .nav-sep.dx{display:block;font-size:11.5px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;padding:18px 12px 6px}
   .nav .nav-keys.dx{display:block;font-size:12px;color:var(--muted);padding:14px 12px 0;margin:0}
-  .fab{left:20px;right:auto;bottom:20px;width:208px;justify-content:center}
+  .fab{left:20px;right:auto;bottom:20px;width:208px;justify-content:center;z-index:26}
   .backbar{display:none}
   .band{border-radius:0 0 20px 20px;overflow:hidden}
   header.band{border-radius:0}
@@ -409,3 +409,22 @@ kbd{font:inherit;font-size:11px;font-weight:800;border:1px solid var(--line);bor
   .plan{grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:14px;align-items:start}
   .plan .card{margin:8px 0}
 }
+
+/* v2.4: ERP, locations, tax */
+.modesw{grid-template-columns:1fr 1fr}
+.locsel{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700;color:var(--muted);margin-top:8px}
+.locsel select{flex:1;min-width:0;height:38px;border:1px solid var(--line);border-radius:10px;background:var(--card);padding:0 8px;font-weight:700;color:var(--ink)}
+.moresw{margin:14px 12px 0;display:grid;gap:4px}
+.nav-sw{padding:0 4px 12px}
+.taxline{display:flex;justify-content:space-between;font-size:13px;color:var(--muted);margin-top:6px;font-variant-numeric:tabular-nums}
+.grnlines{display:grid;gap:8px}
+.grnline{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:10px;display:grid;gap:8px}
+.gl1{display:flex;gap:8px;align-items:center}
+.gl1 select{flex:1;min-width:0}
+.gl2{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap}
+.gl2 label{display:grid;gap:3px;flex:1 1 90px;font-size:12px;font-weight:700;color:var(--muted)}
+.gl2 label.tx{flex:0 1 80px}
+.gl2 .unitchips .chip{height:48px}
+.rm{border:0;background:var(--surface);width:36px;height:36px;border-radius:18px;font-size:18px;flex:0 0 auto}
+.reg td.due{color:var(--due);font-weight:800}
+@media (min-width:1024px){ .moresw{display:none} .nav .nav-sw.dx{display:block} .nav-sw .locsel{margin-top:8px} .nav-sw .seg button{height:36px;font-size:13.5px} }

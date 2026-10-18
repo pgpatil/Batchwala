@@ -6,7 +6,7 @@ import * as R from "./roles.js";
 import { APP_NAME, GOOGLE_CLIENT_ID, DATA_FOLDER } from "./config.js";
 import { createDriveAdapter } from "./storage/drive.js";
 import { S, A, V, H, guard, logoHtml, toran, clean } from "./core.js";
-import { $, esc, rs, num, uid, today, cmpFlat, ICON } from "./util.js";
+import { $, esc, rs, rs2, num, uid, today, cmpFlat, ICON } from "./util.js";
 import { ui, toast, openSheet, closeSheet, ask, yesNo } from "./ui.js";
 
 /* ---------- More ---------- */
@@ -27,8 +27,9 @@ V.more = () => {
     ["switchUser", "people", "Switch user", "Hand this phone to someone else", true]
   ].filter(x => x[4]);
   return `<div class="band"><div class="top">${logoHtml(c)}<div class="biz"><div class="name">${esc(c.business)}</div><div class="sub">${esc(me ? me.name + " · " + R.ROLES[me.role].label : "")}</div></div></div>${toran()}</div>
+  ${H.switchers ? `<div class="moresw">${H.switchers()}</div>` : ""}
   <div class="menu-list" style="margin-top:14px">${items.map(([a, ic, t, s]) => `<button class="mi" ${a[0] === "@" ? `data-go="${a.slice(1)}"` : `data-act="${a}"`}><span class="ic">${ICON[ic]}</span><span class="grow">${t}<small>${esc(s)}</small></span><span class="chev">${ICON.chev}</span></button>`).join("")}</div>
-  <p class="hint" style="padding:4px 18px">${APP_NAME} 2.3 · ${st.state === "off" ? "data saved on this phone only" : "synced through Google Drive"}${st.last ? " · last sync " + new Date(st.last).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" }) : ""}</p>`;
+  <p class="hint" style="padding:4px 18px">${APP_NAME} 2.4${R.mode() !== "classic" ? " · " + esc(M.MODES[R.mode()]) + " mode" : ""} · ${st.state === "off" ? "data saved on this phone only" : "synced through Google Drive"}${st.last ? " · last sync " + new Date(st.last).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" }) : ""}</p>`;
 };
 
 /* ---------- first run ---------- */
@@ -78,6 +79,7 @@ function usersSheet() {
   <label class="f" style="margin-top:14px">What each role can do</label>
   <div class="kv">${R.ROLE_KEYS.map(k => `<div><span><b>${esc(R.ROLES[k].label)}</b><small class="mut" style="display:block">${esc(R.ROLES[k].note)}</small></span></div>`).join("")}</div>`);
 }
+const modeKey = x => { const mm = Array.isArray(x.modes) ? x.modes : (x.role === "admin" && R.mode() !== "classic" ? ["restaurant", "erp"] : ["restaurant"]); return mm.length > 1 ? "both" : mm[0]; };
 function memberSheet(m) {
   const isNew = !m; const x = m ? { ...m } : { id: uid("u"), name: "", role: "management", email: "", prefix: "", pin: "" };
   const a = sync.current();
@@ -85,6 +87,9 @@ function memberSheet(m) {
   <label class="f" for="mbName">Name</label><input class="in" id="mbName" value="${esc(x.name)}">
   <label class="f">Role</label><div class="chips">${R.ROLE_KEYS.map(k => `<button class="chip" data-mrole="${k}" aria-pressed="${x.role === k}">${R.ROLES[k].label}</button>`).join("")}</div>
   <p class="hint" id="mbNote">${esc(R.ROLES[x.role].note)}</p>
+  <label class="f">Uses</label><div class="chips">${[["restaurant", "Restaurant"], ["erp", "ERP"], ["both", "Both"]].map(([k, l]) => `<button class="chip" data-mmode="${k}" aria-pressed="${modeKey(x) === k}">${l}</button>`).join("")}</div>
+  <p class="hint">Restaurant: counter, orders, payments, deliveries and the outlet’s bake board. ERP: purchases (GRN), stock by location, BOM, production, batches, transfers and finished goods. Both: a switch between the two.</p>
+  ${M.locations().length > 1 ? `<label class="f" for="mbLoc">Usually works at</label><select class="in" id="mbLoc">${M.locations().map(l => `<option value="${esc(l.id)}" ${(x.loc || M.locations()[0].id) === l.id ? "selected" : ""}>${esc(l.name)}</option>`).join("")}</select>` : ""}
   <label class="f" for="mbEmail">Google account email <small class="mut">(for signing in on their own phone)</small></label><input class="in" id="mbEmail" type="email" value="${esc(x.email)}" autocapitalize="off">
   <label class="f" for="mbPin">PIN for switching on a shared phone <small class="mut">(optional, 4 digits)</small></label><input class="in" id="mbPin" inputmode="numeric" maxlength="4" value="${esc(x.pin || "")}">
   <button class="btn btn-primary" data-act="saveMember">${isNew ? "Add" : "Save"}</button>
@@ -99,7 +104,12 @@ A.saveMember = async () => {
   if (x.pin && x.pin.length !== 4) { toast("PIN must be 4 digits"); return; }
   if (!x.prefix) x.prefix = prefixFor(x.name);
   if (x.id === (R.me() || {}).id && x.role !== "admin" && R.members().filter(m => m.role === "admin").length < 2) { toast("Keep at least one admin"); return; }
-  const { _at, _by, ...rec } = x; await ev.put("members", rec); sync.soon(); toast(st.isNew ? `${x.name} added` : "Saved"); usersSheet();
+  if ($("#mbLoc")) x.loc = $("#mbLoc").value;
+  const erpBefore = M.erpOn(); const { _at, _by, ...rec } = x; await ev.put("members", rec);
+  // ERP starts counting finished goods from the day it is first given to someone.
+  if (!erpBefore && M.erpOn() && !M.config().erpStart) await ev.put("config", clean({ ...M.config(), erpStart: today(), id: "app" }));
+  if (x.id === (R.me() || {}).id) { R.setMode(null); S.view = R.home(); }
+  sync.soon(); toast(st.isNew ? `${x.name} added` : "Saved"); usersSheet();
 };
 A.removeMember = async () => { const x = ui.sheet.x; if (await yesNo(`<p class="cq">Remove ${esc(x.name)}?</p><div class="cdetail">They can no longer use the app. Their past work stays in the history.</div>`, "Remove", "btn-danger-solid")) { await ev.del("members", x.id); sync.soon(); usersSheet(); } };
 A.shareFolder = async () => { const x = ui.sheet.x; const a = sync.current(); try { await a.ready(); await a.shareWith(x.email); toast(`Folder shared with ${x.email}`); } catch (e) { toast(e.message || "Couldn’t share the folder"); } };
@@ -111,17 +121,26 @@ A.switchUser = () => {
 H.click.push(async T => {
   const st = ui.sheet;
   const mb = T.closest("[data-member]"); if (mb) { memberSheet(ev.get("members", mb.dataset.member)); return true; }
+  const mm = T.closest("[data-mmode]"); if (mm && st && st.kind === "member") { const k = mm.dataset.mmode; st.x.modes = k === "both" ? ["restaurant", "erp"] : [k]; document.querySelectorAll("[data-mmode]").forEach(b => b.setAttribute("aria-pressed", b.dataset.mmode === k)); return true; }
   const mr = T.closest("[data-mrole]"); if (mr && st && st.kind === "member") { st.x.role = mr.dataset.mrole; document.querySelectorAll("[data-mrole]").forEach(b => b.setAttribute("aria-pressed", b.dataset.mrole === st.x.role)); $("#mbNote").textContent = R.ROLES[st.x.role].note; return true; }
   const sw = T.closest("[data-switch]"); if (sw) { const m = ev.get("members", sw.dataset.switch);
     if (m.pin) { const v = await ask(`<p class="cq">PIN for ${esc(m.name)}</p><input class="in" id="pinIn" inputmode="numeric" maxlength="4" style="margin-top:12px;text-align:center;font-size:24px;letter-spacing:8px">`, [{ label: "Cancel", cls: "btn-ghost", value: false }, { label: "Unlock", cls: "btn-primary", value: true }], true);
       if (!v) return true; if (($("#pinIn") || {}).value !== m.pin) { toast("Wrong PIN"); return true; } }
-    await R.setMe(m.id); S.view = R.home(); closeSheet(); toast(`Now using as ${m.name}`); return true; }
+    await R.setMe(m.id); R.setMode(null); await ev.setMeta("mode", null); if (m.loc) { M.setHere(m.loc); await ev.setMeta("here", m.loc); } S.view = R.home(); closeSheet(); toast(`Now using as ${m.name}`); return true; }
+  if (st && st.kind === "settings") {
+    const ti = T.closest("[data-taxincl]"); if (ti) { syncSettings(); st.c.tax.incl = ti.dataset.taxincl === "1"; drawSettings(st); return true; }
+    const ts = T.closest("[data-taxsplit]"); if (ts) { syncSettings(); st.c.tax.split = ts.dataset.taxsplit === "1"; drawSettings(st); return true; }
+    const lk = T.closest("[data-lockind]"); if (lk) { syncSettings(); const [ix, k] = lk.dataset.lockind.split(":"); st.c.locations[+ix].kind = k; drawSettings(st); return true; }
+    const lr = T.closest("[data-locrm]"); if (lr) { syncSettings(); const l = st.c.locations[+lr.dataset.locrm];
+      const used = ev.all("moves").some(m => m.outletId === l.id) || ev.all("orders").some(o => o.outletId === l.id) || ev.all("transfers").some(t => t.from === l.id || t.to === l.id) || ev.all("bakes").some(b => b.outletId === l.id);
+      if (used) { toast(`${l.name} has records; rename it instead`); return true; } st.c.locations.splice(+lr.dataset.locrm, 1); drawSettings(st); return true; } }
   const dt = T.closest("[data-deltag]"); if (dt && st && st.kind === "settings") { syncSettings(); st.c.tags = (st.c.tags || []).filter(g => g !== dt.dataset.deltag); if (st.c.activeTag === dt.dataset.deltag) st.c.activeTag = ""; drawSettings(st); return true; }
   return false;
 });
 
 /* ---------- business settings ---------- */
-function settingsSheet() { if (!R.isAdmin()) return; const st = { kind: "settings", c: JSON.parse(JSON.stringify(M.config())) }; st.redraw = () => drawSettings(st); drawSettings(st); }
+function settingsSheet() { if (!R.isAdmin()) return; const c = JSON.parse(JSON.stringify(M.config())); c.tax = M.taxCfg(); c.locations = M.locations().map(l => ({ ...l }));
+  const st = { kind: "settings", c }; st.redraw = () => drawSettings(st); drawSettings(st); }
 function hue(hex) { const n = parseInt(hex.slice(1), 16); const r = (n >> 16) / 255, g = (n >> 8 & 255) / 255, b = (n & 255) / 255; const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn; if (!d) return -1; let h = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4; return (h * 60 + 360) % 360; }
 function drawSettings(st) {
   const c = st.c;
@@ -134,13 +153,24 @@ function drawSettings(st) {
   <div class="two"><div><label class="f" for="sUpi">UPI ID</label><input class="in" id="sUpi" value="${esc(c.upi || "")}" placeholder="name@okaxis" autocapitalize="off"></div>
   <div><label class="f" for="sPayee">Name on UPI</label><input class="in" id="sPayee" value="${esc(c.payee || "")}" placeholder="As shown in UPI app"></div></div>
   <p class="hint">The UPI ID goes into WhatsApp order messages and reminders.</p>
+  <label class="f" style="display:flex;align-items:center;gap:12px;margin-top:18px">Charge tax on bills <button class="swt" role="switch" aria-checked="${!!c.tax.on}" data-act="toggleTax" aria-label="Tax on bills"></button></label>
+  ${c.tax.on ? `<div class="two"><div><label class="f" for="sTaxName">Tax name</label><input class="in" id="sTaxName" value="${esc(c.tax.name)}" placeholder="GST"></div><div><label class="f" for="sTaxRate">Default rate %</label><input class="in" id="sTaxRate" inputmode="decimal" value="${esc(c.tax.rate)}"></div></div>
+    <label class="f" for="sGstin">${esc(c.tax.name || "GST")}IN <small class="mut">(printed on bills)</small></label><input class="in" id="sGstin" value="${esc(c.tax.gstin || "")}" autocapitalize="characters" placeholder="Optional">
+    <div class="chips" style="margin-top:10px"><button class="chip" data-taxincl="0" aria-pressed="${!c.tax.incl}">Prices exclude tax</button><button class="chip" data-taxincl="1" aria-pressed="${!!c.tax.incl}">Prices include tax</button></div>
+    <div class="chips" style="margin-top:6px"><button class="chip" data-taxsplit="1" aria-pressed="${!!c.tax.split}">Split into C${esc(c.tax.name)} + S${esc(c.tax.name)}</button><button class="chip" data-taxsplit="0" aria-pressed="${!c.tax.split}">One line</button></div>
+    <p class="hint">Each menu item and material can have its own rate (Menu & recipes, Stock); otherwise the default applies. New orders and GRNs use the rates at the time; old bills don’t change.</p>` : ""}
+  <label class="f" style="margin-top:18px">Locations</label><div class="kv">${c.locations.map((l, ix) => `<div style="align-items:center;gap:8px"><input class="in" data-locname="${ix}" value="${esc(l.name)}" style="flex:1;min-width:0"><div class="chips">${[["kitchen", "Kitchen"], ["outlet", "Outlet"]].map(([k, n]) => `<button class="chip" data-lockind="${ix}:${k}" aria-pressed="${l.kind === k}">${n}</button>`).join("")}</div>${ix ? `<button class="rm" data-locrm="${ix}" aria-label="Remove location">×</button>` : ""}</div>`).join("")}</div>
+  <button class="add-line" data-act="addLocation">+ Add outlet or kitchen</button>
+  <p class="hint">Kitchens make; outlets sell and receive transfers. The first location holds everything recorded before locations existed.</p>
   <label class="f" for="sTables">Dine-in tables at the counter</label><input class="in" id="sTables" inputmode="numeric" value="${esc(c.tables || 10)}" placeholder="10">
   <label class="f">Occasions</label><div class="chips">${(c.tags || []).map(g => `<span class="chip tagchip">${esc(g)}<button data-deltag="${esc(g)}" aria-label="Remove ${esc(g)}">×</button></span>`).join("") || `<span class="hint">None yet</span>`}</div>
   <div class="two" style="margin-top:8px"><input class="in" id="sNewTag" placeholder="e.g. Diwali 2026"><button class="btn btn-ghost" style="margin:0;height:48px" data-act="addTag">Add occasion</button></div>
   <label class="f" for="sActive">Tag new orders with</label><select class="in" id="sActive"><option value="">Nothing (regular orders)</option>${(c.tags || []).map(g => `<option ${g === c.activeTag ? "selected" : ""}>${esc(g)}</option>`).join("")}</select>
   <button class="btn btn-primary" data-act="saveSettings">Save settings</button>`);
 }
-function syncSettings() { const c = ui.sheet.c; const g = id => document.getElementById(id); c.business = g("sBiz").value.trim() || "My Bakery"; c.tagline = g("sTag").value.trim(); c.upi = g("sUpi").value.trim(); c.payee = g("sPayee").value.trim(); c.activeTag = g("sActive").value; c.accent = g("sAccent").value; c.tables = Math.min(60, Math.max(0, Math.round(num(g("sTables").value)))) || 10; }
+function syncSettings() { const c = ui.sheet.c; const g = id => document.getElementById(id); c.business = g("sBiz").value.trim() || "My Bakery"; c.tagline = g("sTag").value.trim(); c.upi = g("sUpi").value.trim(); c.payee = g("sPayee").value.trim(); c.activeTag = g("sActive").value; c.accent = g("sAccent").value; c.tables = Math.min(60, Math.max(0, Math.round(num(g("sTables").value)))) || 10;
+  if (g("sTaxName")) { c.tax.name = g("sTaxName").value.trim() || "GST"; c.tax.rate = num(g("sTaxRate").value); c.tax.gstin = g("sGstin").value.trim().toUpperCase(); }
+  c.locations.forEach((l, ix) => { const el = document.querySelector(`[data-locname="${ix}"]`); if (el) l.name = el.value.trim() || l.name; }); }
 async function shrinkImage(file, size = 256) {
   const url = URL.createObjectURL(file); const img = new Image(); img.src = url; await img.decode();
   const cv = document.createElement("canvas"); const s = Math.min(img.width, img.height); cv.width = cv.height = size;
@@ -148,6 +178,8 @@ async function shrinkImage(file, size = 256) {
 }
 A.settings = settingsSheet;
 A.removeLogo = () => { syncSettings(); ui.sheet.c.logo = ""; drawSettings(ui.sheet); };
+A.toggleTax = () => { syncSettings(); ui.sheet.c.tax.on = !ui.sheet.c.tax.on; drawSettings(ui.sheet); };
+A.addLocation = () => { syncSettings(); const c = ui.sheet.c; c.locations.push({ id: uid("l"), name: `Outlet ${c.locations.filter(l => l.kind === "outlet").length + 1}`, kind: "outlet" }); drawSettings(ui.sheet); };
 A.toggleFestive = () => { syncSettings(); ui.sheet.c.festive = !ui.sheet.c.festive; drawSettings(ui.sheet); };
 A.addTag = () => { syncSettings(); const v = $("#sNewTag").value.trim(); if (!v) { toast("Type the occasion name"); return; } ui.sheet.c.tags = [...new Set([...(ui.sheet.c.tags || []), v])]; drawSettings(ui.sheet); };
 A.saveSettings = async () => { syncSettings(); const h = hue(ui.sheet.c.accent);
@@ -247,8 +279,8 @@ H.change.push(async T => {
 /* ---------- Excel ---------- */
 export function buildWorkbook() {
   const X = window.XLSX; const wb = X.utils.book_new(); const os = M.orders().sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : cmpFlat(a, b));
-  const L = [["Order #", "Date", "Channel", "Status", "Customer", "Flat", "Phone", "Occasion", "Item", "Qty", "Rate (₹)", "Line (₹)", "Offer %", "Order total (₹)", "Received (₹)", "Balance (₹)", "Notes"]];
-  os.forEach(o => o.items.forEach((i, ix) => L.push([o.no, o.date, M.CHANNELS[o.channel] || o.channel, M.STATUS_LABEL[o.status] || o.status, o.customer, o.flat, o.phone, o.tag, i.item, i.qty, i.rate, i.qty * i.rate, ix ? "" : o.discountPct || "", ix ? "" : M.total(o), ix ? "" : M.received(o), ix ? "" : M.bal(o), ix ? "" : o.notes])));
+  const L = [["Order #", "Date", "Location", "Channel", "Status", "Customer", "Flat", "Phone", "Occasion", "Item", "Qty", "Rate (₹)", "Line (₹)", "Tax %", "Offer %", "Tax (₹)", "Order total (₹)", "Received (₹)", "Balance (₹)", "Notes"]];
+  os.forEach(o => o.items.forEach((i, ix) => L.push([o.no, o.date, M.locName(o.outletId || M.locations()[0].id), M.chanLabel(o), M.STATUS_LABEL[o.status] || o.status, o.customer, o.flat, o.phone, o.tag, i.item, i.qty, i.rate, i.qty * i.rate, i.taxPct || "", ix ? "" : o.discountPct || "", ix ? "" : M.taxOf(o).tax || "", ix ? "" : M.total(o), ix ? "" : M.received(o), ix ? "" : M.bal(o), ix ? "" : o.notes])));
   X.utils.book_append_sheet(wb, X.utils.aoa_to_sheet(L), "Orders");
   const byId = Object.fromEntries(os.map(o => [o.id, o]));
   const P = [["Date", "Order #", "Customer", "Amount (₹)", "Mode", "Note"]]; ev.all("payments").sort((a, b) => a.date < b.date ? -1 : 1).forEach(p => { const o = byId[p.orderId] || {}; P.push([p.date, o.no || "", o.customer || "", p.amount, p.mode, p.note || ""]); });
@@ -262,6 +294,12 @@ export function buildWorkbook() {
   M.menu().forEach(m => (m.recipe || []).forEach(r => { const i = ings[r.ingId]; if (i) Bm.push([m.name, "Finished item", "1 piece", i.name, M.ING_TYPES[i.type], r.qty, i.unit, Math.round(M.unitCost(i) * r.qty * 100) / 100]); }));
   M.ingredients().filter(x => x.type === "sf").forEach(x => x.recipe.forEach(r => { const i = ings[r.ingId]; if (i) Bm.push([x.name, "Semi-finished", `1 run (${x.yield} ${x.unit})`, i.name, M.ING_TYPES[i.type], r.qty, i.unit, Math.round(M.unitCost(i) * r.qty * 100) / 100]); }));
   X.utils.book_append_sheet(wb, X.utils.aoa_to_sheet(Bm), "BOM");
+  const G = [["GRN", "Date", "Supplier", "Invoice", "Received at", "Material", "Qty", "Unit", "Amount (₹)", "Tax %", "GRN tax (₹)", "GRN total (₹)", "Status"]];
+  M.grns().slice().reverse().forEach(g => g.lines.forEach((l, ix) => { const i = ings[l.ingId]; G.push([g.no, g.date, g.supplier, g.invoiceNo || "", M.locName(g.loc), i ? i.name : "?", l.qty, i ? i.unit : "", l.amount, l.taxPct || "", ix ? "" : g.tax || "", ix ? "" : g.total, g.void ? "Undone" : ""]); }));
+  if (G.length > 1) X.utils.book_append_sheet(wb, X.utils.aoa_to_sheet(G), "GRNs");
+  const Tr = [["Transfer", "Date", "From", "To", "Item or material", "Qty", "Unit", "Status"]];
+  M.transfers().slice().reverse().forEach(t => t.lines.forEach(l => { const i = l.ingId ? ings[l.ingId] : null; Tr.push([t.no, t.date, M.locName(t.from), M.locName(t.to), l.item || (i ? i.name : "?"), l.qty, l.item ? "pcs" : (i ? i.unit : ""), t.void ? "Undone" : ""]); }));
+  if (Tr.length > 1) X.utils.book_append_sheet(wb, X.utils.aoa_to_sheet(Tr), "Transfers");
   const V2 = [["Date", "Material", "Type", "Qty", "Unit", "Amount (₹)", "Note"]]; M.moves().forEach(m => { const i = ings[m.ingId]; V2.push([m.date, i ? i.name : "?", m.type, m.qty, i ? i.unit : "", m.amount || "", m.note || ""]); });
   X.utils.book_append_sheet(wb, X.utils.aoa_to_sheet(V2), "Stock movements");
   const Bt = [["Batch #", "Date", "Time", "Item", "Pieces", "Spoiled", "Batch cost (₹)", "Made by", "Note"]];

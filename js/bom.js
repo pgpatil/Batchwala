@@ -50,7 +50,7 @@ V.bom = () => {
 /* ---------- plan: explode a day's bake through every level ---------- */
 function planView(ings) {
   const t = today(); const d = S.planDate || t;
-  const lines = M.board(d).filter(r => r.toBake > 0).map(r => ({ item: r.item, qty: r.toBake }));
+  const lines = R.mode() === "erp" && H.prodLines ? H.prodLines(d) : M.board(d).filter(r => r.toBake > 0).map(r => ({ item: r.item, qty: r.toBake }));
   const ex = M.explode(lines); const sm = ex.onHand;
   const ids = Object.keys(ex.need).filter(id => ings[id]);
   const bought = ids.filter(id => ings[id].type !== "sf").sort((a, b) => (ings[a].type + ings[a].name).localeCompare(ings[b].type + ings[b].name));

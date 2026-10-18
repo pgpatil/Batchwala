@@ -3,7 +3,7 @@ import * as ev from "./events.js";
 import * as M from "./model.js";
 import * as R from "./roles.js";
 import { S, A, V, H, render, guard, saveOrder, payOrders, reversePayments, logoHtml, toran, chipBar, searchBox, matchQ, band, payTag, chanTag, noLabel } from "./core.js";
-import { $, esc, rs, num, uid, today, addDays, dObj, dLabel, dLong, plate, cmpFlat, ICON, copyText, waHref } from "./util.js";
+import { $, esc, rs, rs2, num, uid, today, addDays, dObj, dLabel, dLong, plate, cmpFlat, ICON, copyText, waHref } from "./util.js";
 import { ui, toast, openSheet, closeSheet, ask, yesNo } from "./ui.js";
 
 /* ---------- WhatsApp text ---------- */
@@ -12,6 +12,7 @@ export function orderText(o) {
   let t = `Hi ${first}! 🧁 Your ${c.business} order for ${dLong(o.date)}:\n`;
   o.items.forEach(i => t += `• ${i.item} × ${i.qty} — ${rs(i.qty * i.rate)}\n`);
   if (o.discountPct) t += `Offer ${o.discountPct}% off — −${rs(M.disc(o))}\n`;
+  t += taxBlock(o, " — ").map(x => x + "\n").join("");
   t += `*Total ${rs(M.total(o))}*`; if (M.bal(o) > 0 && c.upi) t += `\n\nPay by UPI: ${c.upi}`;
   return t + `\n\nThank you! 💛`;
 }
@@ -25,11 +26,20 @@ export function reminderText(cu) {
 /* ---------- bill summary ---------- */
 // Lines are shown at the menu price; a lower charged rate counts as discount, together with any offer %.
 function billLines(o) { return o.items.map(i => { const m = (i.menuId && M.menu().find(x => x.id === i.menuId)) || M.menuByName(i.item); const list = m && m.price > i.rate ? m.price : i.rate; return { ...i, list }; }); }
+// Tax lines for messages and bills: exclusive tax is added ("CGST 2.5%: ₹3"); inclusive is shown as included. Round-off when the total was rounded.
+export function taxBlock(o, sep = ": ") {
+  const tl = M.taxLines(o); if (!tl.length) return [];
+  const out = o.taxIncl ? tl.map(([n, v]) => `Includes ${n}${sep}${rs2(v)}`) : [`Taxable value${sep}${rs2(M.sub(o) - M.disc(o))}`, ...tl.map(([n, v]) => `${n}${sep}${rs2(v)}`)];
+  const ro = Math.round((M.total(o) - (M.sub(o) - M.disc(o) + (o.taxIncl ? 0 : M.taxOf(o).tax))) * 100) / 100;
+  if (Math.abs(ro) >= 0.01) out.push(`Round off${sep}${ro > 0 ? "+" : "−"}${rs2(Math.abs(ro))}`);
+  return out;
+}
+const taxId = o => { const t = M.taxCfg(); return t.gstin && M.taxLines(o).length ? `${t.name}IN: ${t.gstin}\n` : ""; };
 export function billText(o) {
-  const L = billLines(o); const gross = L.reduce((s, l) => s + l.list * l.qty, 0); const payable = M.total(o); const discount = Math.max(0, gross - payable);
-  let t = `${M.config().business} – Bill summary\n${o.customer}${o.flat ? " · " + o.flat : ""}\n${dLong(o.date)}\n\n`;
+  const L = billLines(o); const gross = L.reduce((s, l) => s + l.list * l.qty, 0); const payable = M.total(o); const discount = Math.max(0, gross - (M.sub(o) - M.disc(o)));
+  let t = `${M.config().business} – Bill summary\n${taxId(o)}${o.customer}${o.flat ? " · " + o.flat : ""}\n${dLong(o.date)}\n\n`;
   L.forEach(l => t += `${l.item} × ${l.qty} @ ${rs(l.list)} = ${rs(l.list * l.qty)}\n`);
-  return t + `\nTotal: ${rs(gross)}\nDiscount: ${discount > 0 ? "−" + rs(discount) : rs(0)}\nTotal payable: ${rs(payable)}`;
+  return t + `\nTotal: ${rs(gross)}\nDiscount: ${discount > 0 ? "−" + rs(discount) : rs(0)}\n${taxBlock(o).map(x => x + "\n").join("")}Total payable: ${rs(payable)}`;
 }
 const billChanged = o => o.billSentAt && o.billTotal != null && +o.billTotal !== M.total(o);
 const billWhen = o => new Date(o.billSentAt).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
@@ -141,7 +151,7 @@ export function openOrder(id) {
   <div class="subl" style="margin:-4px 0 10px">Order ${noLabel(o)} · ${esc(dLong(o.date))} · ${esc(M.chanLabel(o))}${o.phone && R.can("phone") ? " · " + esc(o.phone) : ""}${o.tag ? ` · <span class="tag t-camp">${esc(o.tag)}</span>` : ""}</div>
   ${cancelled ? `<div class="banner bad">Cancelled${o.cancelReason ? ": " + esc(o.cancelReason) : ""}</div>` : `<div class="steps" role="group" aria-label="Order status">${steps}</div>`}
   <div class="kv">${o.items.map(i => `<div><span>${esc(i.item)} × ${i.qty}${money ? ` <small class="mut">@ ${rs(i.rate)}</small>` : ""}</span>${money ? `<span>${rs(i.qty * i.rate)}</span>` : ""}</div>`).join("")}
-  ${money && o.discountPct ? `<div><span>Offer ${o.discountPct}% off</span><span>−${rs(M.disc(o))}</span></div>` : ""}${money ? `<div class="tot"><span>Total</span><span>${rs(M.total(o))}</span></div>` : ""}</div>
+  ${money && o.discountPct ? `<div><span>Offer ${o.discountPct}% off</span><span>−${rs(M.disc(o))}</span></div>` : ""}${money ? taxBlock(o, "|").map(x => { const [a, b] = x.split("|"); return `<div><span class="mut">${esc(a)}</span><span class="mut">${esc(b)}</span></div>`; }).join("") : ""}${money ? `<div class="tot"><span>Total</span><span>${rs(M.total(o))}</span></div>` : ""}</div>
   ${o.notes ? `<p class="hint">Note: ${esc(o.notes)}</p>` : ""}
   ${cancelled ? "" : `<div class="statusrow"><button class="sbox ${M.isDelivered(o) ? "on" : "off"}" data-act="toggleDeliver" ${R.can("deliver") ? "" : "disabled"}><small>Delivery</small><b>${M.isDelivered(o) ? "Delivered ✓" : "Not delivered"}</b><em>${R.can("deliver") ? "Tap to " + (M.isDelivered(o) ? "undo" : "mark delivered") : ""}</em></button>
   ${money ? `<button class="sbox ${s === "paid" ? "on" : "off"}" data-act="${s === "paid" ? "unpay" : "payOrder"}" ${R.can("pay.record") || R.can("collect") ? "" : "disabled"}><small>Payment</small><b>${s === "paid" ? "Paid ✓" : s === "part" ? rs(M.bal(o)) + " due" : "Unpaid"}</b><em>${s === "paid" ? (M.lastPayMode(o) ? M.lastPayMode(o) + " · " : "") + "tap to undo" : "Tap to record payment"}</em></button>` : ""}</div>`}
@@ -246,7 +256,7 @@ function drawCompose(st) {
     <div><label class="f" for="cNotes">Notes</label><input class="in" id="cNotes" value="${esc(o.notes)}" placeholder="Optional"></div></div>
   </div>
   <div class="comp-foot"><div class="offer">Offer ${[0, 5, 10, 15].map(p => `<button class="chip" data-offer="${p}" aria-pressed="${(o.discountPct || 0) === p}">${p ? p + "% off" : "None"}</button>`).join("")}</div>
-    <div class="totline"><small>${M.pcs(o)} pcs${o.discountPct ? ` · saves ${rs(M.disc(o))}` : ""}</small><b>${rs(M.sub(o) - M.disc(o))}</b></div>
+    <div class="totline"><small>${M.pcs(o)} pcs${o.discountPct ? ` · saves ${rs(M.disc(o))}` : ""}${M.taxOf(M.withTax(o)).tax ? ` · ${M.withTax(o).taxIncl ? "incl." : "+"} ${esc(M.taxCfg().name)} ${rs2(M.taxOf(M.withTax(o)).tax)}` : ""}</small><b>${rs(M.total(M.withTax(o)))}</b></div>
     <button class="btn btn-primary" data-act="saveCompose" ${o.items.length ? "" : "disabled"}>${st.isNew ? "Save order" : "Save changes"}</button></div>`, true);
   const cs = $(".comp-scroll"); if (cs) cs.scrollTop = sc;
   if (fid) { const el = document.getElementById(fid); if (el) { el.focus(); try { el.setSelectionRange(fpos, fpos); } catch (_) {} } }
@@ -280,7 +290,7 @@ H.input.push(T => {
   const st = ui.sheet; if (!st || st.kind !== "compose") return false;
   if (T.id === "cName") { st.o.customer = T.value; st.sugg = true; st.dirty = true; drawCompose(st); return true; }
   if (["cFlat", "cPhone", "cNotes"].includes(T.id)) { syncCompose(); st.dirty = true; return true; }
-  if (T.dataset.rate != null) { const it = st.o.items[+T.dataset.rate]; it.rate = num(T.value); st.dirty = true; const tb = $(".totline b"); if (tb) tb.textContent = rs(M.sub(st.o) - M.disc(st.o)); const sm = T.closest(".cl").querySelector(".cn small"); if (sm) sm.textContent = rs(it.qty * it.rate); return true; }
+  if (T.dataset.rate != null) { const it = st.o.items[+T.dataset.rate]; it.rate = num(T.value); st.dirty = true; const tb = $(".totline b"); if (tb) tb.textContent = rs(M.total(M.withTax(st.o))); const sm = T.closest(".cl").querySelector(".cn small"); if (sm) sm.textContent = rs(it.qty * it.rate); return true; }
   return false;
 });
 H.change.push(T => {

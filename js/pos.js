@@ -2,7 +2,7 @@
 import * as M from "./model.js";
 import * as R from "./roles.js";
 import { S, A, V, H, guard, saveOrder, payOrders, band, payTag, noLabel } from "./core.js";
-import { esc, rs, uid, today, ICON } from "./util.js";
+import { esc, rs, rs2, uid, today, ICON } from "./util.js";
 import { ui, toast, ask, yesNo } from "./ui.js";
 
 const SVC = [["takeaway", "Takeaway"], ["dinein", "Dine-in"], ["swiggy", "Swiggy"], ["zomato", "Zomato"]];
@@ -12,7 +12,9 @@ const P = () => S.pos || (S.pos = fresh());
 const walkin = svc => svc === "takeaway" || svc === "dinein";
 const openTabs = () => M.orders(false).filter(o => o.channel === "walkin" && o.service === "dinein" && !M.isDelivered(o));
 const sub = p => p.items.reduce((s, i) => s + i.qty * i.rate, 0);
-const total = p => sub(p) - Math.round(sub(p) * p.disc / 100);
+// The ticket as an order, with current tax rates on new lines, so totals match the bill.
+const asOrder = p => M.withTax({ items: p.items, discountPct: p.disc, ...(p.openId ? { taxIncl: (M.orders().find(o => o.id === p.openId) || {}).taxIncl } : {}) });
+const total = p => M.total(asOrder(p));
 const pcs = p => p.items.reduce((s, i) => s + i.qty, 0);
 const since = o => new Date(o.createdAt || o._at).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" });
 function tableList(tabs) { const n = Math.max(1, +M.config().tables || 10); const t = Array.from({ length: n }, (_, i) => String(i + 1)); tabs.forEach(o => { if (o.table && !t.includes(o.table)) t.push(o.table); }); return t; }
@@ -42,7 +44,8 @@ V.pos = () => {
       : `<p class="hint">Tap items to add them.${p.svc === "dinein" && tabs.length ? " Tap a busy table to see or add to its bill." : ""}</p>`}
     <input class="in" id="posNote" value="${esc(p.note)}" placeholder="Note (less sugar, birthday candle…)" style="margin-top:10px">
     <div class="offer" style="margin-top:10px">Discount ${[0, 5, 10, 15].map(d => `<button class="chip" data-posdisc="${d}" aria-pressed="${p.disc === d}">${d ? d + "%" : "None"}</button>`).join("")}</div>
-    <div class="totline"><small>${pcs(p)} pcs${p.disc ? ` · saves ${rs(sub(p) - total(p))}` : ""}</small><b>${rs(total(p))}</b></div>
+    ${M.taxLines(asOrder(p)).map(([n, v]) => `<div class="taxline"><span>${asOrder(p).taxIncl ? "incl. " : ""}${esc(n)}</span><span>${rs2(v)}</span></div>`).join("")}
+    <div class="totline"><small>${pcs(p)} pcs${p.disc ? ` · saves ${rs(Math.round(sub(p) * p.disc / 100))}` : ""}</small><b>${rs(total(p))}</b></div>
     ${p.svc === "takeaway" ? `<div class="seg seg3" style="margin-top:8px" role="group" aria-label="Paid by">${MODES.map(m => `<button data-posmode="${m}" aria-pressed="${p.mode === m}">${m}</button>`).join("")}</div>
       <button class="btn btn-primary" data-act="posCharge" ${p.items.length ? "" : "disabled"}>Charge ${rs(total(p))} · ${esc(p.mode)}</button>` : ""}
     ${p.svc === "dinein" ? `<div class="btnrow"><button class="btn btn-ghost" data-act="posSaveTab" ${p.items.length && p.table && p.dirty ? "" : "disabled"}>${tab ? "Update table" : "Open table"}</button><button class="btn btn-primary" data-act="posSettle" ${p.items.length && p.table ? "" : "disabled"}>Settle ${rs(total(p))}</button></div>` : ""}
@@ -62,7 +65,7 @@ async function savePos(status) {
     customer: p.customer.trim() || (p.svc === "dinein" ? `Table ${p.table}` : w ? "Walk-in" : M.CHANNELS[p.svc]), phone: p.phone.trim(),
     channel: w ? "walkin" : p.svc, service: w ? p.svc : "", table: p.svc === "dinein" ? p.table : "",
     items: p.items.map(i => ({ ...i })), discountPct: p.disc, notes: p.note.trim(), status, deliveredAt: status === "delivered" ? now : "" };
-  await saveOrder(o); return M.normOrder(o);
+  await saveOrder(o); return M.orders().find(x => x.id === o.id);   // as stored, with tax stamped
 }
 const reset = () => { const p = P(); S.pos = fresh(p.svc, p.mode); S.query.pos = ""; H.render(); };
 A.posCharge = async el => { if (!guard("sale")) return; const p = P(); if (!p.items.length) return; el.disabled = true;

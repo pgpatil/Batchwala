@@ -10,24 +10,34 @@ import "./inventory.js";
 import "./batches.js";
 import "./pos.js";
 import "./bom.js";
+import "./erp.js";
 import { waSheet } from "./ops.js";
 import { setupView, resumeSync, dailyReport } from "./admin.js";
 import { APP_NAME } from "./config.js";
 import { $, esc, ICON } from "./util.js";
 import { ui, toast, closeSheet, yesNo } from "./ui.js";
 
-const TAB = { pos: ["Counter", ICON.cart], bom: ["BOM", ICON.tree], today: ["Today", ICON.today], orders: ["Orders", ICON.orders], pay: ["Payments", ICON.pay], stock: ["Stock", ICON.stock], bake: ["Bake board", ICON.oven], batches: ["Batches", ICON.batch], run: ["Delivery run", ICON.run], more: ["More", ICON.more] };
-const SHORT = { bake: "Bake", run: "My run" };   // bottom-bar labels on phones
-const ORDER = ["pos", "today", "orders", "bake", "batches", "bom", "run", "pay", "stock", "more"];
-// Screens a role may open, from its permissions; its phone tabs are a subset.
+const TAB = { pos: ["Counter", ICON.cart], bom: ["BOM", ICON.tree], prod: ["Production", ICON.oven], grn: ["Purchases (GRN)", ICON.inbox], xfer: ["Transfers", ICON.truck], fg: ["Finished goods", ICON.batch], today: ["Today", ICON.today], orders: ["Orders", ICON.orders], pay: ["Payments", ICON.pay], stock: ["Stock", ICON.stock], bake: ["Bake board", ICON.oven], batches: ["Batches", ICON.batch], run: ["Delivery run", ICON.run], more: ["More", ICON.more] };
+const SHORT = { bake: "Bake", run: "My run", grn: "GRN", fg: "FG stock", prod: "Make" };   // bottom-bar labels on phones
+const ORDER = ["pos", "today", "orders", "bake", "prod", "grn", "stock", "xfer", "fg", "batches", "bom", "run", "pay", "more"];
+// Screens a role may open in the current mode, from its permissions; its phone tabs are a subset.
+// Classic (nobody has ERP) shows restaurant and production screens together, as before.
 function allowedViews() {
-  const t = R.tabs().slice(); const c = R.can;
-  if (c("sale")) t.push("pos");
-  if (c("bake.record") || t.includes("today")) t.push("bake", "batches");
-  if (c("bake.record") || c("menu.edit") || c("stock.edit") || c("reports")) t.push("bom");
-  if (c("deliver") && t.includes("today")) t.push("run");
-  if (c("stock.buy") || c("stock.count")) t.push("stock");
+  const md = R.mode(); const t = R.tabs().slice(); const c = R.can; const rest = md !== "erp", erp = md !== "restaurant";
+  if (rest) { if (c("sale")) t.push("pos"); if (c("deliver") && t.includes("today")) t.push("run"); if (t.includes("today") || c("bake.record")) t.push("bake"); }
+  if (erp) {
+    if (c("bake.record") || c("orders.edit")) t.push("batches");
+    if (c("bake.record") || c("menu.edit") || c("stock.edit") || c("reports")) t.push("bom");
+    if (c("stock.buy") || c("stock.count")) t.push("stock");
+    if (md === "erp") { if (c("bake.record") || c("orders.edit")) t.push("prod"); if (c("stock.buy")) t.push("grn"); if (c("transfer")) t.push("xfer"); t.push("fg"); }
+  }
   return [...new Set(t)];
+}
+// Mode switch (people the admin gave both modes) and this device's location (when there is more than one).
+export function switchersHtml() {
+  const both = R.mode() !== "classic" && R.myModes().length > 1; const locs = M.locations();
+  return `${both ? `<div class="seg modesw" role="group" aria-label="Mode">${Object.entries(M.MODES).map(([k, l]) => `<button data-mode="${k}" aria-pressed="${R.mode() === k}">${l}</button>`).join("")}</div>` : ""}
+  ${locs.length > 1 ? `<label class="locsel"><span>Location</span><select data-here aria-label="This device’s location">${locs.map(l => `<option value="${esc(l.id)}" ${M.here() === l.id ? "selected" : ""}>${esc(l.name)}${l.kind === "kitchen" ? " (kitchen)" : ""}</option>`).join("")}</select></label>` : ""}`;
 }
 // Wide screens get a sidebar, side drawers and table views.
 const wideQ = window.matchMedia("(min-width: 1024px)");
@@ -49,7 +59,7 @@ function navHtml() {
   const c = M.config(); const me = R.me();
   const links = [["customers", ICON.people, "Customers", R.can("customers")], ["reports", ICON.chart, "Sales & profit", R.can("reports")], ["menu", ICON.menu, "Menu & recipes", R.can("menu.edit") || R.can("reports")]].filter(x => x[3]);
   const btn = t => `<button class="nb${tabs.includes(t) ? "" : " dx"}" data-view="${t}" aria-current="${S.view === t ? "page" : "false"}"><span class="dot">${TAB[t][1]}${t === "pay" && owe ? `<em>${owe}</em>` : ""}${t === "stock" && low ? `<em>${low}</em>` : ""}</span><span class="nl">${S.wide ? TAB[t][0] : SHORT[t] || TAB[t][0]}</span></button>`;
-  return `<div class="nav-brand">${logoHtml(c)}<div><b>${esc(c.business)}</b><small>${esc(me.name + " · " + R.ROLES[me.role].label)}</small></div></div>
+  return `<div class="nav-brand">${logoHtml(c)}<div><b>${esc(c.business)}</b><small>${esc(me.name + " · " + R.ROLES[me.role].label)}</small></div></div><div class="nav-sw dx">${switchersHtml()}</div>
   <div class="nav-in" style="grid-template-columns:repeat(${tabs.length},1fr)">${ORDER.filter(v => views.includes(v)).map(btn).join("")}
   ${links.length ? `<div class="nav-sep dx">Records</div>${links.map(([a, ic, l]) => `<button class="nb dx" data-act="${a}"><span class="dot">${ic}</span><span class="nl">${l}</span></button>`).join("")}` : ""}</div>
   <p class="nav-keys dx">Keys: <kbd>N</kbd> new · <kbd>/</kbd> search</p>`;
@@ -60,9 +70,9 @@ export function render() {
   $("#nav").style.display = "";
   if (!allowedViews().includes(S.view)) S.view = R.home();
   const v = S.view;
-  const fabOn = (["today", "orders", "pay"].includes(v) && (R.can("orders.edit") || R.can("sale") || R.can("wa.import"))) || (v === "stock" && R.can("stock.buy"));
+  const fabOn = (["today", "orders", "pay"].includes(v) && (R.can("orders.edit") || R.can("sale") || R.can("wa.import"))) || ((v === "stock" || v === "grn") && R.can("stock.buy")) || (v === "xfer" && R.can("transfer"));
   $("#fab").style.display = fabOn ? "" : "none";
-  $("#fab").innerHTML = v === "stock" ? `${ICON.plus}Add stock` : `${ICON.plus}New order`;
+  $("#fab").innerHTML = `${ICON.plus}${v === "grn" || (v === "stock" && R.mode() === "erp") ? "New GRN" : v === "stock" ? "Add stock" : v === "xfer" ? "New transfer" : "New order"}`;
   $("#nav").innerHTML = navHtml();
   const a = document.activeElement; const sk = a && a.dataset && a.dataset.search; const pos = sk ? a.selectionStart : 0;
   const sx = $("#days") ? $("#days").scrollLeft : null;
@@ -74,6 +84,7 @@ export function render() {
 }
 function rerenderSheet() { const s = ui.sheet; if (!s || !s.redraw) return; $("#sheet").dataset.keep = "1"; const top = $("#sheet").scrollTop; s.redraw(); $("#sheet").scrollTop = top; }
 hooks.render = render; hooks.rerenderSheet = rerenderSheet; H.render = render;
+H.switchers = switchersHtml;
 ui.onClose = () => render();
 
 /* ---------- events ---------- */
@@ -88,6 +99,7 @@ document.addEventListener("click", async e => {
     closeSheet(); return; }
   const f = T.closest("[data-filter]"); if (f) { const [k, v] = f.dataset.filter.split(":"); S.filter[k] = v; render(); return; }
   const tf = T.closest("[data-tagf]"); if (tf) { S.filter.ordersTag = tf.dataset.tagf; render(); return; }
+  const md = T.closest("[data-mode]"); if (md) { R.setMode(md.dataset.mode); await ev.setMeta("mode", md.dataset.mode); S.view = R.home(); render(); window.scrollTo({ top: 0 }); return; }
   const cf = T.closest("[data-chanf]"); if (cf) { S.filter.ordersChan = cf.dataset.chanf; render(); return; }
   const dy = T.closest("[data-day]"); if (dy) { S.date = dy.dataset.day; render(); return; }
   const dv = T.closest("[data-deliver]"); if (dv) { const { confirmDeliver } = await import("./orders.js"); const o = M.orders().find(x => x.id === dv.dataset.deliver); if (o) confirmDeliver(o, true); return; }
@@ -103,6 +115,7 @@ document.addEventListener("input", e => {
 });
 document.addEventListener("change", async e => {
   const T = e.target;
+  if (T.dataset && T.dataset.here != null) { M.setHere(T.value); await ev.setMeta("here", T.value); render(); toast(`This device is now at ${M.locName(T.value)}`); return; }
   if (T.dataset && T.dataset.pickday != null) { if (T.value) { S.date = T.value; S.center = true; render(); } return; }
   for (const h of H.change) if (await h(T, e)) return;
 });
@@ -120,10 +133,10 @@ $("#scrim").addEventListener("click", () => { const x = document.querySelector("
 /* ---------- start ---------- */
 (async () => {
   try { await ev.init(); } catch (err) { $("#main").innerHTML = `<div class="empty"><strong>Storage isn’t available</strong>This browser blocked local storage. Open the app in Chrome or Safari, not a private window.</div>`; return; }
-  await R.loadMe();
+  await R.loadMe(); R.setMode(await ev.getMeta("mode")); M.setHere(await ev.getMeta("here") || (R.me() || {}).loc || null);
   ev.setActor(() => (R.me() || {}).id || "setup");
   if (R.me()) S.view = R.home();
-  ev.onChange(() => { if (ui.sheet && ui.sheet.redraw && !["compose", "waConfirm", "settings", "member", "ingEdit", "item", "move", "bake", "part", "batchSpoil"].includes(ui.sheet.kind)) rerenderSheet(); render(); });
+  ev.onChange(() => { if (ui.sheet && ui.sheet.redraw && !["compose", "waConfirm", "settings", "member", "ingEdit", "item", "move", "bake", "part", "batchSpoil", "grn", "xfer", "fgAdj"].includes(ui.sheet.kind)) rerenderSheet(); render(); });
   sync.onStatus(async st => {
     let joined = false;
     if (st.state === "ok" && !R.me()) { const a = sync.current(); const m = a && R.matchEmail(a.account); if (m) { await R.setMe(m.id); S.view = R.home(); joined = true; toast(`Welcome, ${m.name}`); } }
