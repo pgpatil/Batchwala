@@ -16,7 +16,8 @@ export const rerenderSheet = () => hooks.rerenderSheet();
 
 export function guard(perm) { if (can(perm)) return true; toast("Your role can’t do this. Ask an admin."); return false; }
 export const clean = o => { const { _at, _by, ...r } = o; return JSON.parse(JSON.stringify(r)); };
-export async function saveOrder(o) { const c = M.config(); await ev.put("orders", clean({ businessId: c.businessId, outletId: c.outletId, ...o })); sync.soon(); return true; }
+// New orders belong to this device's location; tax rates are stamped on lines the first time they're saved.
+export async function saveOrder(o) { const c = M.config(); await ev.put("orders", clean(M.withTax({ businessId: c.businessId, outletId: M.here(), ...o }))); sync.soon(); return true; }
 export async function addPayment(o, amount, mode, note = "", reverses = "") {
   await ev.put("payments", { id: uid("p"), orderId: o.id, customerKey: M.ckey(o), amount: Math.round(amount * 100) / 100, mode: mode || "", date: today(), note, ...(reverses ? { reverses } : {}), businessId: M.config().businessId });
   sync.soon();
@@ -35,5 +36,5 @@ export const searchBox = (key, ph) => `<input class="search" data-search="${key}
 export const matchQ = (key, o) => { const q = (S.query[key] || "").toLowerCase().trim(); return !q || ((o.customer || "") + " " + (o.flat || "") + " " + (o.phone || "") + " " + (o.no || "")).toLowerCase().includes(q); };
 export const band = (title, right = "", extra = "") => `<div class="band"><div class="page-title"><h1 class="h">${title}</h1>${right}</div>${extra}${toran()}</div>`;
 export function payTag(o) { if (o.status === "cancelled") return `<span class="tag t-due">Cancelled</span>`; const s = M.payState(o); return s === "paid" ? `<span class="tag t-paid">${ICON.check}Paid</span>` : s === "part" ? `<span class="tag t-part">${rs(M.bal(o))} due</span>` : `<span class="tag t-due">Unpaid</span>`; }
-export const chanTag = o => o.channel && o.channel !== "whatsapp" ? `<span class="tag t-chan">${esc(M.CHANNELS[o.channel] || o.channel)}</span>` : "";
+export const chanTag = o => o.channel && o.channel !== "whatsapp" ? `<span class="tag t-chan">${esc(M.chanLabel(o))}</span>` : "";
 export const noLabel = o => o.no ? "#" + esc(o.no) : "";

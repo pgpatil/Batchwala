@@ -10,7 +10,7 @@ export function openSheet(state, html, full = false) {
   ui.sheet = state;
   const s = $("#sheet"); s.className = "sheet" + (full ? " full" : ""); s.innerHTML = `<div class="grab"></div>` + html;
   if (!s.dataset.keep) s.scrollTop = 0; delete s.dataset.keep;
-  requestAnimationFrame(() => s.classList.add("open"));
+  requestAnimationFrame(() => { if (ui.sheet === state) s.classList.add("open"); });   // not if it was closed meanwhile
   $("#scrim").classList.add("open"); document.body.style.overflow = "hidden";
 }
 export function closeSheet() {

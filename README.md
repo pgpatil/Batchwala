@@ -11,15 +11,22 @@ It is a Progressive Web App: it opens from a link, installs to the home screen, 
 | Today | Day picker, deliveries in flat order with a confirm step, pieces to bake, money collected |
 | New order | Tap-to-add menu, saved customers, channel, offer %, occasion tag |
 | From WhatsApp | Paste or share a customer’s message; the app reads customer, flat, items and date, then shows a confirm screen. Unmatched words must be matched or ignored before saving, and can be remembered as short names |
-| Quick sale | Walk-in, Swiggy or Zomato sale in three taps; Swiggy and Zomato show as owing until settled |
-| Bake board | Per item: pre-ordered, kept ready (par level), baked, sold at counter, left, and how many still to bake. Recording a bake deducts ingredients by recipe |
+| Counter | First screen for the counter: Takeaway (charge by UPI, cash or card) or Dine-in at a table with an open bill to add to and settle; Swiggy and Zomato sales too. Type to search the menu, Enter adds |
+| Bake board | Per item: pre-ordered, kept ready (par level), baked, spoiled, sold at counter, left, and how many still to bake |
+| Batches | Every bake recorded as a numbered batch: pieces per item, prep runs of semi-finished items, spoiled pieces, note, who made it, stock used and made, and net cost. Undone batches stay in the register, marked |
+| Orders | Every order from every channel (WhatsApp, Phone, Instagram, Bulk / event, Other, Walk-in, Swiggy, Zomato), filtered by period, channel and occasion |
+| Desktop | On a laptop or desktop: sidebar navigation, side-drawer forms, Orders and Batches as tables with totals; N for new order, / to search |
 | Delivery run | Today’s pre-orders by wing and floor; Delivered + paid by UPI or cash in one confirm |
 | Bill summary | Per order: items with quantity, rate and amount, then Total, Discount and Total payable. Copy marks it “Bill summary sent”; editing the order afterwards flags it |
 | Payments | Balances by customer, one-tap UPI or cash, part payments oldest-first, reversals instead of edits, WhatsApp reminders with your UPI ID |
-| Stock | Ingredients in g, ml or pieces, purchases with price, wastage, stock counts, reorder levels, shopping list, barcode search |
+| Stock | Raw materials (RM), packing materials (PM) and semi-finished items in g, ml or pieces; purchases with price and supplier, wastage, stock counts, reorder levels, shopping list, barcode search |
+| BOM | Multilevel bills of materials: menu items use raw, packing and semi-finished materials; semi-finished items have their own recipe and yield and can use other semi-finished items. Costs roll up through every level. Plan & explode turns a day’s bake into what to prepare and what to buy |
 | Menu | Prices, categories, short names for WhatsApp reading, par levels, recipes with cost and margin |
 | Reports | Sales by day and channel, best sellers with margin, wastage value, repeat customers |
-| Users & roles | Admin, Management, Manager, Kitchen, Delivery, Counter; each opens on its own home screen. Optional 4-digit PIN for shared phones |
+| ERP mode | For people the admin gives ERP: Production per kitchen, Purchases as GRNs, Stock by location, Transfers kitchen → outlets, Finished goods by location, Batches and BOM. Restaurant mode keeps the counter, orders, payments, deliveries and the outlet’s bake board. Nobody on ERP = the original single app |
+| Locations | One central kitchen and any number of outlets; each device chooses where it is. Transfers are sent, then received at the other end with what actually arrived |
+| Tax | Optional GST (or any name): default and per-item rates, inclusive or exclusive prices, CGST + SGST split, GSTIN; shown on every bill, message and GRN. Per material, the admin sets whether purchase tax is recoverable or added to cost |
+| Users & roles | Admin, Management, Manager, Kitchen, Delivery, Counter; each opens on its own home screen. Each person uses Restaurant, ERP or both. Optional 4-digit PIN for shared phones |
 | History | Every change records who made it and when; any order shows its full history |
 | Data | Saved on the phone first; optional sync through a shared Google Drive folder; daily Excel copy saved to that folder; backup file; Excel export |
 
@@ -27,12 +34,14 @@ It is a Progressive Web App: it opens from a link, installs to the home screen, 
 
 | Role | Home | Can |
 | --- | --- | --- |
-| Admin | Today | Everything, including users, business settings, sync, backup and deleting records |
-| Management | Today | Orders, bake board, delivery, payments, stock, menu and prices, customers, reports, Excel export |
-| Manager | Today | Day-to-day operations; can’t change prices or export |
-| Kitchen | Bake board | Record bakes, wastage and stock counts; no money or phone numbers |
+| Admin | Counter | Everything, including users, business settings, sync, backup and deleting records |
+| Management | Counter | Orders, bake board, delivery, payments, stock, menu and prices, customers, reports, Excel export |
+| Manager | Counter | Day-to-day operations; can’t change prices or export |
+| Kitchen | Bake board | Batches with prep, spoiled pieces, BOM (no costs), wastage and stock counts; no money or phone numbers |
 | Delivery | My run | Mark delivered, collect payment |
-| Counter | Quick sale | Walk-in and aggregator sales |
+| Counter | Counter | Takeaway, dine-in and aggregator sales |
+
+In ERP mode the homes are Production (Admin, Management, Manager, Kitchen) and Finished goods (Delivery, Counter).
 
 With Google Drive sync, these rules are enforced by the app, not by Drive: anyone with access to the shared folder could edit its files directly. That is fine while the team is the owners. Before staff join, move the data to a database with enforced permissions (see “Moving the data later”).
 
@@ -83,11 +92,15 @@ No build step: plain HTML, CSS and JavaScript modules. Run locally with `python3
 | `js/events.js` | Event store on IndexedDB; current state is the fold of all events |
 | `js/sync.js`, `js/storage/drive.js` | Sync engine and Google Drive adapter |
 | `js/roles.js` | Roles and permissions |
-| `js/model.js` | Totals, balances, customers, stock, costing, bake board |
+| `js/model.js` | Totals, balances, customers, stock, multilevel costing and explosion, batches, bake board |
 | `js/orders.js` | Today, Orders, order detail and history, order form |
 | `js/money.js` | Payments, customers, reports |
-| `js/inventory.js` | Bake board, stock, menu and recipes |
-| `js/ops.js` | Delivery run, quick sale, WhatsApp import |
+| `js/inventory.js` | Bake board, recording a batch, stock, menu and recipes |
+| `js/batches.js` | Batches register and batch detail |
+| `js/pos.js` | Counter: takeaway, dine-in tables, Swiggy and Zomato |
+| `js/bom.js` | BOM trees and the plan & explode view |
+| `js/erp.js` | Production, GRNs, transfers, finished goods, outlet bake board |
+| `js/ops.js` | Delivery run, WhatsApp import, New-order menu |
 | `js/waparse.js` | Reads a WhatsApp message into a draft order |
 | `js/admin.js` | More, first run, users, settings, sync, backup, Excel |
 | `tests/` | Fake shared folder for testing two-phone sync locally |
