@@ -89,7 +89,8 @@ const TOPICS = [
     <p>Inventory has a tab for each kind of item: <b>Raw materials</b> (bought), <b>Packing</b> (bought) and <b>Semi-finished</b> (made here from a recipe), plus <b>All</b>. Within a tab, items are grouped by <b>category</b> (Dairy, Flour & grains, Boxes…), which you set on each item. Each is measured in g, ml or pieces; quantities can be typed in kg or L.</p>
     <p>Filter by category, level (low, out) and, with ERP and several locations, by location. Scanners in keyboard mode type into the search to find a barcode. Open a material for its stock, cost, where it’s used and its history; <b>Bought</b> (or a GRN in ERP), <b>Make</b> for semi-finished, <b>Wasted</b> and <b>Count</b>.</p>
     <p><b>Shopping list</b>: bought materials at or below their reorder level, brought back to twice that level.</p>
-    <p>Costs: bought materials use the last purchase price; semi-finished cost rolls up through their recipe. With tax on, the admin sets per material whether purchase tax is recoverable or added to cost.</p>` },
+    <p>Costs: bought materials use the last purchase price; semi-finished cost rolls up through their recipe. With tax on, the admin sets per material whether purchase tax is recoverable or added to cost.</p>
+    <p><b>Cost</b> of bought materials is the weighted average of stock on hand (Business settings can switch to the last purchase price). A material can be <b>bought in packs</b> (bag of 50 kg, carton of 100): POs and GRNs then offer the pack as a unit. <b>Usable for</b> days fills the best-before date on GRNs; each GRN line becomes a lot, used oldest first. Expired or expiring lots show a banner and an <b>Expiring</b> filter, and can be discarded from the material’s page.</p>` },
   { id: "invoice", title: "Upload a purchase invoice", tags: "invoice upload supplier bill purchase grn map match item names excel csv paste pdf photo camera scan ocr claude", body: `
     <p>Inventory, Purchases or Import & export → <b>Upload invoice</b>.</p>
     <ol><li>Enter the supplier and invoice number (or leave them for the app to read from the bill).</li>
@@ -102,6 +103,27 @@ const TOPICS = [
   { id: "grn", view: "grn", title: "Purchases (GRN)", tags: "grn goods received note purchase supplier invoice tax receive stock", body: `
     <p>Record each delivery from a supplier as a <b>GRN</b>: supplier (new names are added to your supplier list), invoice number, date, the location receiving it, and each item’s quantity, amount and tax %. Saving adds the stock at that location.</p>
     <p>The list shows this month, 30 days or all, with totals and spend by supplier. <b>Undo</b> takes the stock back off and keeps the GRN marked undone.</p>` },
+  { id: "po", view: "po", title: "Purchase orders", tags: "po purchase order approve approval supplier indent reorder receive grn rate pack bag", body: `
+    <ol><li><b>Raise</b>: New PO, or let the app draft them: Planning → Indent → <b>Draft purchase orders</b> (one per usual supplier, for what’s short after stock and anything already on order), or the reorder banner on this screen for materials below their reorder level. Quantities are rounded up to whole packs when a material is bought in packs, at the supplier’s last price.</li>
+    <li><b>Approve</b>: drafts wait for an admin or management to approve (Managers can raise but not approve). Approved POs count as <b>on order</b> in Planning.</li>
+    <li><b>Send</b> it to the supplier on WhatsApp, or copy it.</li>
+    <li><b>Receive goods (GRN)</b> opens a GRN filled with what’s still pending. Each line shows if the bill’s rate differs from the PO. Receive in parts; the PO shows Part received until everything arrives, or <b>Close short</b> when nothing more is coming.</li></ol>` },
+  { id: "sup", view: "sup", title: "Suppliers & payables", tags: "supplier payable owe credit days overdue payment ledger statement upi bank cheque", body: `
+    <p>Every GRN is a bill from its supplier. This screen shows what you owe each one, what is overdue (bill date + the supplier’s <b>credit days</b>) and when the oldest bill fell due.</p>
+    <p>Open a supplier to set phone, GSTIN and credit days, see unpaid bills and the ledger with a running balance, <b>record a payment</b> (bank, UPI, cash or cheque, with a reference), or share a statement on WhatsApp. Payments settle the oldest bills first. A wrong payment is reversed, not deleted.</p>` },
+  { id: "wo", view: "wo", title: "Work orders and variance", tags: "work order production issue materials store complete variance yield return wip", body: `
+    <ol><li><b>Create</b> from Planning (Create a work order for this plan), from a batch card, or New work order: pieces to make and semi-finished runs.</li>
+    <li><b>Issue materials</b>: the standard quantities from the BOM are filled in; change them to what was really handed to the kitchen. Issued stock leaves the store at once. Issue more later if needed.</li>
+    <li><b>Complete</b>: enter good and spoiled pieces, semi-finished runs made, and anything returned to the store unused. The batch is recorded with its real cost: <b>used = issued − returned</b>.</li></ol>
+    <p><b>Variance</b> compares what was used with the BOM for what was actually made, material by material, in quantity and value. Positive means more was used than the BOM allows. Undoing the batch puts back everything the order issued and cancels the order.</p>` },
+  { id: "insights", view: "insights", title: "Cost & stock reports", tags: "reports food cost wastage variance ageing buying price tax gst day book tally accountant export", body: `
+    <ul><li><b>Food cost</b>: sales before tax, and each item’s standard material cost as a share of its price; plus what production actually cost per good piece.</li>
+    <li><b>Wastage</b>: pieces spoiled and discarded per item, and materials written off with their value.</li>
+    <li><b>Variance</b>: completed work orders, by material and by order.</li>
+    <li><b>Stock ageing</b>: material lots on hand by age and best-before, and unsold finished goods.</li>
+    <li><b>Buying</b>: spend by supplier and each material’s latest price change.</li>
+    <li><b>Tax</b>: tax on sales against claimable tax on purchases, by month. A working summary, not a return.</li>
+    <li><b>Day book</b>: every sale, receipt, purchase and supplier payment as a CSV for your accountant. It is not Tally’s own import format.</li></ul>` },
   { id: "xfer", view: "xfer", title: "Transfers", tags: "transfer send receive in transit short kitchen outlet", body: `
     <ol><li><b>Send</b>: from the kitchen, choose the outlet; finished goods are suggested from what it’s short of. Add materials (boxes, cream) if needed. Stock leaves the sender and the transfer is <b>In transit</b>.</li>
     <li><b>Receive</b>: at the outlet (Bake board or Transfers), count what arrived and lower any line that is short, with a note. Only what is received counts at the outlet; shortfalls stay on the transfer as <b>Received short</b>.</li></ol>

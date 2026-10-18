@@ -512,3 +512,4 @@ tr.tfilter input{width:100%;min-width:52px;border:1px solid var(--line);border-r
 .tshown{margin:6px 4px 0}
 .tools .layoutsw{display:inline-flex;width:auto;flex:0 0 auto}
 .layoutsw button{padding:6px 12px}
+.card > p.hint{padding:0 14px 12px;margin:6px 0 0}

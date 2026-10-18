@@ -11,6 +11,9 @@ import "./batches.js";
 import "./pos.js";
 import "./bom.js";
 import "./plan.js";
+import "./purchase.js";
+import "./wo.js";
+import "./reports.js";
 import { enhance } from "./table.js";
 import "./erp.js";
 import "./help.js";
@@ -21,11 +24,11 @@ import { APP_NAME } from "./config.js";
 import { $, esc, ICON } from "./util.js";
 import { ui, toast, closeSheet, yesNo, focusKey, refocus } from "./ui.js";
 
-const TAB = { help: ["Help", ICON.help], data: ["Import & export", ICON.dl], pos: ["Counter", ICON.cart], bom: ["BOM", ICON.tree], plan: ["Planning", ICON.plan], prod: ["Production", ICON.oven], grn: ["Purchases (GRN)", ICON.inbox], xfer: ["Transfers", ICON.truck], fg: ["Finished goods", ICON.batch], today: ["Today", ICON.today], orders: ["Orders", ICON.orders], pay: ["Payments", ICON.pay], stock: ["Inventory", ICON.stock], bake: ["Bake board", ICON.oven], batches: ["Batches", ICON.batch], run: ["Delivery run", ICON.run], more: ["More", ICON.more] };
-const SHORT = { plan: "Plan", bake: "Bake", run: "My run", grn: "GRN", fg: "FG stock", prod: "Make" };   // bottom-bar labels on phones
+const TAB = { help: ["Help", ICON.help], data: ["Import & export", ICON.dl], pos: ["Counter", ICON.cart], bom: ["BOM", ICON.tree], plan: ["Planning", ICON.plan], wo: ["Work orders", ICON.oven], po: ["Purchase orders", ICON.orders], sup: ["Suppliers & payables", ICON.people], insights: ["Cost & stock reports", ICON.chart], prod: ["Production", ICON.oven], grn: ["Purchases (GRN)", ICON.inbox], xfer: ["Transfers", ICON.truck], fg: ["Finished goods", ICON.batch], today: ["Today", ICON.today], orders: ["Orders", ICON.orders], pay: ["Payments", ICON.pay], stock: ["Inventory", ICON.stock], bake: ["Bake board", ICON.oven], batches: ["Batches", ICON.batch], run: ["Delivery run", ICON.run], more: ["More", ICON.more] };
+const SHORT = { plan: "Plan", wo: "Work orders", po: "POs", sup: "Payables", insights: "Reports", bake: "Bake", run: "My run", grn: "GRN", fg: "FG stock", prod: "Make" };   // bottom-bar labels on phones
 const ORDER = ["pos", "today", "orders", "bake", "prod", "grn", "stock", "xfer", "fg", "batches", "bom", "run", "pay", "more"];
 // Screens grouped into buckets: one bottom-bar button per bucket on phones, a strip of its screens on top of each page, sections in the sidebar.
-const BUCKETS = { orders: ["Orders", ICON.orders, ["today", "orders", "run", "pay"]], make: ["Make", ICON.oven, ["plan", "prod", "bake", "batches", "bom"]], stores: ["Stores", ICON.store, ["grn", "stock", "xfer", "fg"]] };
+const BUCKETS = { orders: ["Orders", ICON.orders, ["today", "orders", "run", "pay"]], make: ["Make", ICON.oven, ["plan", "wo", "prod", "bake", "batches", "bom"]], stores: ["Stores", ICON.store, ["po", "grn", "sup", "stock", "xfer", "fg"]] };
 const bucketOf = v => Object.keys(BUCKETS).find(k => BUCKETS[k][2].includes(v));
 const inBucket = k => BUCKETS[k][2].filter(v => allowedViews().includes(v));
 const onBar = v => R.bar().includes(v) || R.bar().includes("@" + bucketOf(v));
@@ -39,7 +42,8 @@ function allowedViews() {
     if (c("bake.record") || c("orders.edit")) t.push("batches");
     if (c("bake.record") || c("menu.edit") || c("stock.edit") || c("reports")) t.push("bom", "plan");
     if (c("stock.buy") || c("stock.count")) t.push("stock");
-    if (md === "erp") { if (c("bake.record") || c("orders.edit")) t.push("prod"); if (c("stock.buy")) t.push("grn"); if (c("transfer")) t.push("xfer"); t.push("fg"); }
+    if (c("stock.buy")) t.push("po", "grn"); if (c("stock.buy") || c("payables")) t.push("sup"); if (c("bake.record")) t.push("wo"); if (c("reports")) t.push("insights");
+    if (md === "erp") { if (c("bake.record") || c("orders.edit")) t.push("prod"); if (c("transfer")) t.push("xfer"); t.push("fg"); }
   }
   t.push("help"); if (c("export") || R.isAdmin()) t.push("data");
   return [...new Set(t)];
@@ -69,7 +73,7 @@ function applyTheme() {
 function navHtml() {
   const tabs = R.tabs(); const views = allowedViews(); const owe = R.can("money") ? M.customers().filter(c => c.balance > 0).length : 0; const low = H.lowCount ? H.lowCount() : 0;
   const c = M.config(); const me = R.me();
-  const links = [["customers", ICON.people, "Customers", R.can("customers")], ["reports", ICON.chart, "Sales & profit", R.can("reports")], ["menu", ICON.menu, "Menu & recipes", R.can("menu.edit") || R.can("reports")], ["data", ICON.dl, "Import & export", R.can("export") || R.isAdmin()], ["help", ICON.help, "Help", true]].filter(x => x[3]);
+  const links = [["customers", ICON.people, "Customers", R.can("customers")], ["reports", ICON.chart, "Sales & profit", R.can("reports")], ["insights", ICON.chart, "Cost & stock reports", views.includes("insights")], ["menu", ICON.menu, "Menu & recipes", R.can("menu.edit") || R.can("reports")], ["data", ICON.dl, "Import & export", R.can("export") || R.isAdmin()], ["help", ICON.help, "Help", true]].filter(x => x[3]);
   const badge = vs => `${vs.includes("pay") && owe ? `<em>${owe}</em>` : ""}${vs.includes("stock") && low ? `<em>${low}</em>` : ""}`;
   const btn = (t, cls) => `<button class="nb ${cls}" data-view="${t}" aria-current="${S.view === t ? "page" : "false"}"><span class="dot">${TAB[t][1]}${badge([t])}</span><span class="nl">${cls === "dx" ? TAB[t][0] : SHORT[t] || TAB[t][0]}</span></button>`;
   // Phone bar: a bucket with one screen is that screen; with several, it opens the one used last.
@@ -153,7 +157,7 @@ document.addEventListener("change", async e => {
 document.addEventListener("keydown", e => {
   if (e.key === "Escape" && ui.sheet && !ui.confirmOpen) { const x = document.querySelector("[data-close]"); x ? x.click() : closeSheet(); return; }
   const T = e.target;
-  if (e.key === "Enter" && T.matches && T.matches("tr[data-open],tr[data-batch],tr[data-ing],tr[data-grn],tr[data-xfer]")) { T.click(); return; }
+  if (e.key === "Enter" && T.matches && T.matches("tr[data-open],tr[data-batch],tr[data-ing],tr[data-grn],tr[data-xfer],tr[data-po],tr[data-sup],tr[data-wo]")) { T.click(); return; }
   // Desktop shortcuts, only when nothing is being typed and no drawer or dialog is open
   if (!R.me() || ui.sheet || ui.confirmOpen || e.ctrlKey || e.metaKey || e.altKey || (T.closest && T.closest("input,textarea,select,[contenteditable]"))) return;
   if (e.key === "/") { const sb = document.querySelector("#main [data-search]"); if (sb) { e.preventDefault(); sb.focus(); } }

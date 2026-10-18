@@ -35,9 +35,9 @@ async function savePlan(d, lines) {
 
 /* ---------- indent ---------- */
 function indentRows(ex, full) {
-  const ings = M.ingMap(); const sm = ex.onHand;
-  return Object.keys(ex.need).filter(id => ings[id] && ings[id].type !== "sf" && ex.need[id] > 0).map(id => { const i = ings[id]; const have = Math.max(0, sm[id] || 0);
-    return { i, need: ex.need[id], have, ind: full ? ex.need[id] : Math.max(0, ex.need[id] - have) }; })
+  const ings = M.ingMap(); const sm = ex.onHand; const oo = M.onOrder();   // approved POs not yet received count as coming
+  return Object.keys(ex.need).filter(id => ings[id] && ings[id].type !== "sf" && ex.need[id] > 0).map(id => { const i = ings[id]; const have = Math.max(0, sm[id] || 0); const ord = oo[id] || 0;
+    return { i, need: ex.need[id], have, ord, ind: full ? ex.need[id] : Math.max(0, ex.need[id] - have - ord) }; })
     .sort((a, b) => (a.i.type + (a.i.category || "~") + a.i.name).localeCompare(b.i.type + (b.i.category || "~") + b.i.name));
 }
 const indentText = (d, rows, full) => `📋 ${M.config().business} ${full ? "store issue" : "purchase indent"} · ${dLong(d)}\n` + rows.filter(r => r.ind > 0).map(r => `• ${r.i.name}: ${qty(r.ind, r.i.unit)}`).join("\n");
@@ -71,7 +71,7 @@ function cardText(rec, c, d) {
 }
 
 /* ---------- printing ---------- */
-function printHtml(title, html) {
+export function printHtml(title, html) {
   let el = document.getElementById("printArea"); if (!el) { el = document.createElement("div"); el.id = "printArea"; document.body.appendChild(el); }
   el.innerHTML = `<h2>${esc(title)}</h2>` + html; document.body.classList.add("printing");
   const done = () => { document.body.classList.remove("printing"); window.removeEventListener("afterprint", done); };
@@ -100,9 +100,9 @@ V.plan = () => {
   const full = S.filter.indent === "full"; const rows = indentRows(ex, full); S.indentText = indentText(d, rows, full);
   const groups = [...new Set(rows.map(r => r.i.type + "|" + (r.i.category || "Other")))];
   return h + `<div class="tools" style="padding-top:0">${chipBar("indent", [["short", "To buy · shortfall"], ["full", "Store issue · full quantity"]])}</div>
-    <div class="plan"><div class="card"><h3>${full ? "Issue from store" : "Purchase indent"} <small class="mut">for ${esc(dLong(d))}</small></h3><table><thead><tr><th>Material</th><th>Required</th><th>In stock</th><th>${full ? "Issue" : "To buy"}</th></tr></thead><tbody>
-    ${groups.map(g => { const [ty, cat] = g.split("|"); return `<tr class="grp"><td colspan="4">${esc(M.ING_TYPES[ty])} · ${esc(cat)}</td></tr>` + rows.filter(r => r.i.type + "|" + (r.i.category || "Other") === g).map(r => `<tr${!full && r.ind > 0 ? ` class="shortrow"` : ""}><td>${esc(r.i.name)} ${typeTag(r.i)}</td><td>${qty(r.need, r.i.unit)}</td><td>${qty(r.have, r.i.unit)}</td><td>${r.ind > 0 ? `<b${full ? "" : ` class="due"`}>${qty(r.ind, r.i.unit)}</b>` : "–"}</td></tr>`).join(""); }).join("") || `<tr><td colspan="4">No BOM lines for these items yet.</td></tr>`}</tbody></table></div></div>
-    <div class="boardfoot">${rows.some(r => r.ind > 0) ? `<div class="btnrow3"><a class="btn btn-wa" href="${esc(waHref("", S.indentText))}" target="_blank" rel="noopener">${ICON.wa}Share</a><button class="btn btn-ghost" data-indentcopy>Copy</button><button class="btn btn-ghost" data-indentprint>${ICON.print}Print</button></div>` : `<p class="hint">${full ? "Nothing to issue." : "Everything is in stock for this plan."}</p>`}
+    <div class="plan"><div class="card"><h3>${full ? "Issue from store" : "Purchase indent"} <small class="mut">for ${esc(dLong(d))}</small></h3><table><thead><tr><th>Material</th><th>Required</th><th>In stock</th>${full ? "" : "<th>On order</th>"}<th>${full ? "Issue" : "To buy"}</th></tr></thead><tbody>
+    ${groups.map(g => { const [ty, cat] = g.split("|"); return `<tr class="grp"><td colspan="${full ? 4 : 5}">${esc(M.ING_TYPES[ty])} · ${esc(cat)}</td></tr>` + rows.filter(r => r.i.type + "|" + (r.i.category || "Other") === g).map(r => `<tr${!full && r.ind > 0 ? ` class="shortrow"` : ""}><td>${esc(r.i.name)} ${typeTag(r.i)}</td><td>${qty(r.need, r.i.unit)}</td><td>${qty(r.have, r.i.unit)}</td>${full ? "" : `<td>${r.ord ? qty(r.ord, r.i.unit) : "–"}</td>`}<td>${r.ind > 0 ? `<b${full ? "" : ` class="due"`}>${qty(r.ind, r.i.unit)}</b>` : "–"}</td></tr>`).join(""); }).join("") || `<tr><td colspan="4">No BOM lines for these items yet.</td></tr>`}</tbody></table></div></div>
+    <div class="boardfoot">${rows.some(r => r.ind > 0) ? `<div class="btnrow3"><a class="btn btn-wa" href="${esc(waHref("", S.indentText))}" target="_blank" rel="noopener">${ICON.wa}Share</a><button class="btn btn-ghost" data-indentcopy>Copy</button><button class="btn btn-ghost" data-indentprint>${ICON.print}Print</button></div>${!full && R.can("stock.buy") && H.draftPOs ? `<button class="btn btn-primary" data-indentpo>${ICON.inbox}Draft purchase orders</button>` : ""}` : `<p class="hint">${full ? "Nothing to issue." : "Everything is in stock for this plan."}</p>`}
     <p class="hint">Includes every level of the BOM: semi-finished runs to be made add their own materials. ${full ? "Full quantities, for issuing from the store to the kitchen." : "Only what stock on hand doesn’t cover."}</p></div>`;
 };
 function fgView(d, lines, ex, saved) {
@@ -115,6 +115,7 @@ function fgView(d, lines, ex, saved) {
       <td>${edit ? `<input class="rate" data-planq="${esc(n)}" inputmode="numeric" value="${planQ(n) || ""}" placeholder="0" aria-label="Plan for ${esc(n)}">` : planQ(n)}</td><td>${m && (m.recipe || []).length && planQ(n) ? `<button class="linkbtn" data-cardfor="m:${esc(m.id)}:${planQ(n)}">Batch card</button>` : ""}</td></tr>`; }).join("") || `<tr><td colspan="4">Nothing suggested for ${esc(dLong(d))}.</td></tr>`}</tbody></table>
     ${edit && left.length ? `<select class="in" data-planadd style="margin-top:10px"><option value="">+ Add an item to the plan</option>${left.map(m => `<option value="${esc(m.name)}">${esc(m.name)}</option>`).join("")}</select>` : ""}</div></div>
   <div class="boardfoot">${R.can("bake.record") && lines.length ? `<button class="btn btn-primary" data-planbake="${d}">${ICON.oven}Record this plan as a batch</button>` : ""}
+  ${R.can("bake.record") && lines.length && H.woNew ? `<button class="btn btn-ghost" data-planwo="${d}">Create a work order for this plan</button>` : ""}
   ${edit && saved ? `<button class="btn btn-ghost" data-planreset="${d}">Back to the suggestion</button>` : ""}
   <p class="hint">${erp() ? "Suggested: what the outlets need for the day less finished goods at the kitchen." : "Suggested: pre-orders plus kept-ready levels, less what’s already baked."} Change any quantity to plan your own; the plan is saved for everyone and the semi-finished and indent tabs follow it.</p></div>`;
 }
@@ -132,7 +133,7 @@ function cardView(d) {
     ${hasSf ? `<label class="f">Semi-finished in this BOM</label><div class="chips">${[[true, "Make in this batch"], [false, "Take from stock"]].map(([v, l]) => `<button class="chip" data-cardscratch="${v ? 1 : 0}" aria-pressed="${c.scratch === v}">${l}</button>`).join("")}</div>` : ""}</div>
     ${cardHtml(rec, c, d, false)}</div>
   <div class="boardfoot"><div class="btnrow3"><button class="btn btn-primary" data-cardprint>${ICON.print}Print card</button><a class="btn btn-wa" href="${esc(waHref("", cardText(rec, c, d)))}" target="_blank" rel="noopener">${ICON.wa}Share</a><button class="btn btn-ghost" data-cardcopy>Copy</button></div>
-  ${R.can("bake.record") ? `<button class="btn btn-ok" data-cardbake>${ICON.oven}Record this batch</button>` : ""}
+  ${R.can("bake.record") ? `<div class="btnrow"><button class="btn btn-ghost" data-cardwo>Create work order</button><button class="btn btn-ok" data-cardbake>${ICON.oven}Record this batch</button></div>` : ""}
   <p class="hint">Change the quantity and every level of the BOM is recalculated. The card lists each step (semi-finished first) and the total of every material, ready to print for the kitchen.</p></div>`;
 }
 
@@ -142,8 +143,11 @@ H.click.push(async T => {
   const pd = T.closest("[data-plandate]"); if (pd) { S.planDate = pd.dataset.plandate; H.render(); return true; }
   const cf = T.closest("[data-cardfor]"); if (cf) { const [k, id, q] = cf.dataset.cardfor.split(":"); S.card = { ref: k + ":" + id, qty: r2(+q), scratch: true }; S.filter.plan = "card"; H.render(); window.scrollTo({ top: 0 }); return true; }
   if (T.closest("[data-planbake]")) { bakeSheet(d, { lines: planLines(d) }); return true; }
+  if (T.closest("[data-planwo]")) { H.woNew({ date: d, lines: planLines(d), prep: M.explode(planLines(d), stockLoc()).make }); return true; }
   if (T.closest("[data-planprep]")) { bakeSheet(d, { prep: M.explode(planLines(d), stockLoc()).make }); return true; }
   if (T.closest("[data-planreset]")) { await ev.del("plans", M.planId(d, planLoc())); sync.soon(); toast("Plan back to the suggestion"); return true; }
+  if (T.closest("[data-indentpo]")) { const ex = M.explode(planLines(d), stockLoc()); const made = await H.draftPOs(indentRows(ex, false).filter(r => r.ind > 0).map(r => ({ ingId: r.i.id, qty: r.ind })), `For ${dLong(d)}`);
+    if (!made.length) { toast("Everything short is already on order"); return true; } S.filter.po = "draft"; S.view = "po"; H.render(); window.scrollTo({ top: 0 }); toast(`${made.length} draft PO${made.length > 1 ? "s" : ""} made · approve to send`); return true; }
   if (T.closest("[data-indentcopy]")) { toast(await copyText(S.indentText || "") ? "Indent copied" : "Couldn’t copy here"); return true; }
   if (T.closest("[data-indentprint]")) { printHtml(S.filter.indent === "full" ? "Store issue" : "Purchase indent", document.querySelector("#main .plan").innerHTML); return true; }
   if (T.closest("[data-planprint]")) { const lines = planLines(d); const ex = M.explode(lines, stockLoc()); const ings = M.ingMap();
@@ -157,6 +161,8 @@ H.click.push(async T => {
   if (!rec) return false;
   if (T.closest("[data-cardprint]")) { printHtml(`Batch card · ${rec.name}`, cardHtml(rec, c, d, true)); return true; }
   if (T.closest("[data-cardcopy]")) { toast(await copyText(cardText(rec, c, d)) ? "Batch card copied" : "Couldn’t copy here"); return true; }
+  if (T.closest("[data-cardwo]")) { const card = M.batchCard(rec, c.qty, c.scratch); const prep = {}; card.steps.forEach(s => { if (s.made) prep[s.made.ing.id] = r2(s.made.runs); });
+    H.woNew({ date: d, lines: rec.type === "sf" ? [] : [{ item: rec.name, qty: Math.round(c.qty) }], prep }); return true; }
   if (T.closest("[data-cardbake]")) { const card = M.batchCard(rec, c.qty, c.scratch); const prep = {}; card.steps.forEach(s => { if (s.made) prep[s.made.ing.id] = r2(s.made.runs); });
     bakeSheet(d, rec.type === "sf" ? { prep } : { lines: [{ item: rec.name, qty: Math.round(c.qty) }], prep }); return true; }
   return false;

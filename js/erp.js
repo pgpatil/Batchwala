@@ -12,6 +12,10 @@ import { ui, toast, openSheet, closeSheet, yesNo } from "./ui.js";
 import { confirmNew, byNameOrAka } from "./match.js";
 
 const big = u => UNITS[u] || null;
+// Unit chips for a quantity: base unit, kg / L, and the material's buying pack when it has one. attr is "name=\"index" (closed by the factor).
+export const unitOpts = i => { const b = big(i.unit); const p = M.packOf(i); return [[i.unit, 1], ...(b ? [[b.big, b.f]] : []), ...(p ? [[`${p.name} (${qty(p.size, i.unit)})`, p.size]] : [])]; };
+const unitPick = (i, f, attr) => { const o = unitOpts(i); return o.length > 1 ? `<div class="chips unitchips">${o.map(([n, v]) => `<button class="chip" data-${attr}:${v}" aria-pressed="${f === v}">${esc(n)}</button>`).join("")}</div>` : `<span class="unitlbl">${esc(i.unit)}</span>`; };
+const rateDiff = (got, po, i) => { const d = (got - po) / po * 100; const b = big(i.unit); return Math.abs(d) < 2 ? ` · at PO rate` : ` · <b class="${d > 0 ? "due" : ""}">${d > 0 ? "+" : ""}${Math.round(d)}% vs PO ${rs2(po * (b ? b.f : 1))}/${b ? b.big : i.unit}</b>`; };
 const who = x => { const m = ev.get("members", x.by || x._by); return m ? m.name : ""; };
 const prefix = () => (R.me() || {}).prefix || "";
 const r2 = v => Math.round(v * 100) / 100;
@@ -85,19 +89,20 @@ V.grn = () => {
 };
 A.newGrn = () => grnSheet();
 H.grnSheet = opts => grnSheet(opts);
+H.grnDetail = id => grnDetail(id);
 function grnSheet(opts = {}) {
   if (!guard("stock.buy")) return; const mats = M.ingredients().filter(i => i.type !== "sf");
   if (!mats.length) { toast("Add raw or packing materials in Inventory first"); return; }
-  const line = id => { const i = mats.find(x => x.id === id) || mats[0]; return { ingId: i.id, qty: 0, f: big(i.unit) ? big(i.unit).f : 1, amount: 0, taxPct: M.taxCfg().on ? (i.taxPct != null && i.taxPct !== "" ? +i.taxPct : +M.taxCfg().rate || 0) : 0 }; };
+  const line = id => { const i = mats.find(x => x.id === id) || mats[0]; return { ingId: i.id, qty: 0, f: M.packOf(i) ? M.packOf(i).size : big(i.unit) ? big(i.unit).f : 1, amount: 0, exp: "", lot: "", taxPct: M.taxCfg().on ? (i.taxPct != null && i.taxPct !== "" ? +i.taxPct : +M.taxCfg().rate || 0) : 0 }; };
   const first = opts.ingId ? mats.find(x => x.id === opts.ingId) : null;
   // opts.lines: a draft read from a supplier invoice ({ ingId, qty in base units, f, amount, taxPct or null }).
-  const lines = opts.lines && opts.lines.length ? opts.lines.map(l => ({ ...line(l.ingId), qty: l.qty, f: l.f, amount: l.amount, ...(l.taxPct != null ? { taxPct: l.taxPct } : {}) })) : [line(opts.ingId)];
-  const st = { kind: "grn", x: { supplier: opts.supplier || (first && first.supplier) || "", invoiceNo: opts.invoiceNo || "", date: today(), loc: M.here(), notes: "", lines }, line }; st.redraw = () => drawGrn(st); drawGrn(st);
+  const lines = opts.lines && opts.lines.length ? opts.lines.map(l => ({ ...line(l.ingId), qty: l.qty, f: l.f, amount: l.amount, ...(l.taxPct != null ? { taxPct: l.taxPct } : {}), ...(l.poRate != null ? { poRate: l.poRate } : {}) })) : [line(opts.ingId)];
+  const st = { kind: "grn", x: { supplier: opts.supplier || (first && first.supplier) || "", invoiceNo: opts.invoiceNo || "", date: today(), loc: opts.loc || M.here(), notes: "", lines, poId: opts.poId || "" }, line }; st.redraw = () => drawGrn(st); drawGrn(st);
 }
 function drawGrn(st) {
   const x = st.x; const mats = M.ingredients().filter(i => i.type !== "sf"); const tax = M.taxCfg().on; const sm = M.stockMap(x.loc);
   openSheet(st, `<div class="sh-head"><h2 class="h">New GRN</h2><button class="x" data-close aria-label="Close">×</button></div>
-  <p class="hint" style="margin-top:-4px">Goods received note · ${esc(M.nextDocNo("grns", prefix(), "GRN"))}</p>
+  <p class="hint" style="margin-top:-4px">Goods received note · ${esc(M.nextDocNo("grns", prefix(), "GRN"))}${x.poId ? ` · against ${esc((ev.get("porders", x.poId) || {}).no || "PO")}` : ""}</p>
   <div class="two"><div><label class="f" for="grSup">Supplier</label><input class="in" id="grSup" list="suplist" value="${esc(x.supplier)}" placeholder="Name" autocomplete="off"><datalist id="suplist">${M.suppliers().map(s => `<option value="${esc(s.name)}">`).join("")}</datalist></div>
   <div><label class="f" for="grInv">Supplier invoice no.</label><input class="in" id="grInv" value="${esc(x.invoiceNo)}" placeholder="Optional"></div></div>
   <div class="two"><div><label class="f" for="grDate">Received on</label><input class="in" id="grDate" type="date" value="${x.date}"></div>
@@ -105,9 +110,10 @@ function drawGrn(st) {
   <label class="f">Items received</label>
   <div class="grnlines">${x.lines.map((l, ix) => { const i = mats.find(m => m.id === l.ingId) || mats[0]; const b = big(i.unit);
     return `<div class="grnline"><div class="gl1"><select class="in" data-gring="${ix}">${["rm", "pm"].map(t => `<optgroup label="${M.ING_TYPES[t]}">${mats.filter(m => m.type === t).map(m => `<option value="${esc(m.id)}" ${m.id === i.id ? "selected" : ""}>${esc(m.name)}</option>`).join("")}</optgroup>`).join("")}</select><button class="rm" data-grrm="${ix}" aria-label="Remove line">×</button></div>
-      <div class="gl2"><label><span>Qty</span><input class="in" data-grqty="${ix}" inputmode="decimal" value="${l.qty ? +(l.qty / l.f).toFixed(3) : ""}" placeholder="0"></label>${b ? `<div class="chips unitchips">${[[i.unit, 1], [b.big, b.f]].map(([n, f]) => `<button class="chip" data-grf="${ix}:${f}" aria-pressed="${l.f === f}">${n}</button>`).join("")}</div>` : `<span class="unitlbl">pcs</span>`}
+      <div class="gl2"><label><span>Qty</span><input class="in" data-grqty="${ix}" inputmode="decimal" value="${l.qty ? +(l.qty / l.f).toFixed(3) : ""}" placeholder="0"></label>${unitPick(i, l.f, `grf="${ix}`)}
       <label><span>Amount ₹${tax ? " before tax" : ""}</span><input class="in" data-gramt="${ix}" inputmode="decimal" value="${l.amount || ""}" placeholder="0"></label>${tax ? `<label class="tx"><span>${esc(M.taxCfg().name)} %</span><input class="in" data-grtax="${ix}" inputmode="decimal" value="${l.taxPct}"></label>` : ""}</div>
-      <small class="mut">Have ${qty(Math.max(0, sm[i.id] || 0), i.unit)}${l.qty && l.amount ? ` · ${rs2(l.amount / l.qty * (b ? b.f : 1))}/${b ? b.big : i.unit}` : ""}${tax && l.taxPct ? (i.taxInCost ? " · tax added to stock cost" : " · tax recoverable, not in cost") : ""}</small></div>`; }).join("")}</div>
+      <div class="gl2"><label><span>Best before</span><input class="in" type="date" data-grexp="${ix}" value="${esc(l.exp || (i.shelfDays ? addDays(x.date, +i.shelfDays) : ""))}"></label><label><span>Lot / batch no.</span><input class="in" data-grlot="${ix}" value="${esc(l.lot || "")}" placeholder="Optional"></label></div>
+      <small class="mut">Have ${qty(Math.max(0, sm[i.id] || 0), i.unit)}${l.qty && l.amount ? ` · ${rs2(l.amount / l.qty * (b ? b.f : 1))}/${b ? b.big : i.unit}` : ""}${l.poRate && l.qty && l.amount ? rateDiff(l.amount / l.qty, l.poRate, i) : ""}${tax && l.taxPct ? (i.taxInCost ? " · tax added to stock cost" : " · tax recoverable, not in cost") : ""}</small></div>`; }).join("")}</div>
   <button class="add-line" data-gradd>+ Add item</button>
   <div class="kv" id="grTotals" style="margin-top:12px">${grnTotals(x.lines)}</div>
   <label class="f" for="grNote">Note</label><input class="in" id="grNote" value="${esc(x.notes)}" placeholder="Optional · short delivery, damaged items">
@@ -120,7 +126,8 @@ function syncGrn() {
   const st = ui.sheet; if (!st || st.kind !== "grn") return; const x = st.x; const g = id => document.getElementById(id);
   x.supplier = g("grSup").value; x.invoiceNo = g("grInv").value; x.date = g("grDate").value || today(); if (g("grLoc")) x.loc = g("grLoc").value; x.notes = g("grNote").value;
   x.lines.forEach((l, ix) => { const q = document.querySelector(`[data-grqty="${ix}"]`), a = document.querySelector(`[data-gramt="${ix}"]`), t = document.querySelector(`[data-grtax="${ix}"]`);
-    if (q) l.qty = num(q.value) * l.f; if (a) l.amount = num(a.value); if (t) l.taxPct = num(t.value); });
+    if (q) l.qty = num(q.value) * l.f; if (a) l.amount = num(a.value); if (t) l.taxPct = num(t.value);
+    const e = document.querySelector(`[data-grexp="${ix}"]`), lt = document.querySelector(`[data-grlot="${ix}"]`); if (e) l.exp = e.value; if (lt) l.lot = lt.value.trim(); });
 }
 A.saveGrn = async el => {
   syncGrn(); const st = ui.sheet, x = st.x; const ings = M.ingMap(); let sup = x.supplier.trim();
@@ -135,15 +142,15 @@ A.saveGrn = async el => {
   // Stock is valued at the bill amount, plus the tax for materials whose purchase tax isn't recoverable (set per material by the admin).
   const costOf = l => r2((+l.amount || 0) * (1 + (ings[l.ingId].taxInCost ? (+l.taxPct || 0) / 100 : 0)));
   for (const l of lines) await putMove({ ingId: l.ingId, type: "purchase", qty: l.qty, amount: costOf(l), date: x.date, note: `${no} · ${sup}`, ref: id, outletId: x.loc });
-  await ev.put("grns", { id, no, date: x.date, supplier: sup, invoiceNo: x.invoiceNo.trim(), loc: x.loc, notes: x.notes.trim(), lines: lines.map(l => ({ ingId: l.ingId, qty: l.qty, amount: +l.amount || 0, taxPct: +l.taxPct || 0, cost: costOf(l) })), amount, tax, total: r2(amount + tax), by: (R.me() || {}).id || "" });
+  await ev.put("grns", { id, no, date: x.date, supplier: sup, invoiceNo: x.invoiceNo.trim(), loc: x.loc, notes: x.notes.trim(), lines: lines.map(l => ({ ingId: l.ingId, qty: l.qty, amount: +l.amount || 0, taxPct: +l.taxPct || 0, cost: costOf(l), ...(l.exp ? { exp: l.exp } : {}), ...(l.lot ? { lot: l.lot } : {}), ...(l.poRate ? { poRate: l.poRate } : {}) })), amount, tax, total: r2(amount + tax), by: (R.me() || {}).id || "", ...(x.poId ? { poId: x.poId } : {}) });
   sync.soon(); closeSheet(); toast(`${no} saved · stock added`);
 };
 function grnDetail(id) {
   const g = M.grns().find(x => x.id === id); if (!g) { closeSheet(); return; } const ings = M.ingMap(); const tr = taxRows(grnTax(g.lines));
   openSheet({ kind: "grnView", id, redraw: () => grnDetail(id) }, `<div class="sh-head"><h2 class="h">${esc(g.no)}</h2><button class="x" data-close aria-label="Close">×</button></div>
-  <div class="subl" style="margin:-4px 0 10px">${esc(g.supplier)}${g.invoiceNo ? " · invoice " + esc(g.invoiceNo) : ""} · ${esc(dLong(g.date))} · at ${esc(M.locName(g.loc))}${who(g) ? " · " + esc(who(g)) : ""}</div>
+  <div class="subl" style="margin:-4px 0 10px">${esc(g.supplier)}${g.poId ? " · against " + esc((ev.get("porders", g.poId) || {}).no || "PO") : ""}${g.invoiceNo ? " · invoice " + esc(g.invoiceNo) : ""} · ${esc(dLong(g.date))} · at ${esc(M.locName(g.loc))}${who(g) ? " · " + esc(who(g)) : ""}</div>
   ${g.void ? `<div class="banner bad">Undone. Its stock was taken back off.</div>` : ""}
-  <div class="kv">${g.lines.map(l => { const i = ings[l.ingId]; return `<div><span>${esc(i ? i.name : "Removed material")} <small class="mut">${i ? qty(l.qty, i.unit) : l.qty}${l.taxPct ? ` · ${l.taxPct}%` : ""}</small></span><span>${rs2(l.amount)}</span></div>`; }).join("")}
+  <div class="kv">${g.lines.map(l => { const i = ings[l.ingId]; return `<div><span>${esc(i ? i.name : "Removed material")} <small class="mut">${i ? qty(l.qty, i.unit) : l.qty}${l.taxPct ? ` · ${l.taxPct}%` : ""}${l.exp ? ` · best before ${esc(dLong(l.exp))}` : ""}${l.lot ? ` · lot ${esc(l.lot)}` : ""}</small></span><span>${rs2(l.amount)}</span></div>`; }).join("")}
   ${tr.map(([n, v]) => `<div><span>${esc(n)}</span><span>${rs2(v)}</span></div>`).join("")}<div class="tot"><span>Total</span><span>${rs2(g.total)}</span></div></div>
   ${g.notes ? `<p class="hint">Note: ${esc(g.notes)}</p>` : ""}
   ${!g.void && R.can("stock.buy") ? `<button class="btn btn-danger" data-grnundo="${esc(g.id)}">Undo this GRN</button>` : ""}`);

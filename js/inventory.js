@@ -85,14 +85,17 @@ V.stock = () => {
   const m0 = today().slice(0, 8) + "01"; const spent = M.moves().filter(m => m.type === "purchase" && m.date >= m0).reduce((s, m) => s + (+m.amount || 0), 0);
   let h = band(loc ? `Inventory · ${esc(M.locName(loc))}` : "Inventory", `${R.can("stock.buy") ? `<button class="pillbtn" data-act="invoiceIn">${ICON.inbox}Upload invoice</button><button class="pillbtn" data-inv="shopping">${ICON.cart}Shopping list</button>` : ""}<button class="pillbtn" data-go="bom">${ICON.tree}BOM</button>`,
     `<div class="stats"><div class="st"><b>${low.length}</b><span>low or out</span></div>${money ? `<div class="st"><b>${rs(value)}</b><span>${ty === "all" ? "inventory" : esc(M.ING_TYPES[ty].toLowerCase())} value</span></div><div class="st"><b>${rs(spent)}</b><span>bought this month</span></div>` : `<div class="st"><b>${ings.length}</b><span>items</span></div>`}</div>`);
+  const exl = M.expiringMaterials(); if (exl.length) { const ex = exl.filter(l => l.expired).length;
+    h += `<button class="banner ${ex ? "bad" : "warn"} expbanner" data-filter="stock:expiring">${ex ? `${ex} material lot${ex > 1 ? "s" : ""} past best-before` : ""}${ex && exl.length > ex ? " · " : ""}${exl.length > ex ? `${exl.length - ex} expiring within 7 days` : ""} · tap to see</button>`; }
+  const expIds = new Set(exl.map(l => l.ingId));
   const q = (S.query.stock || "").toLowerCase().trim();
   const rows = ings.filter(i => !q || (i.name + " " + (i.barcode || "") + " " + (i.supplier || "") + " " + (i.category || "") + " " + (i.aka || []).join(" ")).toLowerCase().includes(q))
-    .filter(i => !S.filter.scat || catOf(i) === S.filter.scat).filter(i => S.filter.stock === "all" || (S.filter.stock === "low" ? i.lv.state !== "ok" : i.lv.state === "out"));
+    .filter(i => !S.filter.scat || catOf(i) === S.filter.scat).filter(i => S.filter.stock === "all" || (S.filter.stock === "expiring" ? expIds.has(i.id) : S.filter.stock === "low" ? i.lv.state !== "ok" : i.lv.state === "out"));
   h += `<div class="tools"><div class="seg invtabs" role="group" aria-label="Type">${[["rm", "Raw materials"], ["pm", "Packing"], ["sf", "Semi-finished"], ["all", "All"]].map(([k, l]) => `<button data-filter="stype:${k}" aria-pressed="${ty === k}">${l} <em>${k === "all" ? all.length : all.filter(i => i.type === k).length}</em></button>`).join("")}</div></div>
   <div class="tools" style="padding-top:6px">${searchBox("stock", "Search, scan a barcode, supplier or category")}${layoutSwitch("stock")}</div>
   ${cats.length > 1 ? `<div class="tools" style="padding-top:2px"><div class="chips scroll"><button class="chip" data-filter="scat:" aria-pressed="${!S.filter.scat}">All categories</button>${cats.map(c => `<button class="chip" data-filter="scat:${esc(c)}" aria-pressed="${S.filter.scat === c}">${esc(c)}<span class="n">${ings.filter(i => catOf(i) === c).length}</span></button>`).join("")}</div></div>` : ""}
   ${multi ? `<div class="tools" style="padding-top:2px">${chipBar("sloc", [["all", "All locations"], ...M.locations().map(l => [l.id, l.name])])}</div>` : ""}
-  <div class="tools" style="padding-top:2px">${chipBar("stock", [["all", "Any level", ings.length], ["low", "Low", low.length], ["out", "Out", ings.filter(i => i.lv.state === "out").length]])}</div>`;
+  <div class="tools" style="padding-top:2px">${chipBar("stock", [["all", "Any level", ings.length], ["low", "Low", low.length], ["out", "Out", ings.filter(i => i.lv.state === "out").length], ...(exl.length ? [["expiring", "Expiring", expIds.size]] : [])])}</div>`;
   if (!all.length) return h + `<div class="empty"><strong>Add your inventory</strong>Raw materials and packing you buy, with a reorder level, and semi-finished items you make (dough, fillings, glazes) with their own recipe. Purchases and prep add stock; batches use it up.${R.can("stock.edit") ? `<button class="btn btn-primary" data-inv="newIng" style="margin-top:14px">${ICON.plus}Add item</button>` : ""}</div>`;
   if (!rows.length) return h + `<div class="empty"><strong>Nothing here</strong>${ings.length ? "Try another search or filter." : `No ${esc(ty === "all" ? "items" : M.ING_TYPES[ty].toLowerCase() + "s")} yet.`}${R.can("stock.edit") && !ings.length ? `<button class="btn btn-primary" data-inv="newIng" style="margin-top:14px">${ICON.plus}Add ${esc(ty === "all" ? "item" : M.ING_TYPES[ty].toLowerCase())}</button>` : ""}</div>`;
   rows.sort((a, b) => cats.indexOf(catOf(a)) - cats.indexOf(catOf(b)) || a.name.localeCompare(b.name));
@@ -113,16 +116,22 @@ export function ingSheet(id) {
   const money = R.can("money") && R.role() !== "kitchen"; const ings = M.ingMap(); const sf = i.type === "sf";
   const lv = M.stockLevel(i); const uc = M.unitCost(i); const hist = M.moves().filter(m => m.ingId === id).slice(0, 40);
   const usedIn = [...M.menu().filter(m => (m.recipe || []).some(r => r.ingId === id)).map(m => esc(m.name)), ...M.ingredients().filter(x => x.type === "sf" && x.recipe.some(r => r.ingId === id)).map(x => esc(x.name) + " <small class='mut'>(semi)</small>")];
-  const label = { purchase: "Bought", transfer: "Transfer", bake: "Used in batch", make: "Made in batch", waste: "Wasted", count: "Stock count", adjust: "Adjusted" };
+  const label = { purchase: "Bought", transfer: "Transfer", bake: "Used in batch", make: "Made in batch", waste: "Wasted", count: "Stock count", adjust: "Adjusted", issue: "Issued to production", return: "Returned to store" };
   openSheet({ kind: "ing", id, redraw: () => ingSheet(id) }, `<div class="sh-head"><h2 class="h">${esc(i.name)}</h2><button class="x" data-close aria-label="Close">×</button></div>
   <div class="subl" style="margin:-4px 0 10px">${typeTag(i)} ${esc(M.ING_TYPES[i.type])} · ${esc(catOf(i))}${i.supplier ? " · " + esc(i.supplier) : ""}${(i.aka || []).length ? ` · also “${(i.aka || []).map(esc).join("”, “")}”` : ""}</div>
   <div class="kpis" style="padding:0;margin-bottom:10px"><div class="kpi"><b>${qty(lv.on, i.unit)}</b><span>on hand ${stateTag(lv.state)}</span></div>${money ? `<div class="kpi"><b>${uc ? perBig(i, uc) : "–"}</b><span>${sf ? "rolled-up recipe cost" : "last price"}${uc ? " · value " + rs(Math.max(0, lv.on) * uc) : ""}</span></div>` : ""}</div>
   <div class="btnrow3">${sf ? (R.can("bake.record") ? `<button class="btn btn-ok" data-inv="makeThis">Make</button>` : "") : (R.can("stock.buy") ? `<button class="btn btn-ok" data-inv="buyThis">Bought</button>` : "")}${R.can("stock.waste") ? `<button class="btn btn-ghost" data-inv="wasteThis">Wasted</button>` : ""}${R.can("stock.count") ? `<button class="btn btn-ghost" data-inv="countThis">Count</button>` : ""}</div>
   ${sf ? `<label class="f" style="margin-top:12px">Recipe · makes ${qty(i.yield, i.unit)} per run</label><div class="kv">${i.recipe.map(r => { const c = ings[r.ingId]; return `<div><span>${esc(c ? c.name : "Removed material")} ${c ? typeTag(c) : ""}</span><span>${c ? qty(r.qty, c.unit) : r.qty}${money && c ? ` <small class="mut">${rs2(M.unitCost(c) * r.qty)}</small>` : ""}</span></div>`; }).join("") || "<div>No recipe yet</div>"}</div>` : ""}
   <div class="kv" style="margin-top:12px">${M.erpOn() && M.locations().length > 1 ? `<div><span>By location</span><span style="text-align:right">${M.locations().map(l => `${esc(l.name)} ${qty(M.stockMap(l.id)[i.id] || 0, i.unit)}`).join(" · ")}</span></div>` : ""}<div><span>${sf ? "Make when below" : "Reorder level"}</span><span>${i.reorder ? qty(i.reorder, i.unit) : "Not set"}</span></div>${i.barcode ? `<div><span>Barcode</span><span>${esc(i.barcode)}</span></div>` : ""}<div><span>Used in</span><span style="text-align:right">${usedIn.length ? usedIn.join(", ") : "No recipes yet"}</span></div></div>
+  ${lotsHtml(i)}
   ${R.can("stock.edit") ? `<button class="btn btn-ghost" data-inv="editIng">Edit material</button>` : ""}
   <label class="f" style="margin-top:16px">History</label>
   <div class="kv">${hist.map(m => `<div><span><b>${label[m.type] || m.type}</b><small class="mut" style="display:block">${esc(dLong(m.date))}${m.note ? " · " + esc(m.note) : ""}</small></span><span class="side"><b style="color:${m.qty < 0 ? "var(--due)" : "var(--ok)"}">${m.qty > 0 ? "+" : ""}${qty(m.qty, i.unit)}</b>${money && m.amount ? `<small class="mut">${rs(m.amount)}</small>` : ""}${R.isAdmin() && m.type !== "bake" && m.type !== "make" ? `<button class="linkbtn" data-delmove="${esc(m.id)}">Reverse</button>` : ""}</span></div>`).join("") || `<div>No movements yet.</div>`}</div>`);
+}
+// Lots on hand from GRNs, oldest best-before first; expired ones can be discarded as wastage.
+function lotsHtml(i) {
+  if (i.type === "sf") return ""; const lots = M.materialLots(i.id).filter(l => l.left > 0); if (!lots.length) return "";
+  return `<label class="f" style="margin-top:12px">Lots on hand <small class="mut">(from GRNs · used oldest first)</small></label><div class="kv">${lots.map(l => `<div style="align-items:center"><span>${esc(l.grn.no)} · ${esc(dLong(l.date))}${l.lot ? ` · lot ${esc(l.lot)}` : ""}<small class="mut" style="display:block">${l.exp ? `best before ${esc(dLong(l.exp))}` : "no best-before"} ${l.expired ? `<span class="tag t-due">Expired</span>` : l.soon ? `<span class="tag t-part">Expiring</span>` : ""}</small></span><span class="side"><b>${qty(l.left, i.unit)}</b>${(l.expired || l.soon) && R.can("stock.waste") ? `<button class="linkbtn" data-lotdiscard="${esc(l.grn.id)}:${l.ix}">Discard</button>` : ""}</span></div>`).join("")}</div>`;
 }
 // Recipe lines for a menu item (per piece) or a semi-finished material (per run); materials grouped by type.
 function recipeRows(st) {
@@ -166,6 +175,8 @@ function drawIngEdit(st) {
   ${M.taxCfg().on ? `<label class="f" for="gTax">${esc(M.taxCfg().name)} % on purchases <small class="mut">(blank = ${M.taxCfg().rate}%)</small></label><input class="in" id="gTax" inputmode="decimal" value="${x.taxPct ?? ""}" placeholder="${M.taxCfg().rate}">
     <label class="f">Purchase tax ${R.isAdmin() ? "" : `<small class="mut">(set by the admin)</small>`}</label><div class="chips">${[[false, "Recoverable · keep out of cost"], [true, "Not recoverable · add to cost"]].map(([v, l]) => `<button class="chip" data-gtic="${v ? 1 : 0}" aria-pressed="${!!x.taxInCost === v}" ${R.isAdmin() ? "" : "disabled"}>${l}</button>`).join("")}</div>
     <p class="hint">Decides whether ${esc(M.taxCfg().name)} paid on this material counts in recipe and batch costs.</p>` : ""}
+  <label class="f">Bought in packs of <small class="mut">(optional · e.g. bag of 50 kg, box of 100)</small></label><div class="two"><input class="in" id="gPackName" value="${esc((x.pack || {}).name || "")}" placeholder="bag, box, tin"><div class="two" style="gap:6px"><input class="in" id="gPackSize" inputmode="decimal" value="${x.pack && x.pack.size ? +(x.pack.size / st.rf).toFixed(3) : ""}" placeholder="size">${unitChips(x.unit, st.rf, "grf")}</div></div>
+  <label class="f" for="gShelf">Usable for <small class="mut">(days after delivery · fills the best-before date on GRNs)</small></label><input class="in" id="gShelf" inputmode="numeric" value="${x.shelfDays || ""}" placeholder="No expiry tracking">
   <label class="f" for="gCode">Barcode <small class="mut">(optional · scan or type)</small></label><input class="in" id="gCode" value="${esc(x.barcode || "")}" autocapitalize="off">`}
   ${st.isNew ? `<label class="f" for="gOpen">Stock on hand now</label><div class="two"><input class="in" id="gOpen" inputmode="decimal" placeholder="0">${unitChips(x.unit, st.rf, "grf")}</div>` : ""}
   <button class="btn btn-primary" data-inv="saveIng">${st.isNew ? "Add material" : "Save"}</button>
@@ -174,7 +185,8 @@ function drawIngEdit(st) {
 function syncIng() { const st = ui.sheet, x = st.x; const b = big(x.unit); const g = id => document.getElementById(id);
   x.name = g("gName").value; if (g("gCat")) x.category = g("gCat").value.trim(); x.reorder = num(g("gReorder").value) * st.rf;
   if (g("gCost")) x.cost = num(g("gCost").value) / (b ? b.f : 1); if (g("gCode")) x.barcode = g("gCode").value.trim(); if (g("gSupp")) x.supplier = g("gSupp").value.trim(); if (g("gTax")) x.taxPct = g("gTax").value.trim() === "" ? null : num(g("gTax").value);
-  if (g("gYield")) x.yield = num(g("gYield").value) * st.rf; if (g("gOpen")) st.open = num(g("gOpen").value) * st.rf; }
+  if (g("gYield")) x.yield = num(g("gYield").value) * st.rf;
+  if (g("gPackName")) { const n = g("gPackName").value.trim(), z = num(g("gPackSize").value) * st.rf; x.pack = n && z > 0 ? { name: n, size: z } : null; x.shelfDays = Math.max(0, Math.round(num(g("gShelf").value))) || null; } if (g("gOpen")) st.open = num(g("gOpen").value) * st.rf; }
 const syncHost = () => { const st = ui.sheet; if (st.nm && $("#nmName")) st.nm.name = $("#nmName").value; st.kind === "item" ? syncItem() : syncIng(); };
 const drawHost = st => st.kind === "item" ? drawItem(st) : drawIngEdit(st);
 
@@ -245,8 +257,11 @@ function syncItem() { const x = ui.sheet.x; x.name = $("#iName").value.trim(); i
 export async function undoBatch(id) {
   if (!guard("bake.record")) return false;
   if (!await yesNo(`<p class="cq">Undo this batch?</p><div class="cdetail">It comes off the bake board, the stock it used goes back and anything it made comes off. It stays in the register marked undone.</div>`, "Undo batch", "btn-danger-solid")) return false;
-  for (const m of ev.all("moves").filter(m => m.ref === id)) await putMove({ ingId: m.ingId, type: "adjust", qty: -m.qty, note: "Batch undone", ref: m.ref + ":undo", outletId: m.outletId });
-  const b = ev.get("bakes", id); await ev.put("bakes", clean({ ...b, void: true, voidAt: new Date().toISOString() })); sync.soon(); toast("Batch undone"); return true;
+  const b = ev.get("bakes", id);
+  // A batch from a work order also gives back what the order issued (less what was returned), and the order is cancelled.
+  for (const m of ev.all("moves").filter(m => m.ref === id || (b.wo && m.ref === b.wo))) await putMove({ ingId: m.ingId, type: "adjust", qty: -m.qty, note: "Batch undone", ref: m.ref + ":undo", outletId: m.outletId });
+  if (b.wo && ev.get("wos", b.wo)) await ev.put("wos", clean({ ...ev.get("wos", b.wo), status: "cancelled", notes: "Batch undone" }));
+  await ev.put("bakes", clean({ ...b, void: true, voidAt: new Date().toISOString() })); sync.soon(); toast("Batch undone"); return true;
 }
 
 /* ---------- actions ---------- */
@@ -325,6 +340,8 @@ H.click.push(async T => {
   const ig = T.closest("[data-ing]"); if (ig) { ingSheet(ig.dataset.ing); return true; }
   const mi = T.closest("[data-menuitem]"); if (mi) { if (R.can("menu.edit")) itemSheet(M.menu().find(m => m.id === mi.dataset.menuitem)); return true; }
   const tg = T.closest("[data-togm]"); if (tg) { if (!guard("menu.edit")) return true; const m = M.menu().find(x => x.id === tg.dataset.togm); if (m) { const { _at, _by, ...rec } = m; await ev.put("menu", { ...rec, active: m.active === false }); sync.soon(); menuSheet(); } return true; }
+  const ld = T.closest("[data-lotdiscard]"); if (ld) { const [gid, ix] = ld.dataset.lotdiscard.split(":"); const l = M.materialLots().find(x => x.grn.id === gid && x.ix === +ix); if (!l || !l.left) return true; const i = M.ingMap()[l.ingId];
+    if (await yesNo(`<p class="cq">Discard ${qty(l.left, i.unit)} of ${esc(i.name)}?</p><div class="cdetail">From ${esc(l.grn.no)}${l.exp ? `, best before ${esc(dLong(l.exp))}` : ""}. Recorded as wastage.</div>`, "Discard", "btn-danger-solid")) { await putMove({ ingId: i.id, type: "waste", qty: -l.left, note: `Expired · ${l.grn.no}${l.lot ? " lot " + l.lot : ""}`, outletId: l.grn.loc }); toast("Discarded"); ingSheet(i.id); } return true; }
   const dm = T.closest("[data-delmove]"); if (dm) { const m = ev.get("moves", dm.dataset.delmove);
     if (m && await yesNo(`<p class="cq">Reverse this entry?</p><div class="cdetail">A correcting entry is added; the original stays in history.</div>`, "Reverse")) { await putMove({ ingId: m.ingId, type: "adjust", qty: -m.qty, note: "Reversal", ref: m.id, outletId: m.outletId }); ingSheet(st.id); } return true; }
   if (!st) return false;

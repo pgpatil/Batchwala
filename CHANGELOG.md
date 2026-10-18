@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.9.0 — 18 Oct 2026
+- Purchase orders: raise, approve (admin or management; managers can raise but not approve), send to the supplier on WhatsApp, receive in one or more GRNs against the PO with a warning when the bill's rate differs, or close short. Planning's indent and a reorder banner draft POs per usual supplier for what's short after stock and anything already on order, rounded up to whole packs at each supplier's last price
+- Suppliers & payables: what is owed to each supplier from their GRNs, overdue by credit days, ledger with running balance, payments (bank, UPI, cash, cheque with reference) that settle the oldest bills first, reversals, WhatsApp statements
+- Work orders: created from Planning or a batch card; materials issued from the store (warned when the store shows less); completed with good and spoiled pieces, semi-finished runs and unused returns. The batch is recorded at what was really used, with variance against the BOM for the actual output by material, in quantity and value. Undoing the batch returns everything issued
+- Costing: weighted average of stock on hand by default (or last purchase price in Business settings)
+- Buying packs per material (bag of 50 kg, carton of 100) as units on POs and GRNs
+- Material lots and expiry: GRN lines take a best-before date (filled from the material's usable days) and a lot number; stock is used oldest first; expired and expiring lots show a banner and a filter in Inventory and can be discarded
+- Cost & stock reports: food cost, wastage, production variance, stock ageing, buying (spend by supplier and price movement), tax on sales against claimable tax on purchases, and a day-book CSV for the accountant
+- GRNs, purchase orders, payables and work orders are available without ERP mode too, under Stores and Make
+
 ## 2.8.0 — 18 Oct 2026
 - Planning screen: for any date, finished goods to make (suggested from pre-orders and kept-ready levels, or outlet needs in ERP; editable and saved for everyone), semi-finished to make level by level in whole runs, and the indent of raw and packing materials through every BOM level, as a purchase indent (shortfall) or a store issue (full quantity). Share, copy or print; print the whole day's plan
 - Batch cards: pick a menu item or semi-finished material and type a batch size; every ingredient is recalculated at once, step by step with a total, cost and stock check. Semi-finished made in the batch or taken from stock. Print with tick boxes and sign-offs, share, or record the batch

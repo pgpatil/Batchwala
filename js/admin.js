@@ -15,6 +15,10 @@ V.more = () => {
   const items = [
     ["menu", "menu", "Menu, prices & recipes", `${M.menuActive().length} items on sale`, R.can("menu.edit") || R.can("reports")],
     ["@stock", "stock", "Inventory · RM / PM / semi-finished", `${M.ingredients().length} items`, !H.onBar("stock") && (R.can("stock.buy") || R.can("stock.count"))],
+    ["@insights", "chart", "Cost & stock reports", "Food cost, wastage, variance, stock ageing, buying, tax, day book", !H.onBar("insights") && H.canOpen("insights")],
+    ["@wo", "oven", "Work orders", "Issue materials, complete, see variance", !H.onBar("wo") && H.canOpen("wo")],
+    ["@po", "orders", "Purchase orders", "Raise, approve, receive against", !H.onBar("po") && H.canOpen("po")],
+    ["@sup", "people", "Suppliers & payables", "What you owe, payments, statements", !H.onBar("sup") && H.canOpen("sup")],
     ["@plan", "plan", "Planning", "What to make, semi-finished, indent and batch cards", !H.onBar("plan") && H.canOpen("plan")],
     ["@bom", "tree", "BOM", "Multilevel bills of materials", !H.onBar("bom") && (R.can("menu.edit") || R.can("reports") || R.can("bake.record"))],
     ["@batches", "batch", "Batches", `${M.batches().filter(b => !b.void).length} recorded · pieces, spoilage and cost`, !H.onBar("batches") && (R.can("bake.record") || R.can("orders.edit"))],
@@ -32,7 +36,7 @@ V.more = () => {
   return `<div class="band"><div class="top">${logoHtml(c)}<div class="biz"><div class="name">${esc(c.business)}</div><div class="sub">${esc(me ? me.name + " · " + R.ROLES[me.role].label : "")}</div></div></div>${toran()}</div>
   ${H.switchers ? `<div class="moresw">${H.switchers()}</div>` : ""}
   <div class="menu-list" style="margin-top:14px">${items.map(([a, ic, t, s]) => `<button class="mi" ${a[0] === "@" ? `data-go="${a.slice(1)}"` : `data-act="${a}"`}><span class="ic">${ICON[ic]}</span><span class="grow">${t}<small>${esc(s)}</small></span><span class="chev">${ICON.chev}</span></button>`).join("")}</div>
-  <p class="hint" style="padding:4px 18px">${APP_NAME} 2.8${R.mode() !== "classic" ? " · " + esc(M.MODES[R.mode()]) + " mode" : ""} · ${st.state === "off" ? "data saved on this phone only" : "synced through Google Drive"}${st.last ? " · last sync " + new Date(st.last).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" }) : ""}</p>`;
+  <p class="hint" style="padding:4px 18px">${APP_NAME} 2.9${R.mode() !== "classic" ? " · " + esc(M.MODES[R.mode()]) + " mode" : ""} · ${st.state === "off" ? "data saved on this phone only" : "synced through Google Drive"}${st.last ? " · last sync " + new Date(st.last).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" }) : ""}</p>`;
 };
 
 /* ---------- first run ---------- */
@@ -131,6 +135,7 @@ H.click.push(async T => {
       if (!v) return true; if (($("#pinIn") || {}).value !== m.pin) { toast("Wrong PIN"); return true; } }
     await R.setMe(m.id); R.setMode(null); await ev.setMeta("mode", null); if (m.loc) { M.setHere(m.loc); await ev.setMeta("here", m.loc); } S.view = R.home(); closeSheet(); toast(`Now using as ${m.name}`); return true; }
   if (st && st.kind === "settings") {
+    const co = T.closest("[data-costing]"); if (co) { syncSettings(); st.c.costing = co.dataset.costing; drawSettings(st); return true; }
     const ti = T.closest("[data-taxincl]"); if (ti) { syncSettings(); st.c.tax.incl = ti.dataset.taxincl === "1"; drawSettings(st); return true; }
     const ts = T.closest("[data-taxsplit]"); if (ts) { syncSettings(); st.c.tax.split = ts.dataset.taxsplit === "1"; drawSettings(st); return true; }
     const lk = T.closest("[data-lockind]"); if (lk) { syncSettings(); const [ix, k] = lk.dataset.lockind.split(":"); st.c.locations[+ix].kind = k; drawSettings(st); return true; }
@@ -162,6 +167,8 @@ function drawSettings(st) {
     <div class="chips" style="margin-top:10px"><button class="chip" data-taxincl="0" aria-pressed="${!c.tax.incl}">Prices exclude tax</button><button class="chip" data-taxincl="1" aria-pressed="${!!c.tax.incl}">Prices include tax</button></div>
     <div class="chips" style="margin-top:6px"><button class="chip" data-taxsplit="1" aria-pressed="${!!c.tax.split}">Split into C${esc(c.tax.name)} + S${esc(c.tax.name)}</button><button class="chip" data-taxsplit="0" aria-pressed="${!c.tax.split}">One line</button></div>
     <p class="hint">Each menu item and material can have its own rate (Menu & recipes, Stock); otherwise the default applies. New orders and GRNs use the rates at the time; old bills don’t change.</p>` : ""}
+  <label class="f" style="margin-top:18px">Material cost</label><div class="chips">${[["avg", "Weighted average of stock"], ["last", "Last purchase price"]].map(([k, l]) => `<button class="chip" data-costing="${k}" aria-pressed="${(c.costing === "last" ? "last" : "avg") === k}">${l}</button>`).join("")}</div>
+  <p class="hint">Used for recipe, batch and stock values. Average smooths price changes; old batches keep the cost they were saved with.</p>
   <label class="f" style="margin-top:18px">Locations</label><div class="kv">${c.locations.map((l, ix) => `<div style="align-items:center;gap:8px"><input class="in" data-locname="${ix}" value="${esc(l.name)}" style="flex:1;min-width:0"><div class="chips">${[["kitchen", "Kitchen"], ["outlet", "Outlet"]].map(([k, n]) => `<button class="chip" data-lockind="${ix}:${k}" aria-pressed="${l.kind === k}">${n}</button>`).join("")}</div>${ix ? `<button class="rm" data-locrm="${ix}" aria-label="Remove location">×</button>` : ""}</div>`).join("")}</div>
   <button class="add-line" data-act="addLocation">+ Add outlet or kitchen</button>
   <p class="hint">Kitchens make; outlets sell and receive transfers. The first location holds everything recorded before locations existed.</p>

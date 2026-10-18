@@ -96,16 +96,41 @@ export const moves = () => ev.all("moves").sort((a, b) => (a.date < b.date ? 1 :
 export function stockMap(loc = null) { const m = {}; const home = locations()[0].id; ev.all("moves").forEach(v => { if (loc && (v.outletId || home) !== loc) return; m[v.ingId] = (m[v.ingId] || 0) + (+v.qty || 0); }); return m; }
 // Semi-finished made fresh (no "make when below" level) aren't flagged when they run out.
 export function stockLevel(i, sm = stockMap()) { const s = sm[i.id] || 0; return { on: s, state: s <= 0 ? (i.type === "sf" && !i.reorder ? "ok" : "out") : (i.reorder && s <= i.reorder ? "low" : "ok") }; }
-// Bought materials cost what the last purchase cost; semi-finished cost rolls up through their recipe, level by level.
+// Cost of bought materials: the moving weighted average of what's on hand (default), or the last purchase price (Business settings).
+// Purchases add their amount; anything else coming in (counts, returns) comes in at the current average; anything going out leaves at it.
+let costCache = null, costStamp = "";
+export const costing = () => config().costing === "last" ? "last" : "avg";
+function costIndex() {
+  const mv = ev.all("moves"); const stamp = mv.length + ":" + ((mv.at(-1) || {}).id || "") + ":" + costing(); if (stamp === costStamp) return costCache;
+  const by = {};
+  mv.sort((a, b) => (a.date + a._at) < (b.date + b._at) ? -1 : 1).forEach(m => { const x = by[m.ingId] = by[m.ingId] || { q: 0, v: 0, last: 0 }; const q = +m.qty || 0; if (!q) return;
+    if (m.type === "purchase" && q > 0 && +m.amount > 0) { x.last = +m.amount / q; if (x.q <= 0) { x.q = 0; x.v = 0; } x.q += q; x.v += +m.amount; return; }
+    const avg = x.q > 0 ? x.v / x.q : x.last; x.q += q; x.v += avg * q; if (x.q <= 0) x.v = 0; });
+  costCache = Object.fromEntries(Object.entries(by).map(([id, x]) => [id, { avg: x.q > 0 ? x.v / x.q : x.last, last: x.last }])); costStamp = stamp; return costCache;
+}
+export const lastPrice = ing => (costIndex()[ing.id] || {}).last || +ing.cost || 0;
+// Semi-finished cost rolls up through their recipe, level by level.
 export function unitCost(ing, seen = new Set()) {
   if (ing.type === "sf") {
     if (seen.has(ing.id) || !(+ing.yield > 0)) return +ing.cost || 0;
     const next = new Set(seen).add(ing.id); const ings = ingMap();
     return (ing.recipe || []).reduce((c, r) => c + (ings[r.ingId] ? unitCost(ings[r.ingId], next) * (+r.qty || 0) : 0), 0) / ing.yield;
   }
-  const p = ev.all("moves").filter(m => m.ingId === ing.id && m.type === "purchase" && m.qty > 0 && m.amount > 0).sort((a, b) => (a.date + a._at) < (b.date + b._at) ? 1 : -1)[0];
-  return p ? p.amount / p.qty : (+ing.cost || 0);
+  const c = costIndex()[ing.id]; if (!c || !c.last) return +ing.cost || 0;
+  return (costing() === "last" ? c.last : c.avg) || c.last;
 }
+// Buying units: a material can be bought in packs (a 50 kg bag, a box of 100); size is in its base unit (g, ml, pcs).
+export const packOf = i => i && i.pack && +i.pack.size > 0 && i.pack.name ? { name: String(i.pack.name), size: +i.pack.size } : null;
+/* ---------- material lots ---------- */
+// Each GRN line is a lot, with its best-before date when one was given. Stock is used oldest first, so what's on hand sits in the newest lots.
+export function materialLots(ingId = null) {
+  const sm = stockMap(); const t = today(); const out = [];
+  const lots = {}; grns().filter(g => !g.void).forEach(g => g.lines.forEach((l, ix) => { if (ingId && l.ingId !== ingId) return; (lots[l.ingId] = lots[l.ingId] || []).push({ ingId: l.ingId, grn: g, ix, date: g.date, qty: +l.qty || 0, exp: l.exp || "", lot: l.lot || "", rate: l.qty ? (+l.cost || +l.amount || 0) / l.qty : 0 }); }));
+  Object.entries(lots).forEach(([id, ls]) => { let r = Math.max(0, sm[id] || 0); ls.sort((a, b) => (b.date + b.grn._at) < (a.date + a.grn._at) ? -1 : 1)
+    .forEach(l => { l.left = Math.min(l.qty, r); r -= l.left; l.expired = !!l.exp && l.left > 0 && l.exp <= t; l.soon = !!l.exp && l.left > 0 && !l.expired && l.exp <= addDays(t, 7); out.push(l); }); });
+  return out.sort((a, b) => (a.exp || "9999") < (b.exp || "9999") ? -1 : 1);
+}
+export const expiringMaterials = () => materialLots().filter(l => l.expired || l.soon);
 export function recipeCost(m) {
   const ings = ingMap(); let cost = 0, missing = 0;
   (m.recipe || []).forEach(r => { const i = ings[r.ingId]; if (!i) { missing++; return; } const c = unitCost(i); if (!c) missing++; cost += c * (+r.qty || 0); });
@@ -241,6 +266,42 @@ export function production(date, kitchen = (kitchens()[0] || locations()[0]).id)
     .filter(x => x.need).sort((a, b) => b.toBake - a.toBake || a.item.localeCompare(b.item));
 }
 export const suppliers = () => ev.all("suppliers").sort((a, b) => a.name.localeCompare(b.name));
+export const supplierByName = n => suppliers().find(s => s.name.toLowerCase() === String(n || "").trim().toLowerCase()) || null;
+
+/* ---------- purchase orders ---------- */
+// A PO: { no, date, supplier, loc, expected, lines: [{ ingId, qty, rate (per base unit), taxPct }], status: draft | approved | closed | cancelled }.
+// Receiving is a GRN with poId; what's been received is read from those GRNs.
+export const porders = () => ev.all("porders").sort((a, b) => (b.date + b._at).localeCompare(a.date + a._at));
+export function poReceived(po) { const r = {}; grns().filter(g => !g.void && g.poId === po.id).forEach(g => g.lines.forEach(l => { r[l.ingId] = (r[l.ingId] || 0) + (+l.qty || 0); })); return r; }
+export function poState(po) {
+  if (po.status === "cancelled" || po.status === "closed" || po.status === "draft") return po.status;
+  const r = poReceived(po); const got = po.lines.filter(l => (r[l.ingId] || 0) > 0).length;
+  return po.lines.every(l => (r[l.ingId] || 0) >= l.qty - 1e-6) ? "received" : got ? "part" : "approved";
+}
+export const poValue = po => po.lines.reduce((s, l) => s + l.qty * l.rate * (1 + (+l.taxPct || 0) / 100), 0);
+export const PO_LABEL = { draft: "Waiting for approval", approved: "Approved", part: "Part received", received: "Received", closed: "Closed short", cancelled: "Cancelled" };
+// Open quantity of a material on approved POs, so planning doesn't order it twice.
+export function onOrder() { const m = {}; porders().filter(p => ["approved", "part"].includes(poState(p))).forEach(p => { const r = poReceived(p); p.lines.forEach(l => { m[l.ingId] = (m[l.ingId] || 0) + Math.max(0, l.qty - (r[l.ingId] || 0)); }); }); return m; }
+// What a supplier last charged for a material (per base unit, before tax), from GRNs.
+export function lastRate(supplier, ingId) { const s = String(supplier || "").toLowerCase(); for (const g of grns()) { if (g.void || g.supplier.toLowerCase() !== s) continue; const l = g.lines.find(x => x.ingId === ingId && x.qty > 0 && x.amount > 0); if (l) return l.amount / l.qty; } return 0; }
+// The usual supplier for a material: set on the material, else whoever it was last bought from.
+export function usualSupplier(i) { if (i.supplier) return i.supplier; const g = grns().find(g => !g.void && g.lines.some(l => l.ingId === i.id)); return g ? g.supplier : ""; }
+
+/* ---------- payables ---------- */
+// Bills are GRNs; payments to suppliers are their own records (kind "spays"). Payments settle the oldest bills first.
+export const spays = () => ev.all("spays").sort((a, b) => (b.date + b._at).localeCompare(a.date + a._at));
+export function supplierLedger(name) {
+  const n = String(name || "").toLowerCase(); const sup = supplierByName(name) || { name, days: 0 }; const days = +sup.days || 0; const t = today();
+  const bills = grns().filter(g => !g.void && g.supplier.toLowerCase() === n).map(g => ({ date: g.date, doc: g.no, id: g.id, bill: +g.total || 0, due: addDays(g.date, days) })).sort((a, b) => a.date < b.date ? -1 : 1);
+  const pays = spays().filter(p => p.supplier.toLowerCase() === n);
+  let paid = pays.reduce((s, p) => s + (+p.amount || 0), 0); bills.forEach(b => { const u = Math.min(b.bill, Math.max(0, paid)); b.open = Math.round((b.bill - u) * 100) / 100; paid -= u; });
+  const entries = [...bills.map(b => ({ date: b.date, doc: b.doc, bill: b.bill, paid: 0, ref: b.id })), ...pays.map(p => ({ date: p.date, doc: p.mode ? `Paid · ${p.mode}${p.ref ? " " + p.ref : ""}` : "Paid", bill: 0, paid: +p.amount || 0, pay: p }))].sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : a.bill ? -1 : 1);
+  let run = 0; entries.forEach(e => { run += e.bill - e.paid; e.bal = Math.round(run * 100) / 100; });
+  const open = bills.filter(b => b.open > 0.005); const overdue = open.filter(b => b.due < t);
+  return { sup, days, bills, pays, entries, balance: Math.round(run * 100) / 100, open, overdue: overdue.reduce((s, b) => s + b.open, 0), oldest: open[0] ? open[0].due : "" };
+}
+export function payables() { const names = new Set([...suppliers().map(s => s.name), ...grns().filter(g => !g.void).map(g => g.supplier), ...spays().map(p => p.supplier)].filter(Boolean).map(x => x.trim()));
+  const seen = new Set(); return [...names].filter(n => { const k = n.toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; }).map(n => ({ name: n, ...supplierLedger(n) })); }
 export const grns = () => ev.all("grns").sort((a, b) => (b.date + b._at).localeCompare(a.date + a._at));
 // Transfers saved before the receive step existed have no status and count as received.
 export const xferReceived = t => !t.status || t.status === "received";
