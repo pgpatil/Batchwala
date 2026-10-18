@@ -43,14 +43,16 @@ const legacyBake = V.bake;
 V.bake = () => R.mode() === "restaurant" ? outletBoardView() : legacyBake();
 function outletBoardView() {
   const d = S.bakeDate || today(); const loc = M.here(); const rows = M.outletBoard(d, loc); const t = today();
-  const inToday = M.transfers().filter(x => !x.void && x.to === loc && x.date === t);
+  const inToday = M.transfers().filter(x => !x.void && x.to === loc && x.date === t && M.xferReceived(x));
+  const coming = M.transfers().filter(x => !x.void && x.to === loc && !M.xferReceived(x));
   const short = rows.filter(r => r.short);
   S.askText = `🧁 ${M.locName(loc)} needs for ${dLong(d)}:\n` + short.map(r => `• ${r.item}: ${r.short}`).join("\n");
   let h = band(`Bake board · ${esc(M.locName(loc))}`, short.length ? `<button class="pillbtn" data-askcopy>${ICON.wa}Ask kitchen</button>` : "",
     `<div class="stats"><div class="st"><b>${rows.reduce((s, r) => s + Math.max(0, r.onHand), 0)}</b><span>pieces on hand</span></div><div class="st"><b>${rows.reduce((s, r) => s + r.committed, 0)}</b><span>pre-orders to hand over</span></div><div class="st"><b>${short.reduce((s, r) => s + r.short, 0)}</b><span>short · ask the kitchen</span></div></div>`);
   h += `<div class="tools">${dateChips("bakedate", d)}</div>`;
+  if (coming.length) h += `<div class="boardfoot"><label class="f">On the way · confirm when it arrives</label><div class="kv">${coming.map(x => `<div style="align-items:center"><button class="who" data-xfer="${esc(x.id)}"><div class="nm" style="font-size:15px">${esc(x.no)} from ${esc(M.locName(x.from))}</div><div class="subl">${esc(xferText(x))}</div></button>${canReceive() ? `<button class="paybtn" data-xferrecv="${esc(x.id)}">Receive</button>` : ""}</div>`).join("")}</div></div>`;
   if (!rows.length) return h + `<div class="empty"><strong>Nothing here yet</strong>Pieces the kitchen sends to ${esc(M.locName(loc))} show here, with pre-orders and kept-ready levels.</div>`;
-  h += `<ul class="list">${rows.map(r => `<li class="row board${r.short ? "" : " done"}"><div class="who"><div class="nm big">${esc(r.item)}</div><div class="subl">${r.committed ? `${r.committed} pre-ordered · ` : ""}${r.par ? `${r.par} kept ready · ` : ""}${r.sold} sold${r.short ? ` <span class="tag t-due">short ${r.short}</span>` : ""}</div></div><div class="side"><div class="bignum">${r.onHand}</div><small class="mut">on hand</small></div></li>`).join("")}</ul>`;
+  h += `<ul class="list">${rows.map(r => `<li class="row board${r.short ? "" : " done"}"><div class="who"><div class="nm big">${esc(r.item)}</div><div class="subl">${r.committed ? `${r.committed} pre-ordered · ` : ""}${r.par ? `${r.par} kept ready · ` : ""}${r.sold} sold${r.coming ? ` · <span class="tag t-part">${r.coming} on the way</span>` : ""}${r.short ? ` <span class="tag t-due">short ${r.short}</span>` : ""}</div></div><div class="side"><div class="bignum">${r.onHand}</div><small class="mut">on hand</small></div></li>`).join("")}</ul>`;
   if (inToday.length) h += `<div class="boardfoot"><label class="f">Received today</label><div class="kv">${inToday.map(x => `<div><button class="who" data-xfer="${esc(x.id)}"><div class="nm" style="font-size:15px">${esc(x.no)} from ${esc(M.locName(x.from))}</div><div class="subl">${esc(xferText(x))}</div></button></div>`).join("")}</div></div>`;
   return h;
 }
@@ -100,7 +102,7 @@ function drawGrn(st) {
     return `<div class="grnline"><div class="gl1"><select class="in" data-gring="${ix}">${["rm", "pm"].map(t => `<optgroup label="${M.ING_TYPES[t]}">${mats.filter(m => m.type === t).map(m => `<option value="${esc(m.id)}" ${m.id === i.id ? "selected" : ""}>${esc(m.name)}</option>`).join("")}</optgroup>`).join("")}</select><button class="rm" data-grrm="${ix}" aria-label="Remove line">×</button></div>
       <div class="gl2"><label><span>Qty</span><input class="in" data-grqty="${ix}" inputmode="decimal" value="${l.qty ? +(l.qty / l.f).toFixed(3) : ""}" placeholder="0"></label>${b ? `<div class="chips unitchips">${[[i.unit, 1], [b.big, b.f]].map(([n, f]) => `<button class="chip" data-grf="${ix}:${f}" aria-pressed="${l.f === f}">${n}</button>`).join("")}</div>` : `<span class="unitlbl">pcs</span>`}
       <label><span>Amount ₹${tax ? " before tax" : ""}</span><input class="in" data-gramt="${ix}" inputmode="decimal" value="${l.amount || ""}" placeholder="0"></label>${tax ? `<label class="tx"><span>${esc(M.taxCfg().name)} %</span><input class="in" data-grtax="${ix}" inputmode="decimal" value="${l.taxPct}"></label>` : ""}</div>
-      <small class="mut">Have ${qty(Math.max(0, sm[i.id] || 0), i.unit)}${l.qty && l.amount ? ` · ${rs2(l.amount / l.qty * (b ? b.f : 1))}/${b ? b.big : i.unit}` : ""}</small></div>`; }).join("")}</div>
+      <small class="mut">Have ${qty(Math.max(0, sm[i.id] || 0), i.unit)}${l.qty && l.amount ? ` · ${rs2(l.amount / l.qty * (b ? b.f : 1))}/${b ? b.big : i.unit}` : ""}${tax && l.taxPct ? (i.taxInCost ? " · tax added to stock cost" : " · tax recoverable, not in cost") : ""}</small></div>`; }).join("")}</div>
   <button class="add-line" data-gradd>+ Add item</button>
   <div class="kv" id="grTotals" style="margin-top:12px">${grnTotals(x.lines)}</div>
   <label class="f" for="grNote">Note</label><input class="in" id="grNote" value="${esc(x.notes)}" placeholder="Optional · short delivery, damaged items">
@@ -123,8 +125,10 @@ A.saveGrn = async el => {
   if (!await yesNo(`<p class="cq">Save ${esc(no)}?</p><div class="cdetail">${esc(sup)}${x.invoiceNo ? " · inv " + esc(x.invoiceNo) : ""}<br>${lines.map(l => esc(ings[l.ingId].name) + " " + qty(l.qty, ings[l.ingId].unit)).join("<br>")}<br><br>Total ${rs2(amount + tax)} · adds stock at ${esc(M.locName(x.loc))}</div>`, "Save GRN", "btn-ok")) return;
   el.disabled = true; const id = uid("g");
   if (!M.suppliers().some(s => s.name.toLowerCase() === sup.toLowerCase())) await ev.put("suppliers", { id: uid("s"), name: sup });
-  for (const l of lines) await putMove({ ingId: l.ingId, type: "purchase", qty: l.qty, amount: +l.amount || 0, date: x.date, note: `${no} · ${sup}`, ref: id, outletId: x.loc });
-  await ev.put("grns", { id, no, date: x.date, supplier: sup, invoiceNo: x.invoiceNo.trim(), loc: x.loc, notes: x.notes.trim(), lines: lines.map(l => ({ ingId: l.ingId, qty: l.qty, amount: +l.amount || 0, taxPct: +l.taxPct || 0 })), amount, tax, total: r2(amount + tax), by: (R.me() || {}).id || "" });
+  // Stock is valued at the bill amount, plus the tax for materials whose purchase tax isn't recoverable (set per material by the admin).
+  const costOf = l => r2((+l.amount || 0) * (1 + (ings[l.ingId].taxInCost ? (+l.taxPct || 0) / 100 : 0)));
+  for (const l of lines) await putMove({ ingId: l.ingId, type: "purchase", qty: l.qty, amount: costOf(l), date: x.date, note: `${no} · ${sup}`, ref: id, outletId: x.loc });
+  await ev.put("grns", { id, no, date: x.date, supplier: sup, invoiceNo: x.invoiceNo.trim(), loc: x.loc, notes: x.notes.trim(), lines: lines.map(l => ({ ingId: l.ingId, qty: l.qty, amount: +l.amount || 0, taxPct: +l.taxPct || 0, cost: costOf(l) })), amount, tax, total: r2(amount + tax), by: (R.me() || {}).id || "" });
   sync.soon(); closeSheet(); toast(`${no} saved · stock added`);
 };
 function grnDetail(id) {
@@ -143,13 +147,13 @@ const xferText = x => { const ings = M.ingMap(); return (x.lines || []).map(l =>
 V.xfer = () => {
   S.filter.xfer = S.filter.xfer || "all"; const f = S.filter.xfer; const all = M.transfers(); const t = today();
   const list = all.filter(x => f === "all" || x.from === f || x.to === f);
-  const todays = list.filter(x => !x.void && x.date === t);
-  let h = band("Transfers", "", `<div class="stats"><div class="st"><b>${todays.length}</b><span>today</span></div><div class="st"><b>${todays.reduce((s, x) => s + x.lines.filter(l => l.item).reduce((a, l) => a + l.qty, 0), 0)}</b><span>pieces sent today</span></div><div class="st"><b>${M.locations().length}</b><span>locations</span></div></div>`);
+  const todays = list.filter(x => !x.void && x.date === t); const transit = list.filter(x => !x.void && !M.xferReceived(x));
+  let h = band("Transfers", "", `<div class="stats"><div class="st"><b>${transit.length}</b><span>in transit</span></div><div class="st"><b>${todays.length}</b><span>today</span></div><div class="st"><b>${todays.reduce((s, x) => s + x.lines.filter(l => l.item).reduce((a, l) => a + l.qty, 0), 0)}</b><span>pieces sent today</span></div><div class="st"><b>${M.locations().length}</b><span>locations</span></div></div>`);
   h += `<div class="tools">${M.locations().length > 1 ? `<div class="chips"><button class="chip" data-filter="xfer:all" aria-pressed="${f === "all"}">All</button>${M.locations().map(l => `<button class="chip" data-filter="xfer:${esc(l.id)}" aria-pressed="${f === l.id}">${esc(l.name)}</button>`).join("")}</div>` : ""}</div>`;
   if (M.locations().length < 2) h += `<p class="hint" style="padding:0 4px">Only one location so far. Add outlets in More → Business settings → Locations to send stock between them.</p>`;
   if (!list.length) return h + `<div class="empty"><strong>No transfers yet</strong>A transfer moves finished goods (and materials, like boxes) from the kitchen to an outlet. The outlet’s bake board shows what arrived.${R.can("transfer") && M.locations().length > 1 ? `<button class="btn btn-primary" data-act="newTransfer" style="margin-top:14px">${ICON.truck}New transfer</button>` : ""}</div>`;
-  return h + (S.wide ? `<div class="card tablecard"><table class="reg"><thead><tr><th>No.</th><th>Date</th><th>From</th><th>To</th><th>Items</th><th class="r">Pieces</th><th>By</th></tr></thead><tbody>${list.map(x => `<tr data-xfer="${esc(x.id)}" tabindex="0"${x.void ? ` class="void"` : ""}><td><b>${esc(x.no)}</b>${x.void ? ` <span class="tag t-due">Undone</span>` : ""}</td><td>${esc(dLong(x.date))}</td><td>${esc(M.locName(x.from))}</td><td>${esc(M.locName(x.to))}</td><td class="items">${esc(xferText(x))}</td><td class="r">${x.lines.filter(l => l.item).reduce((a, l) => a + l.qty, 0)}</td><td>${esc(who(x))}</td></tr>`).join("")}</tbody></table></div>`
-    : `<ul class="list">${list.map(x => `<li class="row${x.void ? " void" : ""}"><button class="who" data-xfer="${esc(x.id)}"><div class="nm">${esc(x.no)} · ${esc(M.locName(x.from))} → ${esc(M.locName(x.to))}</div><div class="subl">${esc(dLong(x.date))}${x.void ? ` <span class="tag t-due">Undone</span>` : ""}</div><div class="subl">${esc(xferText(x))}</div></button></li>`).join("")}</ul>`);
+  return h + (S.wide ? `<div class="card tablecard"><table class="reg"><thead><tr><th>No.</th><th>Date</th><th>From</th><th>To</th><th>Items</th><th class="r">Pieces</th><th>By</th></tr></thead><tbody>${list.map(x => `<tr data-xfer="${esc(x.id)}" tabindex="0"${x.void ? ` class="void"` : ""}><td><b>${esc(x.no)}</b> ${statusTag(x)}</td><td>${esc(dLong(x.date))}</td><td>${esc(M.locName(x.from))}</td><td>${esc(M.locName(x.to))}</td><td class="items">${esc(xferText(x))}</td><td class="r">${x.lines.filter(l => l.item).reduce((a, l) => a + l.qty, 0)}</td><td>${esc(who(x))}</td></tr>`).join("")}</tbody></table></div>`
+    : `<ul class="list">${list.map(x => `<li class="row${x.void ? " void" : ""}"><button class="who" data-xfer="${esc(x.id)}"><div class="nm">${esc(x.no)} · ${esc(M.locName(x.from))} → ${esc(M.locName(x.to))}</div><div class="subl">${esc(dLong(x.date))} ${statusTag(x)}</div><div class="subl">${esc(xferText(x))}</div></button>${!x.void && !M.xferReceived(x) && canReceive() ? `<button class="paybtn" data-xferrecv="${esc(x.id)}">Receive</button>` : ""}</li>`).join("")}</ul>`);
 };
 A.newTransfer = () => transferSheet();
 H.transferSheet = opts => transferSheet(opts);
@@ -182,17 +186,50 @@ A.saveTransfer = async el => {
   syncXfer(); const st = ui.sheet, x = st.x; const ings = M.ingMap();
   const lines = [...x.fg.filter(l => l.qty > 0).map(l => ({ item: l.item, qty: l.qty })), ...x.mats.filter(l => l.qty > 0 && ings[l.ingId]).map(l => ({ ingId: l.ingId, qty: l.qty }))];
   if (!lines.length) return; el.disabled = true; const id = uid("t"); const no = M.nextDocNo("transfers", prefix(), "T");
-  for (const l of lines.filter(l => l.ingId)) { await putMove({ ingId: l.ingId, type: "transfer", qty: -l.qty, note: `${no} to ${M.locName(x.to)}`, ref: id, outletId: x.from }); await putMove({ ingId: l.ingId, type: "transfer", qty: l.qty, note: `${no} from ${M.locName(x.from)}`, ref: id, outletId: x.to }); }
-  await ev.put("transfers", { id, no, date: x.date, from: x.from, to: x.to, lines, note: x.note.trim(), by: (R.me() || {}).id || "" });
-  sync.soon(); closeSheet(); toast(`${no} sent to ${M.locName(x.to)}`);
+  // Sending takes stock off the sender now; the receiver gains it when it confirms what arrived.
+  for (const l of lines.filter(l => l.ingId)) await putMove({ ingId: l.ingId, type: "transfer", qty: -l.qty, note: `${no} to ${M.locName(x.to)}`, ref: id, outletId: x.from });
+  await ev.put("transfers", { id, no, date: x.date, from: x.from, to: x.to, lines, note: x.note.trim(), status: "sent", sentAt: new Date().toISOString(), by: (R.me() || {}).id || "" });
+  sync.soon(); closeSheet(); toast(`${no} on its way to ${M.locName(x.to)}`);
+};
+const canReceive = () => R.can("transfer") || R.can("sale");
+const lineName = (l, ings) => l.item || ((ings[l.ingId] || {}).name || "?");
+const lineQty = (l, v, ings) => l.item ? String(v) : (ings[l.ingId] ? qty(v, ings[l.ingId].unit) : String(v));
+const statusTag = x => x.void ? `<span class="tag t-due">Undone</span>` : !M.xferReceived(x) ? `<span class="tag t-part">In transit</span>` : M.xferShort(x) ? `<span class="tag t-due">Received short</span>` : `<span class="tag t-paid">${ICON.check}Received</span>`;
+// The receiving location confirms each line; anything short is recorded on the transfer.
+function receiveSheet(id) {
+  const x = M.transfers().find(t => t.id === id); if (!x || x.void || M.xferReceived(x)) return; if (!canReceive()) { guard("transfer"); return; }
+  const st = { kind: "xferRecv", id, lines: x.lines.map(l => ({ ...l, recv: +l.qty })), note: "" }; st.redraw = () => drawRecv(st); drawRecv(st);
+}
+function drawRecv(st) {
+  const x = M.transfers().find(t => t.id === st.id); const ings = M.ingMap(); const short = st.lines.filter(l => l.recv < l.qty);
+  openSheet(st, `<div class="sh-head"><h2 class="h">Receive ${esc(x.no)}</h2><button class="x" data-close aria-label="Close">×</button></div>
+  <p class="hint" style="margin-top:-4px">From ${esc(M.locName(x.from))} · sent ${esc(new Date(x.sentAt || x._at).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" }))}${who(x) ? " by " + esc(who(x)) : ""}. Count what arrived; change any line that’s short or damaged.</p>
+  <div class="kv">${st.lines.map((l, ix) => `<div style="align-items:center"><span>${esc(lineName(l, ings))}<small class="mut" style="display:block">sent ${esc(lineQty(l, l.qty, ings))}</small></span>${l.item
+    ? `<div class="stepper"><button data-rvstep="${ix}:-1" aria-label="One less">−</button><span>${l.recv}</span><button data-rvstep="${ix}:1" aria-label="One more">+</button></div>`
+    : `<span style="display:flex;align-items:center;gap:6px"><input class="rate" data-rvq="${ix}" inputmode="decimal" value="${l.recv}"><span class="unitlbl">${ings[l.ingId] ? ings[l.ingId].unit : ""}</span></span>`}</div>`).join("")}</div>
+  <label class="f" for="rvNote">Note</label><input class="in" id="rvNote" value="${esc(st.note)}" placeholder="${short.length ? "What happened to the missing pieces" : "Optional"}">
+  ${short.length ? `<p class="hint" style="color:var(--due)">Short: ${short.map(l => esc(lineName(l, ings)) + " " + esc(lineQty(l, l.qty - l.recv, ings))).join(", ")}. It stays recorded on the transfer.</p>` : ""}
+  <button class="btn btn-ok" data-act="saveReceive">${ICON.check}${short.length ? "Receive with shortage" : "Received in full"}</button>`);
+}
+const syncRecv = () => { const st = ui.sheet; if (!st || st.kind !== "xferRecv") return; st.note = ($("#rvNote") || {}).value || ""; st.lines.forEach((l, ix) => { const q = document.querySelector(`[data-rvq="${ix}"]`); if (q) l.recv = Math.max(0, num(q.value)); }); };
+A.saveReceive = async el => {
+  syncRecv(); const st = ui.sheet; const x = M.transfers().find(t => t.id === st.id); if (!x || M.xferReceived(x)) { closeSheet(); return; }
+  el.disabled = true;
+  for (const l of st.lines.filter(l => l.ingId && l.recv > 0)) await putMove({ ingId: l.ingId, type: "transfer", qty: l.recv, note: `${x.no} from ${M.locName(x.from)}`, ref: x.id, outletId: x.to });
+  await ev.put("transfers", clean({ ...ev.get("transfers", x.id), status: "received", lines: st.lines, receivedAt: new Date().toISOString(), receivedBy: (R.me() || {}).id || "", recvNote: st.note.trim() }));
+  sync.soon(); closeSheet(); toast(`${x.no} received at ${M.locName(x.to)}`);
 };
 function xferDetail(id) {
   const x = M.transfers().find(t => t.id === id); if (!x) { closeSheet(); return; } const ings = M.ingMap();
+  const rcv = M.xferReceived(x); const rb = x.receivedBy ? (ev.get("members", x.receivedBy) || {}).name : "";
+  const when = t => t ? new Date(t).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" }) : "";
   openSheet({ kind: "xferView", id, redraw: () => xferDetail(id) }, `<div class="sh-head"><h2 class="h">${esc(x.no)}</h2><button class="x" data-close aria-label="Close">×</button></div>
-  <div class="subl" style="margin:-4px 0 10px">${esc(M.locName(x.from))} → ${esc(M.locName(x.to))} · ${esc(dLong(x.date))}${who(x) ? " · " + esc(who(x)) : ""}</div>
+  <div class="subl" style="margin:-4px 0 10px">${esc(M.locName(x.from))} → ${esc(M.locName(x.to))} · ${esc(dLong(x.date))} ${statusTag(x)}</div>
   ${x.void ? `<div class="banner bad">Undone. Everything went back to ${esc(M.locName(x.from))}.</div>` : ""}
-  <div class="kv">${x.lines.map(l => l.item ? `<div><span>${esc(l.item)}</span><b>${l.qty}</b></div>` : `<div><span>${esc((ings[l.ingId] || {}).name || "?")}</span><b>${ings[l.ingId] ? qty(l.qty, ings[l.ingId].unit) : l.qty}</b></div>`).join("")}</div>
-  ${x.note ? `<p class="hint">Note: ${esc(x.note)}</p>` : ""}
+  <div class="kv"><div><span class="mut">Item</span><span class="mut">Sent${rcv && x.status ? " · received" : ""}</span></div>${x.lines.map(l => `<div><span>${esc(lineName(l, ings))}</span><b>${esc(lineQty(l, l.qty, ings))}${rcv && l.recv != null ? ` · <span class="${+l.recv < +l.qty ? "due" : ""}">${esc(lineQty(l, l.recv, ings))}</span>` : ""}</b></div>`).join("")}</div>
+  <div class="kv" style="margin-top:10px"><div><span>Sent</span><span>${esc(when(x.sentAt || x._at))}${who(x) ? " · " + esc(who(x)) : ""}</span></div>${x.receivedAt ? `<div><span>Received</span><span>${esc(when(x.receivedAt))}${rb ? " · " + esc(rb) : ""}</span></div>` : ""}</div>
+  ${x.note ? `<p class="hint">Note: ${esc(x.note)}</p>` : ""}${x.recvNote ? `<p class="hint">On receipt: ${esc(x.recvNote)}</p>` : ""}
+  ${!x.void && !rcv && canReceive() ? `<button class="btn btn-ok" data-xferrecv="${esc(x.id)}">${ICON.check}Receive at ${esc(M.locName(x.to))}</button>` : ""}
   ${!x.void && R.can("transfer") ? `<button class="btn btn-danger" data-xferundo="${esc(x.id)}">Undo this transfer</button>` : ""}`);
 }
 
@@ -243,6 +280,7 @@ H.click.push(async T => {
   const gr = T.closest("[data-grn]"); if (gr) { grnDetail(gr.dataset.grn); return true; }
   const gu = T.closest("[data-grnundo]"); if (gu) { if (await voidDoc("grns", gu.dataset.grnundo, "GRN")) grnDetail(gu.dataset.grnundo); return true; }
   const xd = T.closest("[data-xfer]"); if (xd) { xferDetail(xd.dataset.xfer); return true; }
+  const xr = T.closest("[data-xferrecv]"); if (xr) { receiveSheet(xr.dataset.xferrecv); return true; }
   const xu = T.closest("[data-xferundo]"); if (xu) { if (await voidDoc("transfers", xu.dataset.xferundo, "transfer")) xferDetail(xu.dataset.xferundo); return true; }
   if (!st) return false;
   if (st.kind === "grn") {
@@ -255,6 +293,7 @@ H.click.push(async T => {
     if (T.closest("[data-xmadd]")) { syncXfer(); const m = M.ingredients().find(i => i.type === "pm") || M.ingredients()[0]; st.x.mats.push({ ingId: m.id, qty: 0 }); drawXfer(st); return true; }
     const xr = T.closest("[data-xmrm]"); if (xr) { syncXfer(); st.x.mats.splice(+xr.dataset.xmrm, 1); drawXfer(st); return true; }
   }
+  if (st.kind === "xferRecv") { const rv = T.closest("[data-rvstep]"); if (rv) { syncRecv(); const [ix, d] = rv.dataset.rvstep.split(":").map(Number); const l = st.lines[ix]; l.recv = Math.max(0, l.recv + d); drawRecv(st); return true; } }
   if (st.kind === "fgAdj") { const ft = T.closest("[data-fat]"); if (ft) { st.type = ft.dataset.fat; drawFgAdj(st); return true; } }
   return false;
 });

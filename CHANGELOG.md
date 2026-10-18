@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.5.0 — 18 Oct 2026
+- Transfers have a receive step: sending takes stock off the sender and marks it in transit; the receiving location confirms what arrived line by line, with a note for anything short. Only received quantities count at the destination; shortfalls stay on the transfer and show as "Received short". The outlet bake board lists what's on the way with a Receive button, and pieces on the way aren't asked for twice
+- Purchase tax per material (admin only, in the material editor): recoverable (kept out of stock cost) or not recoverable (added to the cost of stock, recipes and batches). GRN lines say which applies
+
 ## 2.4.0 — 18 Oct 2026
 - ERP mode alongside Restaurant mode. The admin sets each person to Restaurant, ERP or both (Users & roles); people with both get a switch in the sidebar or More. While nobody has ERP, the app works exactly as before
 - Locations: a central kitchen and any number of outlets (Business settings → Locations). Each device picks where it is; orders, batches and stock moves belong to that location

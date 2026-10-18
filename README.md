@@ -24,8 +24,8 @@ It is a Progressive Web App: it opens from a link, installs to the home screen, 
 | Menu | Prices, categories, short names for WhatsApp reading, par levels, recipes with cost and margin |
 | Reports | Sales by day and channel, best sellers with margin, wastage value, repeat customers |
 | ERP mode | For people the admin gives ERP: Production per kitchen, Purchases as GRNs, Stock by location, Transfers kitchen → outlets, Finished goods by location, Batches and BOM. Restaurant mode keeps the counter, orders, payments, deliveries and the outlet’s bake board. Nobody on ERP = the original single app |
-| Locations | One central kitchen and any number of outlets; each device chooses where it is |
-| Tax | Optional GST (or any name): default and per-item rates, inclusive or exclusive prices, CGST + SGST split, GSTIN; shown on every bill, message and GRN |
+| Locations | One central kitchen and any number of outlets; each device chooses where it is. Transfers are sent, then received at the other end with what actually arrived |
+| Tax | Optional GST (or any name): default and per-item rates, inclusive or exclusive prices, CGST + SGST split, GSTIN; shown on every bill, message and GRN. Per material, the admin sets whether purchase tax is recoverable or added to cost |
 | Users & roles | Admin, Management, Manager, Kitchen, Delivery, Counter; each opens on its own home screen. Each person uses Restaurant, ERP or both. Optional 4-digit PIN for shared phones |
 | History | Every change records who made it and when; any order shows its full history |
 | Data | Saved on the phone first; optional sync through a shared Google Drive folder; daily Excel copy saved to that folder; backup file; Excel export |

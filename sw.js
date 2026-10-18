@@ -1,5 +1,5 @@
 // Offline cache. Bump VERSION on every release so phones pick up the update.
-const VERSION = "v2.4.0";
+const VERSION = "v2.5.0";
 const CACHE = "batchwala-" + VERSION;
 const SHELL = ["./", "index.html", "manifest.webmanifest", "css/app.css", "js/app.js", "js/core.js", "js/events.js", "js/sync.js", "js/storage/drive.js",
   "js/roles.js", "js/model.js", "js/orders.js", "js/money.js", "js/inventory.js", "js/batches.js", "js/pos.js", "js/bom.js", "js/erp.js", "js/ops.js", "js/admin.js", "js/waparse.js", "js/util.js", "js/ui.js", "js/config.js",

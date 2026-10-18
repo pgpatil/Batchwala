@@ -191,22 +191,24 @@ export const erpOn = () => ev.all("members").some(m => modesOf(m).includes("erp"
 const since = () => config().erpStart || "0000";
 const locOf = x => x.outletId || locations()[0].id;
 // Finished goods on hand, by location and item, counted from the day ERP started:
-// good pieces from batches + transfers in − transfers out − delivered sales + adjustments.
+// good pieces from batches + transfers received − transfers sent − delivered sales + adjustments.
+// A transfer leaves the sender when sent and reaches the receiver only when received, at the quantity received.
 export function fgStock() {
   const out = {}; const add = (loc, item, q) => { const L = out[loc] = out[loc] || {}; L[item] = (L[item] || 0) + q; }; const s0 = since();
   batches().filter(b => !b.void && b.date >= s0).forEach(b => b.lines.forEach(l => add(locOf(b), l.item, l.qty - l.spoiled)));
-  ev.all("transfers").filter(t => !t.void && t.date >= s0).forEach(t => (t.lines || []).filter(l => l.item).forEach(l => { add(t.from, l.item, -(+l.qty || 0)); add(t.to, l.item, +l.qty || 0); }));
+  ev.all("transfers").filter(t => !t.void && t.date >= s0).forEach(t => (t.lines || []).filter(l => l.item).forEach(l => { add(t.from, l.item, -(+l.qty || 0)); if (xferReceived(t)) add(t.to, l.item, l.recv != null ? +l.recv : +l.qty || 0); }));
   orders(false).filter(o => isDelivered(o) && o.date >= s0).forEach(o => o.items.forEach(i => add(locOf(o), i.item, -i.qty)));
   ev.all("fg").filter(f => f.date >= s0).forEach(f => add(f.loc, f.item, +f.qty || 0));
   return out;
 }
 // Outlet board for a date: per item, pre-orders still to hand over, kept-ready level, on hand here, sold here today, and what to ask the kitchen for.
 export function outletBoard(date, loc = here()) {
-  const fg = fgStock()[loc] || {}; const rows = new Map(); const row = n => { if (!rows.has(n)) rows.set(n, { item: n, committed: 0, par: 0, onHand: 0, sold: 0 }); return rows.get(n); };
+  const fg = fgStock()[loc] || {}; const way = inTransit(loc); const rows = new Map(); const row = n => { if (!rows.has(n)) rows.set(n, { item: n, committed: 0, par: 0, onHand: 0, sold: 0, coming: 0 }); return rows.get(n); };
   orders(false).filter(o => o.date === date && locOf(o) === loc).forEach(o => o.items.forEach(i => { const r = row(i.item); if (isDelivered(o)) r.sold += i.qty; else r.committed += i.qty; }));
   if (sellingLocs().some(l => l.id === loc)) menuActive().filter(m => m.par > 0).forEach(m => { row(m.name).par = m.par; });
-  Object.entries(fg).forEach(([n, q]) => { if (q) row(n).onHand = q; });
-  return [...rows.values()].map(r => ({ ...r, short: Math.max(0, r.committed + r.par - Math.max(0, r.onHand)) })).sort((a, b) => b.short - a.short || a.item.localeCompare(b.item));
+  Object.entries(fg).forEach(([n, q]) => { if (q) row(n).onHand = q; }); Object.entries(way).forEach(([n, q]) => { if (q) row(n).coming = q; });
+  // Pieces already on the way count against the shortfall, so the kitchen isn't asked twice.
+  return [...rows.values()].map(r => ({ ...r, short: Math.max(0, r.committed + r.par - Math.max(0, r.onHand) - r.coming) })).sort((a, b) => b.short - a.short || a.item.localeCompare(b.item));
 }
 // Production for a kitchen and date: what every selling location is short of, less finished goods already at the kitchen.
 export function production(date, kitchen = (kitchens()[0] || locations()[0]).id) {
@@ -219,6 +221,10 @@ export function production(date, kitchen = (kitchens()[0] || locations()[0]).id)
 }
 export const suppliers = () => ev.all("suppliers").sort((a, b) => a.name.localeCompare(b.name));
 export const grns = () => ev.all("grns").sort((a, b) => (b.date + b._at).localeCompare(a.date + a._at));
+// Transfers saved before the receive step existed have no status and count as received.
+export const xferReceived = t => !t.status || t.status === "received";
+export const xferShort = t => xferReceived(t) && (t.lines || []).some(l => l.recv != null && +l.recv < +l.qty);
+export function inTransit(loc) { const m = {}; ev.all("transfers").filter(t => !t.void && t.to === loc && !xferReceived(t)).forEach(t => (t.lines || []).filter(l => l.item).forEach(l => { m[l.item] = (m[l.item] || 0) + (+l.qty || 0); })); return m; }
 export const transfers = () => ev.all("transfers").sort((a, b) => (b.date + b._at).localeCompare(a.date + a._at));
 // GRN-P12, T-P4: the document type, then the person's prefix so two phones never clash offline.
 export function nextDocNo(kind, prefix, tag) { const n = ev.all(kind).map(x => +((/(\d+)$/.exec(String(x.no || "")) || [])[1] || 0)); return `${tag}-${prefix || ""}${Math.max(0, ...n) + 1}`; }
