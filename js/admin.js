@@ -5,6 +5,7 @@ import * as M from "./model.js";
 import * as R from "./roles.js";
 import { APP_NAME, GOOGLE_CLIENT_ID, DATA_FOLDER } from "./config.js";
 import { createDriveAdapter } from "./storage/drive.js";
+import * as L from "./lock.js";
 import { S, A, V, H, guard, logoHtml, toran, clean } from "./core.js";
 import { $, esc, rs, rs2, num, uid, today, cmpFlat, ICON } from "./util.js";
 import { ui, toast, openSheet, closeSheet, ask, yesNo } from "./ui.js";
@@ -14,9 +15,14 @@ V.more = () => {
   const c = M.config(); const me = R.me(); const st = sync.status;
   const items = [
     ["menu", "menu", "Menu, prices & recipes", `${M.menuActive().length} items on sale`, R.can("menu.edit") || R.can("reports")],
-    ["@stock", "stock", "Stock · RM / PM / semi-finished", `${M.ingredients().length} materials`, !R.tabs().includes("stock") && (R.can("stock.buy") || R.can("stock.count"))],
-    ["@bom", "tree", "BOM", "Multilevel bills of materials and the bake plan", !R.tabs().includes("bom") && (R.can("menu.edit") || R.can("reports") || R.can("bake.record"))],
-    ["@batches", "batch", "Batches", `${M.batches().filter(b => !b.void).length} recorded · pieces, spoilage and cost`, !R.tabs().includes("batches") && R.tabs().includes("today")],
+    ["@stock", "stock", "Inventory · RM / PM / semi-finished", `${M.ingredients().length} items`, !H.onBar("stock") && (R.can("stock.buy") || R.can("stock.count"))],
+    ["@insights", "chart", "Cost & stock reports", "Food cost, wastage, variance, stock ageing, buying, tax, day book", !H.onBar("insights") && H.canOpen("insights")],
+    ["@wo", "oven", "Work orders", "Issue materials, complete, see variance", !H.onBar("wo") && H.canOpen("wo")],
+    ["@po", "orders", "Purchase orders", "Raise, approve, receive against", !H.onBar("po") && H.canOpen("po")],
+    ["@sup", "people", "Suppliers & payables", "What you owe, payments, statements", !H.onBar("sup") && H.canOpen("sup")],
+    ["@plan", "plan", "Planning", "What to make, semi-finished, indent and batch cards", !H.onBar("plan") && H.canOpen("plan")],
+    ["@bom", "tree", "BOM", "Multilevel bills of materials", !H.onBar("bom") && (R.can("menu.edit") || R.can("reports") || R.can("bake.record"))],
+    ["@batches", "batch", "Batches", `${M.batches().filter(b => !b.void).length} recorded · pieces, spoilage and cost`, !H.onBar("batches") && (R.can("bake.record") || R.can("orders.edit"))],
     ["customers", "people", "Customers", `${M.customers().length} saved`, R.can("customers")],
     ["reports", "chart", "Sales & profit", "Sales by day and channel, best sellers, margins", R.can("reports")],
     ["users", "people", "Users & roles", `${R.members().length} people`, R.isAdmin()],
@@ -24,12 +30,14 @@ V.more = () => {
     ["syncSettings", "cloud", "Cloud sync (Google Drive)", st.state === "off" ? "Off · this phone only" : st.state === "ok" ? "On · up to date" : st.state === "error" ? "Needs attention" : "On", true],
     ["backup", "backup", "Backup & restore", "Save a backup file or load one", R.isAdmin()],
     ["export", "dl", "Export to Excel", "Orders, payments, batches, stock and menu", R.can("export")],
+    ["data", "dl", "Import & export", "CSV by data type, with templates", R.can("export") || R.isAdmin()],
+    ["help", "help", "Help", "How every screen and module works", true],
     ["switchUser", "people", "Switch user", "Hand this phone to someone else", true]
   ].filter(x => x[4]);
   return `<div class="band"><div class="top">${logoHtml(c)}<div class="biz"><div class="name">${esc(c.business)}</div><div class="sub">${esc(me ? me.name + " · " + R.ROLES[me.role].label : "")}</div></div></div>${toran()}</div>
   ${H.switchers ? `<div class="moresw">${H.switchers()}</div>` : ""}
   <div class="menu-list" style="margin-top:14px">${items.map(([a, ic, t, s]) => `<button class="mi" ${a[0] === "@" ? `data-go="${a.slice(1)}"` : `data-act="${a}"`}><span class="ic">${ICON[ic]}</span><span class="grow">${t}<small>${esc(s)}</small></span><span class="chev">${ICON.chev}</span></button>`).join("")}</div>
-  <p class="hint" style="padding:4px 18px">${APP_NAME} 2.5${R.mode() !== "classic" ? " · " + esc(M.MODES[R.mode()]) + " mode" : ""} · ${st.state === "off" ? "data saved on this phone only" : "synced through Google Drive"}${st.last ? " · last sync " + new Date(st.last).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" }) : ""}</p>`;
+  <p class="hint" style="padding:4px 18px">${APP_NAME} 2.10${R.mode() !== "classic" ? " · " + esc(M.MODES[R.mode()]) + " mode" : ""} · ${st.state === "off" ? "data saved on this phone only" : "synced through Google Drive"}${st.last ? " · last sync " + new Date(st.last).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" }) : ""}</p>`;
 };
 
 /* ---------- first run ---------- */
@@ -80,10 +88,11 @@ function usersSheet() {
   <div class="kv">${R.ROLE_KEYS.map(k => `<div><span><b>${esc(R.ROLES[k].label)}</b><small class="mut" style="display:block">${esc(R.ROLES[k].note)}</small></span></div>`).join("")}</div>`);
 }
 const modeKey = x => { const mm = Array.isArray(x.modes) ? x.modes : (x.role === "admin" && R.mode() !== "classic" ? ["restaurant", "erp"] : ["restaurant"]); return mm.length > 1 ? "both" : mm[0]; };
-function memberSheet(m) {
+async function memberSheet(m) {
+  const lk = m ? await L.open("members", m.id, m.name) : {}; if (!lk) return;
   const isNew = !m; const x = m ? { ...m } : { id: uid("u"), name: "", role: "management", email: "", prefix: "", pin: "" };
   const a = sync.current();
-  openSheet({ kind: "member", x, isNew }, `<div class="sh-head"><h2 class="h">${isNew ? "Add a person" : esc(x.name)}</h2><button class="x" data-close aria-label="Close">×</button></div>
+  openSheet({ ...lk, kind: "member", x, isNew }, `<div class="sh-head"><h2 class="h">${isNew ? "Add a person" : esc(x.name)}</h2><button class="x" data-close aria-label="Close">×</button></div>
   <label class="f" for="mbName">Name</label><input class="in" id="mbName" value="${esc(x.name)}">
   <label class="f">Role</label><div class="chips">${R.ROLE_KEYS.map(k => `<button class="chip" data-mrole="${k}" aria-pressed="${x.role === k}">${R.ROLES[k].label}</button>`).join("")}</div>
   <p class="hint" id="mbNote">${esc(R.ROLES[x.role].note)}</p>
@@ -105,6 +114,7 @@ A.saveMember = async () => {
   if (!x.prefix) x.prefix = prefixFor(x.name);
   if (x.id === (R.me() || {}).id && x.role !== "admin" && R.members().filter(m => m.role === "admin").length < 2) { toast("Keep at least one admin"); return; }
   if ($("#mbLoc")) x.loc = $("#mbLoc").value;
+  if (!await L.saveOk(st)) return;
   const erpBefore = M.erpOn(); const { _at, _by, ...rec } = x; await ev.put("members", rec);
   // ERP starts counting finished goods from the day it is first given to someone.
   if (!erpBefore && M.erpOn() && !M.config().erpStart) await ev.put("config", clean({ ...M.config(), erpStart: today(), id: "app" }));
@@ -128,6 +138,7 @@ H.click.push(async T => {
       if (!v) return true; if (($("#pinIn") || {}).value !== m.pin) { toast("Wrong PIN"); return true; } }
     await R.setMe(m.id); R.setMode(null); await ev.setMeta("mode", null); if (m.loc) { M.setHere(m.loc); await ev.setMeta("here", m.loc); } S.view = R.home(); closeSheet(); toast(`Now using as ${m.name}`); return true; }
   if (st && st.kind === "settings") {
+    const co = T.closest("[data-costing]"); if (co) { syncSettings(); st.c.costing = co.dataset.costing; drawSettings(st); return true; }
     const ti = T.closest("[data-taxincl]"); if (ti) { syncSettings(); st.c.tax.incl = ti.dataset.taxincl === "1"; drawSettings(st); return true; }
     const ts = T.closest("[data-taxsplit]"); if (ts) { syncSettings(); st.c.tax.split = ts.dataset.taxsplit === "1"; drawSettings(st); return true; }
     const lk = T.closest("[data-lockind]"); if (lk) { syncSettings(); const [ix, k] = lk.dataset.lockind.split(":"); st.c.locations[+ix].kind = k; drawSettings(st); return true; }
@@ -139,8 +150,8 @@ H.click.push(async T => {
 });
 
 /* ---------- business settings ---------- */
-function settingsSheet() { if (!R.isAdmin()) return; const c = JSON.parse(JSON.stringify(M.config())); c.tax = M.taxCfg(); c.locations = M.locations().map(l => ({ ...l }));
-  const st = { kind: "settings", c }; st.redraw = () => drawSettings(st); drawSettings(st); }
+async function settingsSheet() { if (!R.isAdmin()) return; const lk = await L.open("config", "app", "Business settings"); if (!lk) return; const c = JSON.parse(JSON.stringify(M.config())); c.tax = M.taxCfg(); c.locations = M.locations().map(l => ({ ...l }));
+  const st = { ...lk, kind: "settings", c }; st.redraw = () => drawSettings(st); drawSettings(st); }
 function hue(hex) { const n = parseInt(hex.slice(1), 16); const r = (n >> 16) / 255, g = (n >> 8 & 255) / 255, b = (n & 255) / 255; const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn; if (!d) return -1; let h = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4; return (h * 60 + 360) % 360; }
 function drawSettings(st) {
   const c = st.c;
@@ -159,6 +170,8 @@ function drawSettings(st) {
     <div class="chips" style="margin-top:10px"><button class="chip" data-taxincl="0" aria-pressed="${!c.tax.incl}">Prices exclude tax</button><button class="chip" data-taxincl="1" aria-pressed="${!!c.tax.incl}">Prices include tax</button></div>
     <div class="chips" style="margin-top:6px"><button class="chip" data-taxsplit="1" aria-pressed="${!!c.tax.split}">Split into C${esc(c.tax.name)} + S${esc(c.tax.name)}</button><button class="chip" data-taxsplit="0" aria-pressed="${!c.tax.split}">One line</button></div>
     <p class="hint">Each menu item and material can have its own rate (Menu & recipes, Stock); otherwise the default applies. New orders and GRNs use the rates at the time; old bills don’t change.</p>` : ""}
+  <label class="f" style="margin-top:18px">Material cost</label><div class="chips">${[["avg", "Weighted average of stock"], ["last", "Last purchase price"]].map(([k, l]) => `<button class="chip" data-costing="${k}" aria-pressed="${(c.costing === "last" ? "last" : "avg") === k}">${l}</button>`).join("")}</div>
+  <p class="hint">Used for recipe, batch and stock values. Average smooths price changes; old batches keep the cost they were saved with.</p>
   <label class="f" style="margin-top:18px">Locations</label><div class="kv">${c.locations.map((l, ix) => `<div style="align-items:center;gap:8px"><input class="in" data-locname="${ix}" value="${esc(l.name)}" style="flex:1;min-width:0"><div class="chips">${[["kitchen", "Kitchen"], ["outlet", "Outlet"]].map(([k, n]) => `<button class="chip" data-lockind="${ix}:${k}" aria-pressed="${l.kind === k}">${n}</button>`).join("")}</div>${ix ? `<button class="rm" data-locrm="${ix}" aria-label="Remove location">×</button>` : ""}</div>`).join("")}</div>
   <button class="add-line" data-act="addLocation">+ Add outlet or kitchen</button>
   <p class="hint">Kitchens make; outlets sell and receive transfers. The first location holds everything recorded before locations existed.</p>
@@ -182,7 +195,7 @@ A.toggleTax = () => { syncSettings(); ui.sheet.c.tax.on = !ui.sheet.c.tax.on; dr
 A.addLocation = () => { syncSettings(); const c = ui.sheet.c; c.locations.push({ id: uid("l"), name: `Outlet ${c.locations.filter(l => l.kind === "outlet").length + 1}`, kind: "outlet" }); drawSettings(ui.sheet); };
 A.toggleFestive = () => { syncSettings(); ui.sheet.c.festive = !ui.sheet.c.festive; drawSettings(ui.sheet); };
 A.addTag = () => { syncSettings(); const v = $("#sNewTag").value.trim(); if (!v) { toast("Type the occasion name"); return; } ui.sheet.c.tags = [...new Set([...(ui.sheet.c.tags || []), v])]; drawSettings(ui.sheet); };
-A.saveSettings = async () => { syncSettings(); const h = hue(ui.sheet.c.accent);
+A.saveSettings = async () => { syncSettings(); const h = hue(ui.sheet.c.accent); if (!await L.saveOk(ui.sheet)) return;
   if ((h >= 0 && (h < 15 || h > 340)) || (h > 100 && h < 170)) { toast("That colour is too close to the red or green used for status. Pick another."); return; }
   await ev.put("config", clean({ ...ui.sheet.c, id: "app" })); sync.soon(); closeSheet(); toast("Settings saved"); };
 H.change.push(async T => {
@@ -288,7 +301,7 @@ export function buildWorkbook() {
   const C = [["Customer", "Flat", "Phone", "Orders", "Total (₹)", "Received (₹)", "Balance (₹)", "Last order"]]; M.customers().sort(cmpFlat).forEach(c => C.push([c.customer, c.flat, c.phone, c.orders.length, c.spend, c.received, c.balance, c.last]));
   X.utils.book_append_sheet(wb, X.utils.aoa_to_sheet(C), "Customers");
   const sm = M.stockMap(); const I = [["Material", "Type", "Unit", "On hand", "Reorder at", "Cost per unit (₹)", "Stock value (₹)", "Supplier"]]; M.ingredients().forEach(i => { const c = M.unitCost(i); I.push([i.name, M.ING_TYPES[i.type], i.unit, sm[i.id] || 0, i.reorder, +c.toFixed(4), Math.round((sm[i.id] || 0) * c), i.supplier]); });
-  X.utils.book_append_sheet(wb, X.utils.aoa_to_sheet(I), "Stock");
+  X.utils.book_append_sheet(wb, X.utils.aoa_to_sheet(I), "Inventory");
   const ings = Object.fromEntries(M.ingredients().map(i => [i.id, i]));
   const Bm = [["Parent", "Parent type", "Per", "Component", "Component type", "Qty", "Unit", "Cost (₹)"]];
   M.menu().forEach(m => (m.recipe || []).forEach(r => { const i = ings[r.ingId]; if (i) Bm.push([m.name, "Finished item", "1 piece", i.name, M.ING_TYPES[i.type], r.qty, i.unit, Math.round(M.unitCost(i) * r.qty * 100) / 100]); }));

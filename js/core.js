@@ -6,7 +6,7 @@ import { can } from "./roles.js";
 import { esc, rs, uid, today, ICON } from "./util.js";
 import { toast } from "./ui.js";
 
-export const S = { view: "today", date: today(), filter: {}, query: {}, center: true };
+export const S = { view: "today", date: today(), filter: {}, query: {}, center: true, lastIn: {} };
 export const A = {};                       // actions: data-act="name" → A.name(el, event)
 export const V = {};                       // views: V.today() → html
 export const H = { click: [], input: [], change: [] };   // extra handlers; return true when handled

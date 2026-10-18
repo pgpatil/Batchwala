@@ -1,6 +1,6 @@
 // Business rules over the event store: orders, payments, customers, stock, costing and the bake board.
 import * as ev from "./events.js";
-import { today, cmpFlat, flatKey } from "./util.js";
+import { today, addDays, cmpFlat, flatKey } from "./util.js";
 
 export const CHANNELS = { whatsapp: "WhatsApp", phone: "Phone", instagram: "Instagram", bulk: "Bulk / event", other: "Other", walkin: "Walk-in", swiggy: "Swiggy", zomato: "Zomato" };
 export const PREORDER = ["whatsapp", "phone", "instagram", "bulk", "other"];
@@ -96,16 +96,41 @@ export const moves = () => ev.all("moves").sort((a, b) => (a.date < b.date ? 1 :
 export function stockMap(loc = null) { const m = {}; const home = locations()[0].id; ev.all("moves").forEach(v => { if (loc && (v.outletId || home) !== loc) return; m[v.ingId] = (m[v.ingId] || 0) + (+v.qty || 0); }); return m; }
 // Semi-finished made fresh (no "make when below" level) aren't flagged when they run out.
 export function stockLevel(i, sm = stockMap()) { const s = sm[i.id] || 0; return { on: s, state: s <= 0 ? (i.type === "sf" && !i.reorder ? "ok" : "out") : (i.reorder && s <= i.reorder ? "low" : "ok") }; }
-// Bought materials cost what the last purchase cost; semi-finished cost rolls up through their recipe, level by level.
+// Cost of bought materials: the moving weighted average of what's on hand (default), or the last purchase price (Business settings).
+// Purchases add their amount; anything else coming in (counts, returns) comes in at the current average; anything going out leaves at it.
+let costCache = null, costStamp = "";
+export const costing = () => config().costing === "last" ? "last" : "avg";
+function costIndex() {
+  const mv = ev.all("moves"); const stamp = mv.length + ":" + ((mv.at(-1) || {}).id || "") + ":" + costing(); if (stamp === costStamp) return costCache;
+  const by = {};
+  mv.sort((a, b) => (a.date + a._at) < (b.date + b._at) ? -1 : 1).forEach(m => { const x = by[m.ingId] = by[m.ingId] || { q: 0, v: 0, last: 0 }; const q = +m.qty || 0; if (!q) return;
+    if (m.type === "purchase" && q > 0 && +m.amount > 0) { x.last = +m.amount / q; if (x.q <= 0) { x.q = 0; x.v = 0; } x.q += q; x.v += +m.amount; return; }
+    const avg = x.q > 0 ? x.v / x.q : x.last; x.q += q; x.v += avg * q; if (x.q <= 0) x.v = 0; });
+  costCache = Object.fromEntries(Object.entries(by).map(([id, x]) => [id, { avg: x.q > 0 ? x.v / x.q : x.last, last: x.last }])); costStamp = stamp; return costCache;
+}
+export const lastPrice = ing => (costIndex()[ing.id] || {}).last || +ing.cost || 0;
+// Semi-finished cost rolls up through their recipe, level by level.
 export function unitCost(ing, seen = new Set()) {
   if (ing.type === "sf") {
     if (seen.has(ing.id) || !(+ing.yield > 0)) return +ing.cost || 0;
     const next = new Set(seen).add(ing.id); const ings = ingMap();
     return (ing.recipe || []).reduce((c, r) => c + (ings[r.ingId] ? unitCost(ings[r.ingId], next) * (+r.qty || 0) : 0), 0) / ing.yield;
   }
-  const p = ev.all("moves").filter(m => m.ingId === ing.id && m.type === "purchase" && m.qty > 0 && m.amount > 0).sort((a, b) => (a.date + a._at) < (b.date + b._at) ? 1 : -1)[0];
-  return p ? p.amount / p.qty : (+ing.cost || 0);
+  const c = costIndex()[ing.id]; if (!c || !c.last) return +ing.cost || 0;
+  return (costing() === "last" ? c.last : c.avg) || c.last;
 }
+// Buying units: a material can be bought in packs (a 50 kg bag, a box of 100); size is in its base unit (g, ml, pcs).
+export const packOf = i => i && i.pack && +i.pack.size > 0 && i.pack.name ? { name: String(i.pack.name), size: +i.pack.size } : null;
+/* ---------- material lots ---------- */
+// Each GRN line is a lot, with its best-before date when one was given. Stock is used oldest first, so what's on hand sits in the newest lots.
+export function materialLots(ingId = null) {
+  const sm = stockMap(); const t = today(); const out = [];
+  const lots = {}; grns().filter(g => !g.void).forEach(g => g.lines.forEach((l, ix) => { if (ingId && l.ingId !== ingId) return; (lots[l.ingId] = lots[l.ingId] || []).push({ ingId: l.ingId, grn: g, ix, date: g.date, qty: +l.qty || 0, exp: l.exp || "", lot: l.lot || "", rate: l.qty ? (+l.cost || +l.amount || 0) / l.qty : 0 }); }));
+  Object.entries(lots).forEach(([id, ls]) => { let r = Math.max(0, sm[id] || 0); ls.sort((a, b) => (b.date + b.grn._at) < (a.date + a.grn._at) ? -1 : 1)
+    .forEach(l => { l.left = Math.min(l.qty, r); r -= l.left; l.expired = !!l.exp && l.left > 0 && l.exp <= t; l.soon = !!l.exp && l.left > 0 && !l.expired && l.exp <= addDays(t, 7); out.push(l); }); });
+  return out.sort((a, b) => (a.exp || "9999") < (b.exp || "9999") ? -1 : 1);
+}
+export const expiringMaterials = () => materialLots().filter(l => l.expired || l.soon);
 export function recipeCost(m) {
   const ings = ingMap(); let cost = 0, missing = 0;
   (m.recipe || []).forEach(r => { const i = ings[r.ingId]; if (!i) { missing++; return; } const c = unitCost(i); if (!c) missing++; cost += c * (+r.qty || 0); });
@@ -119,7 +144,7 @@ export function requirement(lines) {
 
 /* ---------- batches ---------- */
 // A batch is one recorded bake (kind "bakes"): numbered, with pieces and spoiled pieces per item and the stock it used.
-export const batches = () => ev.all("bakes").map(b => ({ no: "", notes: "", void: false, ...b, lines: (b.lines || []).map(l => ({ item: l.item, qty: +l.qty || 0, spoiled: +l.spoiled || 0 })), prep: (b.prep || []).map(p => ({ ingId: p.ingId, runs: +p.runs || 0, qty: +p.qty || 0 })) }))
+export const batches = () => ev.all("bakes").map(b => ({ no: "", notes: "", void: false, ...b, lines: (b.lines || []).map(l => ({ item: l.item, qty: +l.qty || 0, spoiled: +l.spoiled || 0, discarded: +l.discarded || 0, cleared: +l.cleared || 0 })), prep: (b.prep || []).map(p => ({ ingId: p.ingId, runs: +p.runs || 0, qty: +p.qty || 0 })) }))
   .sort((a, b) => (a.date + (a.at || a._at || "")) < (b.date + (b.at || b._at || "")) ? 1 : -1);
 export const bakesOn = date => batches().filter(b => b.date === date && !b.void);
 export const batchPcs = b => b.lines.reduce((s, l) => s + l.qty, 0);
@@ -144,8 +169,8 @@ export function batchNeed(lines, prep = []) {
 }
 // Planning across every BOM level: semi-finished on hand is used first; only the shortfall is made, in whole recipe runs, and exploded further.
 // Each material is settled after all its parents (by its deepest level), so runs are counted once.
-export function explode(lines) {
-  const ings = ingMap(); const sm = stockMap(); const gross = {}; const make = {}; const unknown = [];
+export function explode(lines, loc = null) {
+  const ings = ingMap(); const sm = stockMap(loc); const gross = {}; const make = {}; const unknown = [];
   lines.forEach(l => { const m = menuByName(l.item); if (!m || !(m.recipe || []).length) { if (l.qty) unknown.push(l.item); return; }
     m.recipe.forEach(r => { gross[r.ingId] = (gross[r.ingId] || 0) + (+r.qty || 0) * l.qty; }); });
   const lvl = {}; const walk = (id, d, path) => { if (path.has(id) || d > 12) return; lvl[id] = Math.max(lvl[id] || 0, d); const i = ings[id];
@@ -155,6 +180,27 @@ export function explode(lines) {
     if (!i || i.type !== "sf" || q <= 0 || !(+i.yield > 0)) return; const short = q - Math.max(0, sm[id] || 0); if (short <= 0) return;
     const runs = Math.ceil(short / i.yield); make[id] = runs; (i.recipe || []).forEach(r => { gross[r.ingId] = (gross[r.ingId] || 0) + (+r.qty || 0) * runs; }); });
   return { need: gross, make, level: lvl, unknown: [...new Set(unknown)], onHand: sm };
+}
+// A saved production plan for a date and kitchen: { id, date, loc, lines: [{ item, qty }] }. Without one, planning starts from the suggestion.
+export const planId = (date, loc) => `${date}@${loc || ""}`;
+export const planOf = (date, loc) => ev.get("plans", planId(date, loc));
+// Every level of a recipe scaled to `qty` (pieces of a menu item, or g / ml / pcs of a semi-finished material).
+// scratch: semi-finished lines are made in the batch (their own steps, deepest first); otherwise they are taken from stock as a line.
+export function batchCard(rec, qty, scratch = true) {
+  const ings = ingMap(); const steps = []; const total = {};
+  const walk = (name, recipe, mult, made, path) => {
+    const lines = (recipe || []).map(r => ({ ing: ings[r.ingId], qty: (+r.qty || 0) * mult })).filter(l => l.ing && l.qty > 0);
+    lines.forEach(l => { const i = l.ing; if (scratch && i.type === "sf" && +i.yield > 0 && (i.recipe || []).length && !path.has(i.id)) walk(i.name, i.recipe, l.qty / i.yield, { ing: i, qty: l.qty, runs: l.qty / i.yield }, new Set(path).add(i.id));
+      else total[i.id] = (total[i.id] || 0) + l.qty; });
+    steps.push({ name, made, lines });
+  };
+  const sf = rec.type === "sf"; walk(rec.name, rec.recipe, sf ? qty / (+rec.yield || 1) : qty, sf ? { ing: rec, qty, runs: qty / (+rec.yield || 1) } : null, new Set(sf ? [rec.id] : []));
+  // The same semi-finished used in two places is one step making the sum.
+  const merged = []; steps.forEach(s => { const m = s.made && merged.find(x => x.made && x.made.ing.id === s.made.ing.id);
+    if (!m) { merged.push({ ...s, lines: s.lines.map(l => ({ ...l })) }); return; } m.made.qty += s.made.qty; m.made.runs += s.made.runs;
+    s.lines.forEach(l => { const x = m.lines.find(y => y.ing.id === l.ing.id); if (x) x.qty += l.qty; else m.lines.push({ ...l }); }); });
+  const cost = Object.entries(total).reduce((s, [id, q]) => s + unitCost(ings[id]) * q, 0);
+  return { steps: merged, total: Object.entries(total).map(([id, q]) => ({ ing: ings[id], qty: q })), cost };
 }
 // True if `recipe` (for material `id`) reaches back to `id` through semi-finished recipes.
 export function makesCycle(id, recipe) {
@@ -220,6 +266,42 @@ export function production(date, kitchen = (kitchens()[0] || locations()[0]).id)
     .filter(x => x.need).sort((a, b) => b.toBake - a.toBake || a.item.localeCompare(b.item));
 }
 export const suppliers = () => ev.all("suppliers").sort((a, b) => a.name.localeCompare(b.name));
+export const supplierByName = n => suppliers().find(s => s.name.toLowerCase() === String(n || "").trim().toLowerCase()) || null;
+
+/* ---------- purchase orders ---------- */
+// A PO: { no, date, supplier, loc, expected, lines: [{ ingId, qty, rate (per base unit), taxPct }], status: draft | approved | closed | cancelled }.
+// Receiving is a GRN with poId; what's been received is read from those GRNs.
+export const porders = () => ev.all("porders").sort((a, b) => (b.date + b._at).localeCompare(a.date + a._at));
+export function poReceived(po) { const r = {}; grns().filter(g => !g.void && g.poId === po.id).forEach(g => g.lines.forEach(l => { r[l.ingId] = (r[l.ingId] || 0) + (+l.qty || 0); })); return r; }
+export function poState(po) {
+  if (po.status === "cancelled" || po.status === "closed" || po.status === "draft") return po.status;
+  const r = poReceived(po); const got = po.lines.filter(l => (r[l.ingId] || 0) > 0).length;
+  return po.lines.every(l => (r[l.ingId] || 0) >= l.qty - 1e-6) ? "received" : got ? "part" : "approved";
+}
+export const poValue = po => po.lines.reduce((s, l) => s + l.qty * l.rate * (1 + (+l.taxPct || 0) / 100), 0);
+export const PO_LABEL = { draft: "Waiting for approval", approved: "Approved", part: "Part received", received: "Received", closed: "Closed short", cancelled: "Cancelled" };
+// Open quantity of a material on approved POs, so planning doesn't order it twice.
+export function onOrder() { const m = {}; porders().filter(p => ["approved", "part"].includes(poState(p))).forEach(p => { const r = poReceived(p); p.lines.forEach(l => { m[l.ingId] = (m[l.ingId] || 0) + Math.max(0, l.qty - (r[l.ingId] || 0)); }); }); return m; }
+// What a supplier last charged for a material (per base unit, before tax), from GRNs.
+export function lastRate(supplier, ingId) { const s = String(supplier || "").toLowerCase(); for (const g of grns()) { if (g.void || g.supplier.toLowerCase() !== s) continue; const l = g.lines.find(x => x.ingId === ingId && x.qty > 0 && x.amount > 0); if (l) return l.amount / l.qty; } return 0; }
+// The usual supplier for a material: set on the material, else whoever it was last bought from.
+export function usualSupplier(i) { if (i.supplier) return i.supplier; const g = grns().find(g => !g.void && g.lines.some(l => l.ingId === i.id)); return g ? g.supplier : ""; }
+
+/* ---------- payables ---------- */
+// Bills are GRNs; payments to suppliers are their own records (kind "spays"). Payments settle the oldest bills first.
+export const spays = () => ev.all("spays").sort((a, b) => (b.date + b._at).localeCompare(a.date + a._at));
+export function supplierLedger(name) {
+  const n = String(name || "").toLowerCase(); const sup = supplierByName(name) || { name, days: 0 }; const days = +sup.days || 0; const t = today();
+  const bills = grns().filter(g => !g.void && g.supplier.toLowerCase() === n).map(g => ({ date: g.date, doc: g.no, id: g.id, bill: +g.total || 0, due: addDays(g.date, days) })).sort((a, b) => a.date < b.date ? -1 : 1);
+  const pays = spays().filter(p => p.supplier.toLowerCase() === n);
+  let paid = pays.reduce((s, p) => s + (+p.amount || 0), 0); bills.forEach(b => { const u = Math.min(b.bill, Math.max(0, paid)); b.open = Math.round((b.bill - u) * 100) / 100; paid -= u; });
+  const entries = [...bills.map(b => ({ date: b.date, doc: b.doc, bill: b.bill, paid: 0, ref: b.id })), ...pays.map(p => ({ date: p.date, doc: p.mode ? `Paid · ${p.mode}${p.ref ? " " + p.ref : ""}` : "Paid", bill: 0, paid: +p.amount || 0, pay: p }))].sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : a.bill ? -1 : 1);
+  let run = 0; entries.forEach(e => { run += e.bill - e.paid; e.bal = Math.round(run * 100) / 100; });
+  const open = bills.filter(b => b.open > 0.005); const overdue = open.filter(b => b.due < t);
+  return { sup, days, bills, pays, entries, balance: Math.round(run * 100) / 100, open, overdue: overdue.reduce((s, b) => s + b.open, 0), oldest: open[0] ? open[0].due : "" };
+}
+export function payables() { const names = new Set([...suppliers().map(s => s.name), ...grns().filter(g => !g.void).map(g => g.supplier), ...spays().map(p => p.supplier)].filter(Boolean).map(x => x.trim()));
+  const seen = new Set(); return [...names].filter(n => { const k = n.toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; }).map(n => ({ name: n, ...supplierLedger(n) })); }
 export const grns = () => ev.all("grns").sort((a, b) => (b.date + b._at).localeCompare(a.date + a._at));
 // Transfers saved before the receive step existed have no status and count as received.
 export const xferReceived = t => !t.status || t.status === "received";
@@ -228,3 +310,18 @@ export function inTransit(loc) { const m = {}; ev.all("transfers").filter(t => !
 export const transfers = () => ev.all("transfers").sort((a, b) => (b.date + b._at).localeCompare(a.date + a._at));
 // GRN-P12, T-P4: the document type, then the person's prefix so two phones never clash offline.
 export function nextDocNo(kind, prefix, tag) { const n = ev.all(kind).map(x => +((/(\d+)$/.exec(String(x.no || "")) || [])[1] || 0)); return `${tag}-${prefix || ""}${Math.max(0, ...n) + 1}`; }
+
+/* ---------- shelf life ---------- */
+// Days a piece can be sold, counting the day it was baked. Set per menu item; otherwise cookies keep a month and everything else 3 days.
+export const shelfLife = m => m && m.shelfLife != null && m.shelfLife !== "" ? Math.max(1, +m.shelfLife) : (/cookie/i.test(m ? `${m.name} ${m.category}` : "") ? 30 : 3);
+// Pieces of each batch still unsold: delivered orders use up the oldest batch made on or before their date first.
+// Discarded pieces and pieces cleared on a count also come off. A lot is expired from the day its shelf life ends.
+export function batchLots() {
+  const lots = {}; const t = today();
+  batches().filter(b => !b.void).sort((a, b) => (a.date + (a.at || a._at || "")) < (b.date + (b.at || b._at || "")) ? -1 : 1)
+    .forEach(b => b.lines.forEach((l, ix) => { (lots[l.item] = lots[l.item] || []).push({ b, ix, item: l.item, date: b.date, made: l.qty - l.spoiled, left: Math.max(0, l.qty - l.spoiled - l.discarded - l.cleared) }); }));
+  orders(false).filter(isDelivered).flatMap(o => o.items.map(i => ({ item: i.item, qty: i.qty, date: o.date }))).sort((a, b) => a.date < b.date ? -1 : 1)
+    .forEach(s => { let q = s.qty; for (const lot of lots[s.item] || []) { if (q <= 0) break; if (lot.date > s.date || lot.left <= 0) continue; const u = Math.min(lot.left, q); lot.left -= u; q -= u; } });
+  return Object.values(lots).flat().map(l => { const life = shelfLife(menuByName(l.item)); const exp = addDays(l.date, life); return { ...l, life, expires: exp, expired: l.left > 0 && exp <= t }; });
+}
+export const expiredLots = () => batchLots().filter(l => l.expired).sort((a, b) => a.expires < b.expires ? -1 : 1);

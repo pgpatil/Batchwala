@@ -2,9 +2,12 @@
 import * as ev from "./events.js";
 import * as M from "./model.js";
 import * as R from "./roles.js";
+import { asLines, layoutSwitch } from "./table.js";
 import { S, A, V, H, render, guard, saveOrder, payOrders, reversePayments, logoHtml, toran, chipBar, searchBox, matchQ, band, payTag, chanTag, noLabel } from "./core.js";
 import { $, esc, rs, rs2, num, uid, today, addDays, dObj, dLabel, dLong, plate, cmpFlat, ICON, copyText, waHref } from "./util.js";
 import { ui, toast, openSheet, closeSheet, ask, yesNo } from "./ui.js";
+import * as L from "./lock.js";
+import { checkCustomer } from "./match.js";
 
 /* ---------- WhatsApp text ---------- */
 export function orderText(o) {
@@ -79,9 +82,12 @@ V.today = () => {
   <label class="day pick">Pick date<input type="date" data-pickday value="${S.date}" aria-label="Pick a date"></label></div>${toran()}</div>
   <div class="quick"><button class="qbtn" data-go="bake">${ICON.oven}<span>Bake board<small>${toBake ? toBake + " pcs to bake" : "Up to date"}</small></span></button><button class="qbtn" data-go="run">${ICON.run}<span>Delivery run<small>${day.filter(o => M.PREORDER.includes(o.channel) && !M.isDelivered(o)).length} to deliver</small></span></button></div>`;
   const rows = day.filter(o => matchQ("today", o)).filter(o => S.filter.today === "all" || (S.filter.today === "done" ? M.isDelivered(o) : !M.isDelivered(o)));
-  h += `<div class="tools">${searchBox("today", "Search name, flat or phone")}${chipBar("today", [["todo", "To deliver", day.length - done], ["done", "Delivered", done], ["all", "All", day.length]])}</div>`;
+  h += `<div class="tools">${searchBox("today", "Search name, flat or phone")}${layoutSwitch("today")}${chipBar("today", [["todo", "To deliver", day.length - done], ["done", "Delivered", done], ["all", "All", day.length]])}</div>`;
   if (!day.length) h += `<div class="empty"><strong>No orders for ${esc(dLong(S.date))}</strong>Tap New order to take one for this day.</div>`;
   else if (!rows.length) h += `<div class="empty"><strong>${S.filter.today === "todo" && !S.query.today ? "All delivered" : "Nothing matches"}</strong>${S.filter.today === "todo" && !S.query.today ? "Every order for this day is done." : "Try another name or filter."}</div>`;
+  else if (asLines("today")) { const money = R.can("money");
+    h += `<div class="card tablecard"><table class="reg"><thead><tr><th>Flat</th><th>Customer</th><th>Items</th><th class="r">Pcs</th>${money ? `<th class="r">Total</th><th>Payment</th>` : ""}<th>Status</th><th>Delivered</th></tr></thead><tbody>${rows.map(o => { const d = M.isDelivered(o);
+      return `<tr${d ? ' class="done"' : ""}><td>${esc(o.flat || "")}</td><td><button class="linkbtn" data-open="${esc(o.id)}"><b>${esc(o.customer || M.CHANNELS[o.channel])}</b></button> ${chanTag(o)}</td><td class="items">${o.items.map(i => esc(i.item) + " ×" + i.qty).join(", ")}</td><td class="r">${M.pcs(o)}</td>${money ? `<td class="r">${rs(M.total(o))}</td><td>${payTag(o)} ${billTag(o)}</td>` : ""}<td>${statusTag(o)}</td><td><button class="tick sm" data-deliver="${esc(o.id)}" aria-pressed="${d}" aria-label="${d ? "Delivered" : "Mark delivered"}: ${esc(o.customer)}">${ICON.check}</button></td></tr>`; }).join("")}</tbody></table></div>`; }
   else h += `<ul class="list">${rows.map(o => orderRow(o, true)).join("")}</ul>`;
   return h;
 };
@@ -104,11 +110,11 @@ V.orders = () => {
   const list = group.filter(o => !tagF || o.tag === tagF).filter(o => !chanF || o.channel === chanF).filter(o => matchQ("orders", o))
     .sort((a, b) => S.filter.orders === "past" ? (a.date < b.date ? 1 : a.date > b.date ? -1 : cmpFlat(a, b)) : (a.date < b.date ? -1 : a.date > b.date ? 1 : cmpFlat(a, b)));
   let h = band("Orders", R.can("export") ? `<button class="pillbtn" data-act="export">${ICON.dl}Excel</button>` : "");
-  h += `<div class="tools">${searchBox("orders", "Search name, flat, phone or #")}${chipBar("orders", [["upcoming", "Upcoming", all.filter(g.upcoming).length], ["past", "Past", all.filter(g.past).length], ["cancelled", "Cancelled", all.filter(g.cancelled).length], ["all", "All", all.length]])}</div>`;
+  h += `<div class="tools">${searchBox("orders", "Search name, flat, phone or #")}${layoutSwitch("orders")}${chipBar("orders", [["upcoming", "Upcoming", all.filter(g.upcoming).length], ["past", "Past", all.filter(g.past).length], ["cancelled", "Cancelled", all.filter(g.cancelled).length], ["all", "All", all.length]])}</div>`;
   if (chans.length > 1) h += `<div class="tools" style="padding-top:2px"><div class="chips scroll"><button class="chip" data-chanf="" aria-pressed="${!chanF}">All channels</button>${chans.map(k => `<button class="chip" data-chanf="${esc(k)}" aria-pressed="${chanF === k}">${esc(M.CHANNELS[k] || k)}<span class="n">${group.filter(o => o.channel === k).length}</span></button>`).join("")}</div></div>`;
   if (tags.length) h += `<div class="tools" style="padding-top:2px"><div class="chips"><button class="chip" data-tagf="" aria-pressed="${!tagF}">All occasions</button>${tags.map(x => `<button class="chip" data-tagf="${esc(x)}" aria-pressed="${tagF === x}">${esc(x)}</button>`).join("")}</div></div>`;
   if (!list.length) return h + `<div class="empty"><strong>No orders here</strong>${all.length ? "Try another filter or search." : "Tap New order to take your first one."}</div>`;
-  if (S.wide) return h + ordersTable(list);
+  if (asLines("orders")) return h + ordersTable(list);
   let cur = ""; h += "<div>";
   list.forEach(o => {
     if (o.date !== cur) { if (cur) h += "</ul>"; cur = o.date; const d = list.filter(x => x.date === cur); h += `<div class="sect">${esc(dLong(cur))}${cur === t ? " · Today" : ""}<span>${d.length} orders${R.can("money") ? " · " + rs(d.reduce((s, x) => s + M.total(x), 0)) : ""}</span></div><ul class="list" style="padding-top:0">`; }
@@ -122,7 +128,7 @@ const statusTag = o => o.status === "cancelled" ? `<span class="tag t-due">Cance
 function ordersTable(list) {
   const money = R.can("money"); const live = list.filter(o => o.status !== "cancelled");
   return `<div class="card tablecard"><table class="reg"><thead><tr><th>#</th><th>Date</th><th>Customer</th><th>Channel</th><th>Items</th><th class="r">Pcs</th>${money ? `<th class="r">Total</th><th class="r">Due</th><th>Payment</th>` : ""}<th>Status</th></tr></thead>
-  <tbody>${list.map(o => `<tr data-open="${esc(o.id)}" tabindex="0"><td>${noLabel(o)}</td><td>${esc(dLong(o.date))}</td><td><b>${esc(o.customer || M.CHANNELS[o.channel])}</b>${o.flat ? ` <small class="mut">${esc(o.flat)}</small>` : ""}${o.tag ? ` <span class="tag t-camp">${esc(o.tag)}</span>` : ""}</td><td>${esc(M.chanLabel(o))}</td>
+  <tbody>${list.map(o => `<tr data-open="${esc(o.id)}" tabindex="0"><td>${noLabel(o)}</td><td data-v="${esc(o.date)}">${esc(dLong(o.date))}</td><td><b>${esc(o.customer || M.CHANNELS[o.channel])}</b>${o.flat ? ` <small class="mut">${esc(o.flat)}</small>` : ""}${o.tag ? ` <span class="tag t-camp">${esc(o.tag)}</span>` : ""}</td><td>${esc(M.chanLabel(o))}</td>
     <td class="items">${o.items.map(i => esc(i.item) + " ×" + i.qty).join(", ")}</td><td class="r">${M.pcs(o)}</td>${money ? `<td class="r">${rs(M.total(o))}</td><td class="r">${M.bal(o) ? `<span class="due">${rs(M.bal(o))}</span>` : "–"}</td><td>${o.status === "cancelled" ? "" : payTag(o)} ${billTag(o)}</td>` : ""}<td>${statusTag(o)}</td></tr>`).join("")}</tbody>
   <tfoot><tr><td colspan="5">${list.length} order${list.length === 1 ? "" : "s"}${live.length < list.length ? ` · ${list.length - live.length} cancelled` : ""}</td><td class="r">${live.reduce((s, o) => s + M.pcs(o), 0)}</td>${money ? `<td class="r">${rs(live.reduce((s, o) => s + M.total(o), 0))}</td><td class="r">${rs(live.reduce((s, o) => s + M.bal(o), 0))}</td><td></td>` : ""}<td></td></tr></tfoot></table></div>`;
 }
@@ -133,7 +139,7 @@ export async function confirmDeliver(o, withCollect = false) {
   const head = `${plate(o.flat)}<p class="cq">${v ? "Mark as delivered?" : "Undo delivery?"}</p><div class="cname">${esc(o.customer)}</div><div class="cdetail">${o.items.map(i => esc(i.item) + " × " + i.qty).join(", ")}<br>${esc(dLong(o.date))}${R.can("money") ? " · " + rs(M.total(o)) + (b > 0 ? ` · <b>${rs(b)} due</b>` : " · paid") : ""}</div>`;
   let choice;
   if (!v) choice = await ask(head, [{ label: "Keep delivered", cls: "btn-ghost", value: false }, { label: "Undo", cls: "btn-danger-solid", value: "undo" }], true);
-  else if (withCollect && b > 0 && R.can("collect")) choice = await ask(head, [{ label: "Delivered + paid by UPI", cls: "btn-ok", value: "UPI" }, { label: "Delivered + paid in cash", cls: "btn-ok", value: "Cash" }, { label: "Delivered, not paid yet", cls: "btn-ghost", value: "nopay" }, { label: "Cancel", cls: "btn-danger", value: null }]);
+  else if (withCollect && b > 0 && R.can("collect")) choice = await ask(head, [{ label: "Delivered, not paid yet", cls: "btn-primary", value: "nopay" }, { label: "Delivered + paid by UPI", cls: "btn-ok", value: "UPI" }, { label: "Delivered + paid in cash", cls: "btn-ok", value: "Cash" }, { label: "Cancel", cls: "btn-danger", value: null }]);
   else choice = await ask(head, [{ label: "Cancel", cls: "btn-ghost", value: false }, { label: "Yes, delivered", cls: "btn-ok", value: "yes" }], true);
   if (!choice) return false;
   await saveOrder({ ...o, status: v ? "delivered" : "ready", deliveredAt: v ? new Date().toISOString() : "" });
@@ -147,7 +153,7 @@ export function openOrder(id) {
   const o = getOrder(id); if (!o) { closeSheet(); return; }
   const s = M.payState(o); const money = R.can("money"); const edit = R.can("orders.edit"); const cancelled = o.status === "cancelled";
   const steps = M.STATUSES.map(st => `<button class="step${o.status === st ? " on" : ""}${M.STATUSES.indexOf(st) < M.STATUSES.indexOf(o.status) ? " past" : ""}" data-status="${st}" ${edit && !cancelled ? "" : "disabled"}>${esc(M.STATUS_LABEL[st])}</button>`).join("");
-  openSheet({ kind: "order", id, redraw: () => openOrder(id) }, `<div class="sh-head">${plate(o.flat)}<h2 class="h">${esc(o.customer || M.CHANNELS[o.channel])}</h2><button class="x" data-close aria-label="Close">×</button></div>
+  openSheet({ kind: "order", id, redraw: () => openOrder(id) }, `<div class="sh-head">${plate(o.flat)}<h2 class="h">${esc(o.customer || M.CHANNELS[o.channel])}</h2><button class="x" data-close aria-label="Close">×</button></div>${L.banner("orders", id)}
   <div class="subl" style="margin:-4px 0 10px">Order ${noLabel(o)} · ${esc(dLong(o.date))} · ${esc(M.chanLabel(o))}${o.phone && R.can("phone") ? " · " + esc(o.phone) : ""}${o.tag ? ` · <span class="tag t-camp">${esc(o.tag)}</span>` : ""}</div>
   ${cancelled ? `<div class="banner bad">Cancelled${o.cancelReason ? ": " + esc(o.cancelReason) : ""}</div>` : `<div class="steps" role="group" aria-label="Order status">${steps}</div>`}
   <div class="kv">${o.items.map(i => `<div><span>${esc(i.item)} × ${i.qty}${money ? ` <small class="mut">@ ${rs(i.rate)}</small>` : ""}</span>${money ? `<span>${rs(i.qty * i.rate)}</span>` : ""}</div>`).join("")}
@@ -218,12 +224,13 @@ H.click.push(async (T) => {
 });
 
 /* ---------- composer ---------- */
-export function compose(o, opts = {}) {
+export async function compose(o, opts = {}) {
   if (!guard("orders.edit")) return;
+  let lk = {}; if (o && !opts.repeat && o.id) { lk = await L.open("orders", o.id, `order #${o.no}`); if (!lk) return; }
   const c = M.config(); const me = R.me();
   const base = o ? JSON.parse(JSON.stringify(o)) : { id: uid("o"), no: "", customer: opts.customer || "", flat: opts.flat || "", phone: opts.phone || "", channel: opts.channel || "whatsapp", date: opts.date || (S.view === "today" ? S.date : today()), items: opts.items || [], discountPct: 0, status: "received", notes: opts.notes || "", tag: c.activeTag || "", createdAt: new Date().toISOString() };
   if (o && opts.repeat) Object.assign(base, { id: uid("o"), no: "", date: today(), status: "received", deliveredAt: "", cancelReason: "", createdAt: new Date().toISOString(), tag: c.activeTag || "" });
-  const st = { kind: "compose", o: base, isNew: !o || !!opts.repeat, dirty: !!opts.repeat || !!(opts.items && opts.items.length), cat: "", sugg: false, prefix: (me && me.prefix) || "" };
+  const st = { ...lk, kind: "compose", o: base, isNew: !o || !!opts.repeat, dirty: !!opts.repeat || !!(opts.items && opts.items.length), cat: "", sugg: false, prefix: (me && me.prefix) || "" };
   st.redraw = () => drawCompose(st); drawCompose(st);
 }
 function drawCompose(st) {
@@ -270,8 +277,12 @@ A.saveCompose = async el => { syncCompose(); const st = ui.sheet; const o = st.o
   o.customer = o.customer.trim(); o.flat = o.flat.trim().toUpperCase().replace(/^([A-Z])\s*-?\s*(\d+)$/, "$1-$2"); o.phone = o.phone.trim(); o.notes = o.notes.trim();
   if (!o.customer) { toast("Add the customer’s name"); $("#cName").focus(); return; }
   if (!o.items.length) { toast("Add at least one item"); return; }
+  // A customer not seen before is checked against saved ones (same flat or phone, similar name) before the order is saved.
+  const prev = st.isNew ? null : M.orders().find(x => x.id === o.id);
+  if (!prev || M.ckey(prev) !== M.ckey(o)) { const r = await checkCustomer(o); if (!r) return; if (r !== "new") { Object.assign(o, r); st.dirty = true; } }
+  if (!await L.saveOk(st)) return;
   if (!o.no) o.no = M.nextNo(st.prefix);
-  el.disabled = true; await saveOrder(o); const wasNew = st.isNew; ui.sheet = null; closeSheet();
+  el.disabled = true; await saveOrder(o); const wasNew = st.isNew; if (st.lock) L.release(st.lock); ui.sheet = null; closeSheet();
   if (S.view === "today" && wasNew && o.date !== S.date) { S.date = o.date; S.center = true; render(); }
   toast(wasNew ? `Order #${o.no} saved for ${dLabel(o.date)}` : "Changes saved", o.phone ? `<a href="${esc(waHref(o.phone, orderText(M.normOrder(o))))}" target="_blank" rel="noopener">Send on WhatsApp</a>` : ""); };
 

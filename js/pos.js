@@ -4,6 +4,7 @@ import * as R from "./roles.js";
 import { S, A, V, H, guard, saveOrder, payOrders, band, payTag, noLabel } from "./core.js";
 import { esc, rs, rs2, uid, today, ICON } from "./util.js";
 import { ui, toast, ask, yesNo } from "./ui.js";
+import { checkCustomer } from "./match.js";
 
 const SVC = [["takeaway", "Takeaway"], ["dinein", "Dine-in"], ["swiggy", "Swiggy"], ["zomato", "Zomato"]];
 const MODES = ["UPI", "Cash", "Card"];
@@ -68,7 +69,9 @@ async function savePos(status) {
   await saveOrder(o); return M.orders().find(x => x.id === o.id);   // as stored, with tax stamped
 }
 const reset = () => { const p = P(); S.pos = fresh(p.svc, p.mode); S.query.pos = ""; H.render(); };
-A.posCharge = async el => { if (!guard("sale")) return; const p = P(); if (!p.items.length) return; el.disabled = true;
+A.posCharge = async el => { if (!guard("sale")) return; const p = P(); if (!p.items.length) return;
+  if (p.customer.trim()) { const r = await checkCustomer({ customer: p.customer.trim(), flat: "", phone: p.phone }); if (!r) return; if (r !== "new") { p.customer = r.customer; p.phone = r.phone || p.phone; } }
+  el.disabled = true;
   const o = await savePos("delivered"); await payOrders([o], p.mode); reset();
   toast(`${rs(M.total(o))} by ${p.mode} · order ${o.no}`, `<button data-undosale="${esc(o.id)}">Undo</button>`); };
 A.posAggregator = async el => { if (!guard("sale")) return; el.disabled = true; const o = await savePos("delivered"); reset();

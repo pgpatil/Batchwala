@@ -15,12 +15,18 @@ It is a Progressive Web App: it opens from a link, installs to the home screen, 
 | Bake board | Per item: pre-ordered, kept ready (par level), baked, spoiled, sold at counter, left, and how many still to bake |
 | Batches | Every bake recorded as a numbered batch: pieces per item, prep runs of semi-finished items, spoiled pieces, note, who made it, stock used and made, and net cost. Undone batches stay in the register, marked |
 | Orders | Every order from every channel (WhatsApp, Phone, Instagram, Bulk / event, Other, Walk-in, Swiggy, Zomato), filtered by period, channel and occasion |
-| Desktop | On a laptop or desktop: sidebar navigation, side-drawer forms, Orders and Batches as tables with totals; N for new order, / to search |
+| Navigation and views | Screens grouped into Orders, Make and Stores (one bottom-bar button each on phones, sidebar sections on desktop). Grid or lines on list screens; every table sorts by any column and filters per column, with number comparisons. N for new order, / to search |
 | Delivery run | Today’s pre-orders by wing and floor; Delivered + paid by UPI or cash in one confirm |
 | Bill summary | Per order: items with quantity, rate and amount, then Total, Discount and Total payable. Copy marks it “Bill summary sent”; editing the order afterwards flags it |
 | Payments | Balances by customer, one-tap UPI or cash, part payments oldest-first, reversals instead of edits, WhatsApp reminders with your UPI ID |
-| Stock | Raw materials (RM), packing materials (PM) and semi-finished items in g, ml or pieces; purchases with price and supplier, wastage, stock counts, reorder levels, shopping list, barcode search |
-| BOM | Multilevel bills of materials: menu items use raw, packing and semi-finished materials; semi-finished items have their own recipe and yield and can use other semi-finished items. Costs roll up through every level. Plan & explode turns a day’s bake into what to prepare and what to buy |
+| Inventory | Tabs for raw materials (RM), packing (PM) and semi-finished items, with categories; upload a supplier invoice (photo, PDF, Excel or pasted) to fill a GRN, matching their item names to yours. Raw materials (RM), packing materials (PM) and semi-finished items in g, ml or pieces; purchases with price and supplier, wastage, stock counts, reorder levels, shopping list, barcode search |
+| BOM | Multilevel bills of materials: menu items use raw, packing and semi-finished materials; semi-finished items have their own recipe and yield and can use other semi-finished items. Costs roll up through every level. In the BOM editor, new materials can be created on the spot |
+| Planning | For a date: finished goods to make (suggested, editable, shared), semi-finished to make level by level, and the indent (purchase shortfall or full store issue) through every BOM level. Batch cards scale any product to any batch size, step by step, printable |
+| Purchasing | Purchase orders with approval, drafted from the indent or reorder levels, received through GRNs (in parts, with rate checks), buying packs, supplier payables with credit days, payments and statements |
+| Work orders | Production issued from the store and completed with actual output and returns; batches costed at what was really used, with variance against the BOM |
+| Costing and lots | Weighted-average material cost (or last price); GRN lots with best-before dates, used oldest first, expiry alerts and discards |
+| Cost & stock reports | Food cost, wastage, variance, stock ageing, buying and price movement, tax summary, and the day book as Tally vouchers (Day Book view, Tally XML for ledgers and vouchers, Excel) |
+| Editing locks | A saved record being edited is locked for others until saved or closed (lapses after 8 quiet minutes; admin can take over); saves check for changes made meanwhile |
 | Menu | Prices, categories, short names for WhatsApp reading, par levels, recipes with cost and margin |
 | Reports | Sales by day and channel, best sellers with margin, wastage value, repeat customers |
 | ERP mode | For people the admin gives ERP: Production per kitchen, Purchases as GRNs, Stock by location, Transfers kitchen → outlets, Finished goods by location, Batches and BOM. Restaurant mode keeps the counter, orders, payments, deliveries and the outlet’s bake board. Nobody on ERP = the original single app |
@@ -28,6 +34,10 @@ It is a Progressive Web App: it opens from a link, installs to the home screen, 
 | Tax | Optional GST (or any name): default and per-item rates, inclusive or exclusive prices, CGST + SGST split, GSTIN; shown on every bill, message and GRN. Per material, the admin sets whether purchase tax is recoverable or added to cost |
 | Users & roles | Admin, Management, Manager, Kitchen, Delivery, Counter; each opens on its own home screen. Each person uses Restaurant, ERP or both. Optional 4-digit PIN for shared phones |
 | History | Every change records who made it and when; any order shows its full history |
+| Shelf life | Per item (cookies 30 days, others 3 by default); a prompt on opening the app to discard or recount anything unsold past its shelf life |
+| Checks | Before a new customer, item, material or supplier is created, similar existing ones are shown to confirm first |
+| Help | In-app help for every screen and module, searchable, opening on the screen you’re on |
+| Import & export | CSV export by data type; templates; import of menu, materials, BOM, stock and finished-goods counts, suppliers and orders with a check screen first |
 | Data | Saved on the phone first; optional sync through a shared Google Drive folder; daily Excel copy saved to that folder; backup file; Excel export |
 
 ## Roles
@@ -100,10 +110,16 @@ No build step: plain HTML, CSS and JavaScript modules. Run locally with `python3
 | `js/pos.js` | Counter: takeaway, dine-in tables, Swiggy and Zomato |
 | `js/bom.js` | BOM trees and the plan & explode view |
 | `js/erp.js` | Production, GRNs, transfers, finished goods, outlet bake board |
+| `js/help.js` | In-app Help topics |
+| `js/data.js` | Import & export by data type, templates, purchase invoices |
+| `js/match.js` | Name matching and checks before creating new records |
+| `js/ocr.js` | Reading invoice photos and PDFs: pdf.js, Tesseract, optional Claude |
 | `js/ops.js` | Delivery run, WhatsApp import, New-order menu |
 | `js/waparse.js` | Reads a WhatsApp message into a draft order |
 | `js/admin.js` | More, first run, users, settings, sync, backup, Excel |
 | `tests/` | Fake shared folder for testing two-phone sync locally |
 | `sw.js` | Offline cache; **bump `VERSION` on every release** |
+
+Invoice reading loads pdf.js, Tesseract and the Anthropic SDK from jsDelivr on first use (versions pinned in `js/ocr.js`). To test against a local mirror, set `localStorage.setItem("bw.cdn","http://127.0.0.1:8766/npm")`. The optional Claude reading calls the Anthropic API from the browser with a key stored on the device (IndexedDB meta, not synced); it is meant for the owner’s own devices.
 
 To test sync without Google: run `python3 tests/fake_drive.py . 8767`, open two browser profiles at `http://127.0.0.1:8767`, and in each run `localStorage.setItem("bw.testAdapter","http://127.0.0.1:8767")` in the console, then reload.

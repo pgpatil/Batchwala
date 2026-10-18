@@ -3,10 +3,12 @@ import * as ev from "./events.js";
 import * as M from "./model.js";
 import * as R from "./roles.js";
 import { parseOrderMessage } from "./waparse.js";
+import { asLines, layoutSwitch } from "./table.js";
 import { S, A, V, H, guard, saveOrder, payOrders, addPayment, band, toran, payTag, noLabel } from "./core.js";
 import { confirmDeliver, compose, openOrder } from "./orders.js";
 import { $, esc, rs, uid, today, addDays, dObj, dLabel, dLong, plate, flatKey, ICON } from "./util.js";
 import { ui, toast, openSheet, closeSheet, ask, yesNo } from "./ui.js";
+import { checkCustomer } from "./match.js";
 
 /* ---------- Delivery run ---------- */
 V.run = () => {
@@ -15,8 +17,10 @@ V.run = () => {
   const todo = all.filter(o => !M.isDelivered(o)), done = all.filter(M.isDelivered);
   const due = todo.reduce((s, o) => s + M.bal(o), 0);
   let h = band("Delivery run", "", `<div class="stats"><div class="st"><b>${todo.length}</b><span>to deliver</span></div><div class="st"><b>${done.length}</b><span>delivered</span></div>${R.can("money") ? `<div class="st"><b>${rs(due)}</b><span>to collect</span></div>` : ""}</div>`);
-  h += `<div class="tools"><div class="chips">${[addDays(t, -1), t, addDays(t, 1)].map((x, i) => `<button class="chip" data-rundate="${x}" aria-pressed="${d === x}">${["Yesterday", "Today", "Tomorrow"][i]}</button>`).join("")}</div></div>`;
+  h += `<div class="tools">${layoutSwitch("run")}<div class="chips">${[addDays(t, -1), t, addDays(t, 1)].map((x, i) => `<button class="chip" data-rundate="${x}" aria-pressed="${d === x}">${["Yesterday", "Today", "Tomorrow"][i]}</button>`).join("")}</div></div>`;
   if (!all.length) return h + `<div class="empty"><strong>No deliveries for ${esc(dLong(d))}</strong>Pre-orders for this day appear here in route order.</div>`;
+  if (asLines("run")) return h + `<div class="card tablecard"><table class="reg"><thead><tr><th class="r">Stop</th><th>Flat</th><th>Customer</th><th>Items</th>${R.can("money") ? `<th class="r">To collect</th>` : ""}<th>Phone</th><th>Status</th></tr></thead><tbody>${[...todo, ...done].map((o, ix) => { const b = M.bal(o);
+    return `<tr${M.isDelivered(o) ? ' class="done"' : ""}><td class="r">${M.isDelivered(o) ? "–" : ix + 1}</td><td>${esc(o.flat || "")}</td><td><button class="linkbtn" data-open="${esc(o.id)}"><b>${esc(o.customer)}</b></button></td><td class="items">${o.items.map(i => esc(i.item) + " ×" + i.qty).join(", ")}</td>${R.can("money") ? `<td class="r" data-v="${b}">${b > 0 ? `<b class="due">${rs(b)}</b>` : "Paid"}</td>` : ""}<td>${o.phone && R.can("phone") ? `<a class="lnk" href="tel:${esc(o.phone)}">${esc(o.phone)}</a>` : ""}</td><td>${M.isDelivered(o) ? `<span class="tag t-paid">${ICON.check}Done</span>` : (R.can("deliver") ? `<button class="paybtn" data-rundeliver="${esc(o.id)}">Delivered</button>` : "To deliver")}</td></tr>`; }).join("")}</tbody></table></div>`;
   let floor = "";
   const card = o => { const b = M.bal(o); const fk = flatKey(o.flat); const sect = fk[0] ? "Other addresses" : `${fk[1]} wing · floor ${Math.floor(fk[2] / 100)}`;
     let head = ""; if (!M.isDelivered(o) && sect !== floor) { floor = sect; head = `<li class="sectli">${esc(sect)}</li>`; }
@@ -90,6 +94,8 @@ function syncWa() { const o = ui.sheet.o; const g = id => document.getElementByI
 A.waConfirm = async el => {
   syncWa(); const st = ui.sheet; const o = st.o; const me = R.me();
   if (!o.customer.trim()) { toast("Add the customer’s name"); return; }
+  const chk = await checkCustomer({ customer: o.customer.trim(), flat: o.flat.trim().toUpperCase().replace(/^([A-Z])\s*-?\s*(\d+)$/, "$1-$2"), phone: o.phone.trim() }); if (!chk) return;
+  if (chk !== "new") Object.assign(o, chk);
   const order = { id: uid("o"), no: M.nextNo((me && me.prefix) || ""), customer: o.customer.trim(), flat: o.flat.trim().toUpperCase().replace(/^([A-Z])\s*-?\s*(\d+)$/, "$1-$2"), phone: o.phone.trim(), channel: "whatsapp", date: o.date, items: o.items, discountPct: 0, status: "received", notes: o.notes, tag: M.config().activeTag || "", source: "whatsapp-import", createdAt: new Date().toISOString() };
   el.disabled = true; await saveOrder(order); closeSheet(); toast(`Order #${order.no} saved for ${dLabel(order.date)}`); openOrder(order.id);
 };

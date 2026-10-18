@@ -4,12 +4,19 @@ import * as ev from "./events.js";
 import * as sync from "./sync.js";
 import * as M from "./model.js";
 import * as R from "./roles.js";
+import { asLines, layoutSwitch } from "./table.js";
+import * as L from "./lock.js";
 import { S, A, V, H, guard, chipBar, searchBox, band, clean } from "./core.js";
 import { bakeSheet, putMove } from "./inventory.js";
 import { $, esc, rs, rs2, num, uid, today, addDays, dLong, qty, UNITS, ICON, copyText, waHref } from "./util.js";
 import { ui, toast, openSheet, closeSheet, yesNo } from "./ui.js";
+import { confirmNew, byNameOrAka } from "./match.js";
 
 const big = u => UNITS[u] || null;
+// Unit chips for a quantity: base unit, kg / L, and the material's buying pack when it has one. attr is "name=\"index" (closed by the factor).
+export const unitOpts = i => { const b = big(i.unit); const p = M.packOf(i); return [[i.unit, 1], ...(b ? [[b.big, b.f]] : []), ...(p ? [[`${p.name} (${qty(p.size, i.unit)})`, p.size]] : [])]; };
+const unitPick = (i, f, attr) => { const o = unitOpts(i); return o.length > 1 ? `<div class="chips unitchips">${o.map(([n, v]) => `<button class="chip" data-${attr}:${v}" aria-pressed="${f === v}">${esc(n)}</button>`).join("")}</div>` : `<span class="unitlbl">${esc(i.unit)}</span>`; };
+const rateDiff = (got, po, i) => { const d = (got - po) / po * 100; const b = big(i.unit); return Math.abs(d) < 2 ? ` · at PO rate` : ` · <b class="${d > 0 ? "due" : ""}">${d > 0 ? "+" : ""}${Math.round(d)}% vs PO ${rs2(po * (b ? b.f : 1))}/${b ? b.big : i.unit}</b>`; };
 const who = x => { const m = ev.get("members", x.by || x._by); return m ? m.name : ""; };
 const prefix = () => (R.me() || {}).prefix || "";
 const r2 = v => Math.round(v * 100) / 100;
@@ -25,11 +32,11 @@ V.prod = () => {
   const d = S.prodDate || today(); const k = prodKitchen(); const rows = M.production(d, k); const outs = M.sellingLocs().filter(l => l.id !== k);
   const bakedToday = M.bakesOn(d).filter(b => (b.outletId || M.locations()[0].id) === k);
   const toBake = rows.reduce((s, r) => s + r.toBake, 0);
-  let h = band(`Production · ${esc(M.locName(k))}`, `<button class="pillbtn" data-planopen>${ICON.tree}Plan & explode</button>`,
+  let h = band(`Production · ${esc(M.locName(k))}`, `<button class="pillbtn" data-planopen>${ICON.plan}Planning</button>`,
     `<div class="stats"><div class="st"><b>${toBake}</b><span>pieces to bake</span></div><div class="st"><b>${rows.reduce((s, r) => s + r.atKitchen, 0)}</b><span>ready at kitchen</span></div><div class="st"><b>${bakedToday.length}</b><span>batch${bakedToday.length === 1 ? "" : "es"} ${d === today() ? "today" : "for this day"}</span></div></div>`);
-  h += `<div class="tools">${dateChips("proddate", d)}${M.kitchens().length > 1 ? `<div class="chips">${M.kitchens().map(x => `<button class="chip" data-prodk="${esc(x.id)}" aria-pressed="${x.id === k}">${esc(x.name)}</button>`).join("")}</div>` : ""}</div>`;
+  h += `<div class="tools">${dateChips("proddate", d)}${layoutSwitch("prod")}${M.kitchens().length > 1 ? `<div class="chips">${M.kitchens().map(x => `<button class="chip" data-prodk="${esc(x.id)}" aria-pressed="${x.id === k}">${esc(x.name)}</button>`).join("")}</div>` : ""}</div>`;
   if (!rows.length) h += `<div class="empty"><strong>Nothing needed for ${esc(dLong(d))}</strong>Pre-orders and kept-ready levels at every outlet, less what they already hold, appear here.</div>`;
-  else if (S.wide) h += `<div class="card tablecard"><table class="reg"><thead><tr><th>Item</th>${outs.map(l => `<th class="r">${esc(l.name)}</th>`).join("")}${M.sellingLocs().some(l => l.id === k) ? `<th class="r">${esc(M.locName(k))}</th>` : ""}<th class="r">Need</th><th class="r">At kitchen</th><th class="r">To bake</th></tr></thead>
+  else if (asLines("prod")) h += `<div class="card tablecard"><table class="reg"><thead><tr><th>Item</th>${outs.map(l => `<th class="r">${esc(l.name)}</th>`).join("")}${M.sellingLocs().some(l => l.id === k) ? `<th class="r">${esc(M.locName(k))}</th>` : ""}<th class="r">Need</th><th class="r">At kitchen</th><th class="r">To bake</th></tr></thead>
     <tbody>${rows.map(r => `<tr><td><b>${esc(r.item)}</b></td>${outs.map(l => `<td class="r">${r.byLoc[l.id] || "–"}</td>`).join("")}${M.sellingLocs().some(l => l.id === k) ? `<td class="r">${r.byLoc[k] || "–"}</td>` : ""}<td class="r">${r.need}</td><td class="r">${r.atKitchen}</td><td class="r"><b>${r.toBake || "–"}</b></td></tr>`).join("")}</tbody></table></div>`;
   else h += `<ul class="list">${rows.map(r => `<li class="row board${r.toBake ? "" : " done"}"><div class="who"><div class="nm big">${esc(r.item)}</div><div class="subl">${Object.entries(r.byLoc).map(([l, n]) => `${esc(M.locName(l))} ${n}`).join(" · ")}${r.atKitchen ? ` · ${r.atKitchen} at kitchen` : ""}</div></div><div class="side"><div class="bignum">${r.toBake}</div><small class="mut">to bake</small></div></li>`).join("")}</ul>`;
   h += `<div class="boardfoot">${R.can("bake.record") ? `<button class="btn btn-primary" data-prodbake="${d}">${ICON.oven}Record a batch</button>` : ""}
@@ -49,10 +56,12 @@ function outletBoardView() {
   S.askText = `🧁 ${M.locName(loc)} needs for ${dLong(d)}:\n` + short.map(r => `• ${r.item}: ${r.short}`).join("\n");
   let h = band(`Bake board · ${esc(M.locName(loc))}`, short.length ? `<button class="pillbtn" data-askcopy>${ICON.wa}Ask kitchen</button>` : "",
     `<div class="stats"><div class="st"><b>${rows.reduce((s, r) => s + Math.max(0, r.onHand), 0)}</b><span>pieces on hand</span></div><div class="st"><b>${rows.reduce((s, r) => s + r.committed, 0)}</b><span>pre-orders to hand over</span></div><div class="st"><b>${short.reduce((s, r) => s + r.short, 0)}</b><span>short · ask the kitchen</span></div></div>`);
-  h += `<div class="tools">${dateChips("bakedate", d)}</div>`;
+  if (H.expiryBanner) h += `<div class="boardfoot" style="padding-bottom:0">${H.expiryBanner()}</div>`;
+  h += `<div class="tools">${dateChips("bakedate", d)}${layoutSwitch("bake")}</div>`;
   if (coming.length) h += `<div class="boardfoot"><label class="f">On the way · confirm when it arrives</label><div class="kv">${coming.map(x => `<div style="align-items:center"><button class="who" data-xfer="${esc(x.id)}"><div class="nm" style="font-size:15px">${esc(x.no)} from ${esc(M.locName(x.from))}</div><div class="subl">${esc(xferText(x))}</div></button>${canReceive() ? `<button class="paybtn" data-xferrecv="${esc(x.id)}">Receive</button>` : ""}</div>`).join("")}</div></div>`;
   if (!rows.length) return h + `<div class="empty"><strong>Nothing here yet</strong>Pieces the kitchen sends to ${esc(M.locName(loc))} show here, with pre-orders and kept-ready levels.</div>`;
-  h += `<ul class="list">${rows.map(r => `<li class="row board${r.short ? "" : " done"}"><div class="who"><div class="nm big">${esc(r.item)}</div><div class="subl">${r.committed ? `${r.committed} pre-ordered · ` : ""}${r.par ? `${r.par} kept ready · ` : ""}${r.sold} sold${r.coming ? ` · <span class="tag t-part">${r.coming} on the way</span>` : ""}${r.short ? ` <span class="tag t-due">short ${r.short}</span>` : ""}</div></div><div class="side"><div class="bignum">${r.onHand}</div><small class="mut">on hand</small></div></li>`).join("")}</ul>`;
+  if (asLines("bake")) h += `<div class="card tablecard"><table class="reg"><thead><tr><th>Item</th><th class="r">Pre-orders</th><th class="r">Kept ready</th><th class="r">On hand</th><th class="r">Sold</th><th class="r">On the way</th><th class="r">Short</th></tr></thead><tbody>${rows.map(r => `<tr${r.short ? ' class="shortrow"' : ""}><td><b>${esc(r.item)}</b></td><td class="r">${r.committed || "–"}</td><td class="r">${r.par || "–"}</td><td class="r">${r.onHand}</td><td class="r">${r.sold || "–"}</td><td class="r">${r.coming || "–"}</td><td class="r">${r.short ? `<b class="due">${r.short}</b>` : "–"}</td></tr>`).join("")}</tbody></table></div>`;
+  else h += `<ul class="list">${rows.map(r => `<li class="row board${r.short ? "" : " done"}"><div class="who"><div class="nm big">${esc(r.item)}</div><div class="subl">${r.committed ? `${r.committed} pre-ordered · ` : ""}${r.par ? `${r.par} kept ready · ` : ""}${r.sold} sold${r.coming ? ` · <span class="tag t-part">${r.coming} on the way</span>` : ""}${r.short ? ` <span class="tag t-due">short ${r.short}</span>` : ""}</div></div><div class="side"><div class="bignum">${r.onHand}</div><small class="mut">on hand</small></div></li>`).join("")}</ul>`;
   if (inToday.length) h += `<div class="boardfoot"><label class="f">Received today</label><div class="kv">${inToday.map(x => `<div><button class="who" data-xfer="${esc(x.id)}"><div class="nm" style="font-size:15px">${esc(x.no)} from ${esc(M.locName(x.from))}</div><div class="subl">${esc(xferText(x))}</div></button></div>`).join("")}</div></div>`;
   return h;
 }
@@ -67,13 +76,13 @@ V.grn = () => {
   const all = M.grns(); const list = all.filter(g => g.date >= from).filter(g => !q || (g.no + " " + g.supplier + " " + (g.invoiceNo || "") + " " + g.lines.map(l => (ings[l.ingId] || {}).name).join(" ")).toLowerCase().includes(q));
   const live = list.filter(g => !g.void); const spend = live.reduce((s, g) => s + (+g.total || 0), 0), taxPaid = live.reduce((s, g) => s + (+g.tax || 0), 0);
   const bySup = {}; live.forEach(g => { bySup[g.supplier] = (bySup[g.supplier] || 0) + (+g.total || 0); });
-  let h = band("Purchases", "", `<div class="stats"><div class="st"><b>${rs(spend)}</b><span>received${tax ? ` · ${rs(taxPaid)} ${esc(M.taxCfg().name)}` : ""}</span></div><div class="st"><b>${live.length}</b><span>GRNs</span></div><div class="st"><b>${Object.keys(bySup).length}</b><span>suppliers</span></div></div>`);
-  h += `<div class="tools">${searchBox("grn", "Search GRN, supplier, invoice or material")}${chipBar("grn", [["month", "This month"], ["d30", "30 days"], ["all", "All"]])}</div>`;
+  let h = band("Purchases", R.can("stock.buy") ? `<button class="pillbtn" data-act="invoiceIn">${ICON.inbox}Upload invoice</button>` : "", `<div class="stats"><div class="st"><b>${rs(spend)}</b><span>received${tax ? ` · ${rs(taxPaid)} ${esc(M.taxCfg().name)}` : ""}</span></div><div class="st"><b>${live.length}</b><span>GRNs</span></div><div class="st"><b>${Object.keys(bySup).length}</b><span>suppliers</span></div></div>`);
+  h += `<div class="tools">${searchBox("grn", "Search GRN, supplier, invoice or material")}${layoutSwitch("grn")}${chipBar("grn", [["month", "This month"], ["d30", "30 days"], ["all", "All"]])}</div>`;
   if (!all.length) return h + `<div class="empty"><strong>No goods received yet</strong>Record each delivery from a supplier as a GRN: what came, how much, the bill amount${tax ? " and tax" : ""}. It adds stock at the location that received it.${R.can("stock.buy") ? `<button class="btn btn-primary" data-act="newGrn" style="margin-top:14px">${ICON.inbox}New GRN</button>` : ""}</div>`;
   if (!list.length) return h + `<div class="empty"><strong>Nothing matches</strong>Try another search or period.</div>`;
   const items = g => g.lines.map(l => { const i = ings[l.ingId]; return `${i ? i.name : "?"} ${i ? qty(l.qty, i.unit) : l.qty}`; }).join(", ");
-  h += S.wide ? `<div class="card tablecard"><table class="reg"><thead><tr><th>GRN</th><th>Date</th><th>Supplier</th><th>Invoice</th>${M.locations().length > 1 ? "<th>At</th>" : ""}<th>Items</th><th class="r">Amount</th>${tax ? `<th class="r">Tax</th>` : ""}<th class="r">Total</th></tr></thead>
-    <tbody>${list.map(g => `<tr data-grn="${esc(g.id)}" tabindex="0"${g.void ? ` class="void"` : ""}><td><b>${esc(g.no)}</b>${g.void ? ` <span class="tag t-due">Undone</span>` : ""}</td><td>${esc(dLong(g.date))}</td><td>${esc(g.supplier)}</td><td>${esc(g.invoiceNo || "")}</td>${M.locations().length > 1 ? `<td>${esc(M.locName(g.loc))}</td>` : ""}<td class="items">${esc(items(g))}</td><td class="r">${rs2(g.amount)}</td>${tax ? `<td class="r">${g.tax ? rs2(g.tax) : "–"}</td>` : ""}<td class="r"><b>${rs2(g.total)}</b></td></tr>`).join("")}</tbody>
+  h += asLines("grn") ? `<div class="card tablecard"><table class="reg"><thead><tr><th>GRN</th><th>Date</th><th>Supplier</th><th>Invoice</th>${M.locations().length > 1 ? "<th>At</th>" : ""}<th>Items</th><th class="r">Amount</th>${tax ? `<th class="r">Tax</th>` : ""}<th class="r">Total</th></tr></thead>
+    <tbody>${list.map(g => `<tr data-grn="${esc(g.id)}" tabindex="0"${g.void ? ` class="void"` : ""}><td><b>${esc(g.no)}</b>${g.void ? ` <span class="tag t-due">Undone</span>` : ""}</td><td data-v="${esc(g.date)}">${esc(dLong(g.date))}</td><td>${esc(g.supplier)}</td><td>${esc(g.invoiceNo || "")}</td>${M.locations().length > 1 ? `<td>${esc(M.locName(g.loc))}</td>` : ""}<td class="items">${esc(items(g))}</td><td class="r">${rs2(g.amount)}</td>${tax ? `<td class="r">${g.tax ? rs2(g.tax) : "–"}</td>` : ""}<td class="r"><b>${rs2(g.total)}</b></td></tr>`).join("")}</tbody>
     <tfoot><tr><td colspan="${M.locations().length > 1 ? 6 : 5}">${live.length} GRN${live.length === 1 ? "" : "s"}</td><td class="r">${rs2(live.reduce((s, g) => s + (+g.amount || 0), 0))}</td>${tax ? `<td class="r">${rs2(taxPaid)}</td>` : ""}<td class="r">${rs2(spend)}</td></tr></tfoot></table></div>`
     : `<ul class="list">${list.map(g => `<li class="row${g.void ? " void" : ""}"><button class="who" data-grn="${esc(g.id)}"><div class="nm">${esc(g.no)} · ${esc(g.supplier)}</div><div class="subl">${esc(dLong(g.date))}${g.invoiceNo ? " · inv " + esc(g.invoiceNo) : ""}${g.void ? ` <span class="tag t-due">Undone</span>` : ""}</div><div class="subl">${esc(items(g))}</div></button><div class="amt">${rs(g.total)}</div></li>`).join("")}</ul>`;
   const sups = Object.entries(bySup).sort((a, b) => b[1] - a[1]);
@@ -82,17 +91,20 @@ V.grn = () => {
 };
 A.newGrn = () => grnSheet();
 H.grnSheet = opts => grnSheet(opts);
+H.grnDetail = id => grnDetail(id);
 function grnSheet(opts = {}) {
   if (!guard("stock.buy")) return; const mats = M.ingredients().filter(i => i.type !== "sf");
-  if (!mats.length) { toast("Add raw or packing materials on Stock first"); return; }
-  const line = id => { const i = mats.find(x => x.id === id) || mats[0]; return { ingId: i.id, qty: 0, f: big(i.unit) ? big(i.unit).f : 1, amount: 0, taxPct: M.taxCfg().on ? (i.taxPct != null && i.taxPct !== "" ? +i.taxPct : +M.taxCfg().rate || 0) : 0 }; };
+  if (!mats.length) { toast("Add raw or packing materials in Inventory first"); return; }
+  const line = id => { const i = mats.find(x => x.id === id) || mats[0]; return { ingId: i.id, qty: 0, f: M.packOf(i) ? M.packOf(i).size : big(i.unit) ? big(i.unit).f : 1, amount: 0, exp: "", lot: "", taxPct: M.taxCfg().on ? (i.taxPct != null && i.taxPct !== "" ? +i.taxPct : +M.taxCfg().rate || 0) : 0 }; };
   const first = opts.ingId ? mats.find(x => x.id === opts.ingId) : null;
-  const st = { kind: "grn", x: { supplier: first && first.supplier || "", invoiceNo: "", date: today(), loc: M.here(), notes: "", lines: [line(opts.ingId)] }, line }; st.redraw = () => drawGrn(st); drawGrn(st);
+  // opts.lines: a draft read from a supplier invoice ({ ingId, qty in base units, f, amount, taxPct or null }).
+  const lines = opts.lines && opts.lines.length ? opts.lines.map(l => ({ ...line(l.ingId), qty: l.qty, f: l.f, amount: l.amount, ...(l.taxPct != null ? { taxPct: l.taxPct } : {}), ...(l.poRate != null ? { poRate: l.poRate } : {}) })) : [line(opts.ingId)];
+  const st = { kind: "grn", x: { supplier: opts.supplier || (first && first.supplier) || "", invoiceNo: opts.invoiceNo || "", date: today(), loc: opts.loc || M.here(), notes: "", lines, poId: opts.poId || "" }, line }; st.redraw = () => drawGrn(st); drawGrn(st);
 }
 function drawGrn(st) {
   const x = st.x; const mats = M.ingredients().filter(i => i.type !== "sf"); const tax = M.taxCfg().on; const sm = M.stockMap(x.loc);
   openSheet(st, `<div class="sh-head"><h2 class="h">New GRN</h2><button class="x" data-close aria-label="Close">×</button></div>
-  <p class="hint" style="margin-top:-4px">Goods received note · ${esc(M.nextDocNo("grns", prefix(), "GRN"))}</p>
+  <p class="hint" style="margin-top:-4px">Goods received note · ${esc(M.nextDocNo("grns", prefix(), "GRN"))}${x.poId ? ` · against ${esc((ev.get("porders", x.poId) || {}).no || "PO")}` : ""}</p>
   <div class="two"><div><label class="f" for="grSup">Supplier</label><input class="in" id="grSup" list="suplist" value="${esc(x.supplier)}" placeholder="Name" autocomplete="off"><datalist id="suplist">${M.suppliers().map(s => `<option value="${esc(s.name)}">`).join("")}</datalist></div>
   <div><label class="f" for="grInv">Supplier invoice no.</label><input class="in" id="grInv" value="${esc(x.invoiceNo)}" placeholder="Optional"></div></div>
   <div class="two"><div><label class="f" for="grDate">Received on</label><input class="in" id="grDate" type="date" value="${x.date}"></div>
@@ -100,9 +112,10 @@ function drawGrn(st) {
   <label class="f">Items received</label>
   <div class="grnlines">${x.lines.map((l, ix) => { const i = mats.find(m => m.id === l.ingId) || mats[0]; const b = big(i.unit);
     return `<div class="grnline"><div class="gl1"><select class="in" data-gring="${ix}">${["rm", "pm"].map(t => `<optgroup label="${M.ING_TYPES[t]}">${mats.filter(m => m.type === t).map(m => `<option value="${esc(m.id)}" ${m.id === i.id ? "selected" : ""}>${esc(m.name)}</option>`).join("")}</optgroup>`).join("")}</select><button class="rm" data-grrm="${ix}" aria-label="Remove line">×</button></div>
-      <div class="gl2"><label><span>Qty</span><input class="in" data-grqty="${ix}" inputmode="decimal" value="${l.qty ? +(l.qty / l.f).toFixed(3) : ""}" placeholder="0"></label>${b ? `<div class="chips unitchips">${[[i.unit, 1], [b.big, b.f]].map(([n, f]) => `<button class="chip" data-grf="${ix}:${f}" aria-pressed="${l.f === f}">${n}</button>`).join("")}</div>` : `<span class="unitlbl">pcs</span>`}
+      <div class="gl2"><label><span>Qty</span><input class="in" data-grqty="${ix}" inputmode="decimal" value="${l.qty ? +(l.qty / l.f).toFixed(3) : ""}" placeholder="0"></label>${unitPick(i, l.f, `grf="${ix}`)}
       <label><span>Amount ₹${tax ? " before tax" : ""}</span><input class="in" data-gramt="${ix}" inputmode="decimal" value="${l.amount || ""}" placeholder="0"></label>${tax ? `<label class="tx"><span>${esc(M.taxCfg().name)} %</span><input class="in" data-grtax="${ix}" inputmode="decimal" value="${l.taxPct}"></label>` : ""}</div>
-      <small class="mut">Have ${qty(Math.max(0, sm[i.id] || 0), i.unit)}${l.qty && l.amount ? ` · ${rs2(l.amount / l.qty * (b ? b.f : 1))}/${b ? b.big : i.unit}` : ""}${tax && l.taxPct ? (i.taxInCost ? " · tax added to stock cost" : " · tax recoverable, not in cost") : ""}</small></div>`; }).join("")}</div>
+      <div class="gl2"><label><span>Best before</span><input class="in" type="date" data-grexp="${ix}" value="${esc(l.exp || (i.shelfDays ? addDays(x.date, +i.shelfDays) : ""))}"></label><label><span>Lot / batch no.</span><input class="in" data-grlot="${ix}" value="${esc(l.lot || "")}" placeholder="Optional"></label></div>
+      <small class="mut">Have ${qty(Math.max(0, sm[i.id] || 0), i.unit)}${l.qty && l.amount ? ` · ${rs2(l.amount / l.qty * (b ? b.f : 1))}/${b ? b.big : i.unit}` : ""}${l.poRate && l.qty && l.amount ? rateDiff(l.amount / l.qty, l.poRate, i) : ""}${tax && l.taxPct ? (i.taxInCost ? " · tax added to stock cost" : " · tax recoverable, not in cost") : ""}</small></div>`; }).join("")}</div>
   <button class="add-line" data-gradd>+ Add item</button>
   <div class="kv" id="grTotals" style="margin-top:12px">${grnTotals(x.lines)}</div>
   <label class="f" for="grNote">Note</label><input class="in" id="grNote" value="${esc(x.notes)}" placeholder="Optional · short delivery, damaged items">
@@ -115,11 +128,14 @@ function syncGrn() {
   const st = ui.sheet; if (!st || st.kind !== "grn") return; const x = st.x; const g = id => document.getElementById(id);
   x.supplier = g("grSup").value; x.invoiceNo = g("grInv").value; x.date = g("grDate").value || today(); if (g("grLoc")) x.loc = g("grLoc").value; x.notes = g("grNote").value;
   x.lines.forEach((l, ix) => { const q = document.querySelector(`[data-grqty="${ix}"]`), a = document.querySelector(`[data-gramt="${ix}"]`), t = document.querySelector(`[data-grtax="${ix}"]`);
-    if (q) l.qty = num(q.value) * l.f; if (a) l.amount = num(a.value); if (t) l.taxPct = num(t.value); });
+    if (q) l.qty = num(q.value) * l.f; if (a) l.amount = num(a.value); if (t) l.taxPct = num(t.value);
+    const e = document.querySelector(`[data-grexp="${ix}"]`), lt = document.querySelector(`[data-grlot="${ix}"]`); if (e) l.exp = e.value; if (lt) l.lot = lt.value.trim(); });
 }
 A.saveGrn = async el => {
-  syncGrn(); const st = ui.sheet, x = st.x; const ings = M.ingMap(); const sup = x.supplier.trim();
-  if (!sup) { toast("Add the supplier"); return; } const lines = x.lines.filter(l => l.qty > 0); if (!lines.length) { toast("Enter what was received"); return; }
+  syncGrn(); const st = ui.sheet, x = st.x; const ings = M.ingMap(); let sup = x.supplier.trim();
+  if (!sup) { toast("Add the supplier"); return; }
+  const known = byNameOrAka(M.suppliers(), sup); if (known) sup = known.name;
+  else { const r = await confirmNew("supplier", sup, M.suppliers()); if (!r) return; if (r !== "new") { sup = r.name; x.supplier = sup; } } const lines = x.lines.filter(l => l.qty > 0); if (!lines.length) { toast("Enter what was received"); return; }
   const tax = r2(Object.values(grnTax(lines)).reduce((s, v) => s + v, 0)); const amount = r2(lines.reduce((s, l) => s + (+l.amount || 0), 0));
   const no = M.nextDocNo("grns", prefix(), "GRN");
   if (!await yesNo(`<p class="cq">Save ${esc(no)}?</p><div class="cdetail">${esc(sup)}${x.invoiceNo ? " · inv " + esc(x.invoiceNo) : ""}<br>${lines.map(l => esc(ings[l.ingId].name) + " " + qty(l.qty, ings[l.ingId].unit)).join("<br>")}<br><br>Total ${rs2(amount + tax)} · adds stock at ${esc(M.locName(x.loc))}</div>`, "Save GRN", "btn-ok")) return;
@@ -128,15 +144,15 @@ A.saveGrn = async el => {
   // Stock is valued at the bill amount, plus the tax for materials whose purchase tax isn't recoverable (set per material by the admin).
   const costOf = l => r2((+l.amount || 0) * (1 + (ings[l.ingId].taxInCost ? (+l.taxPct || 0) / 100 : 0)));
   for (const l of lines) await putMove({ ingId: l.ingId, type: "purchase", qty: l.qty, amount: costOf(l), date: x.date, note: `${no} · ${sup}`, ref: id, outletId: x.loc });
-  await ev.put("grns", { id, no, date: x.date, supplier: sup, invoiceNo: x.invoiceNo.trim(), loc: x.loc, notes: x.notes.trim(), lines: lines.map(l => ({ ingId: l.ingId, qty: l.qty, amount: +l.amount || 0, taxPct: +l.taxPct || 0, cost: costOf(l) })), amount, tax, total: r2(amount + tax), by: (R.me() || {}).id || "" });
+  await ev.put("grns", { id, no, date: x.date, supplier: sup, invoiceNo: x.invoiceNo.trim(), loc: x.loc, notes: x.notes.trim(), lines: lines.map(l => ({ ingId: l.ingId, qty: l.qty, amount: +l.amount || 0, taxPct: +l.taxPct || 0, cost: costOf(l), ...(l.exp ? { exp: l.exp } : {}), ...(l.lot ? { lot: l.lot } : {}), ...(l.poRate ? { poRate: l.poRate } : {}) })), amount, tax, total: r2(amount + tax), by: (R.me() || {}).id || "", ...(x.poId ? { poId: x.poId } : {}) });
   sync.soon(); closeSheet(); toast(`${no} saved · stock added`);
 };
 function grnDetail(id) {
   const g = M.grns().find(x => x.id === id); if (!g) { closeSheet(); return; } const ings = M.ingMap(); const tr = taxRows(grnTax(g.lines));
   openSheet({ kind: "grnView", id, redraw: () => grnDetail(id) }, `<div class="sh-head"><h2 class="h">${esc(g.no)}</h2><button class="x" data-close aria-label="Close">×</button></div>
-  <div class="subl" style="margin:-4px 0 10px">${esc(g.supplier)}${g.invoiceNo ? " · invoice " + esc(g.invoiceNo) : ""} · ${esc(dLong(g.date))} · at ${esc(M.locName(g.loc))}${who(g) ? " · " + esc(who(g)) : ""}</div>
+  <div class="subl" style="margin:-4px 0 10px">${esc(g.supplier)}${g.poId ? " · against " + esc((ev.get("porders", g.poId) || {}).no || "PO") : ""}${g.invoiceNo ? " · invoice " + esc(g.invoiceNo) : ""} · ${esc(dLong(g.date))} · at ${esc(M.locName(g.loc))}${who(g) ? " · " + esc(who(g)) : ""}</div>
   ${g.void ? `<div class="banner bad">Undone. Its stock was taken back off.</div>` : ""}
-  <div class="kv">${g.lines.map(l => { const i = ings[l.ingId]; return `<div><span>${esc(i ? i.name : "Removed material")} <small class="mut">${i ? qty(l.qty, i.unit) : l.qty}${l.taxPct ? ` · ${l.taxPct}%` : ""}</small></span><span>${rs2(l.amount)}</span></div>`; }).join("")}
+  <div class="kv">${g.lines.map(l => { const i = ings[l.ingId]; return `<div><span>${esc(i ? i.name : "Removed material")} <small class="mut">${i ? qty(l.qty, i.unit) : l.qty}${l.taxPct ? ` · ${l.taxPct}%` : ""}${l.exp ? ` · best before ${esc(dLong(l.exp))}` : ""}${l.lot ? ` · lot ${esc(l.lot)}` : ""}</small></span><span>${rs2(l.amount)}</span></div>`; }).join("")}
   ${tr.map(([n, v]) => `<div><span>${esc(n)}</span><span>${rs2(v)}</span></div>`).join("")}<div class="tot"><span>Total</span><span>${rs2(g.total)}</span></div></div>
   ${g.notes ? `<p class="hint">Note: ${esc(g.notes)}</p>` : ""}
   ${!g.void && R.can("stock.buy") ? `<button class="btn btn-danger" data-grnundo="${esc(g.id)}">Undo this GRN</button>` : ""}`);
@@ -149,10 +165,10 @@ V.xfer = () => {
   const list = all.filter(x => f === "all" || x.from === f || x.to === f);
   const todays = list.filter(x => !x.void && x.date === t); const transit = list.filter(x => !x.void && !M.xferReceived(x));
   let h = band("Transfers", "", `<div class="stats"><div class="st"><b>${transit.length}</b><span>in transit</span></div><div class="st"><b>${todays.length}</b><span>today</span></div><div class="st"><b>${todays.reduce((s, x) => s + x.lines.filter(l => l.item).reduce((a, l) => a + l.qty, 0), 0)}</b><span>pieces sent today</span></div><div class="st"><b>${M.locations().length}</b><span>locations</span></div></div>`);
-  h += `<div class="tools">${M.locations().length > 1 ? `<div class="chips"><button class="chip" data-filter="xfer:all" aria-pressed="${f === "all"}">All</button>${M.locations().map(l => `<button class="chip" data-filter="xfer:${esc(l.id)}" aria-pressed="${f === l.id}">${esc(l.name)}</button>`).join("")}</div>` : ""}</div>`;
+  h += `<div class="tools">${layoutSwitch("xfer")}${M.locations().length > 1 ? `<div class="chips"><button class="chip" data-filter="xfer:all" aria-pressed="${f === "all"}">All</button>${M.locations().map(l => `<button class="chip" data-filter="xfer:${esc(l.id)}" aria-pressed="${f === l.id}">${esc(l.name)}</button>`).join("")}</div>` : ""}</div>`;
   if (M.locations().length < 2) h += `<p class="hint" style="padding:0 4px">Only one location so far. Add outlets in More → Business settings → Locations to send stock between them.</p>`;
   if (!list.length) return h + `<div class="empty"><strong>No transfers yet</strong>A transfer moves finished goods (and materials, like boxes) from the kitchen to an outlet. The outlet’s bake board shows what arrived.${R.can("transfer") && M.locations().length > 1 ? `<button class="btn btn-primary" data-act="newTransfer" style="margin-top:14px">${ICON.truck}New transfer</button>` : ""}</div>`;
-  return h + (S.wide ? `<div class="card tablecard"><table class="reg"><thead><tr><th>No.</th><th>Date</th><th>From</th><th>To</th><th>Items</th><th class="r">Pieces</th><th>By</th></tr></thead><tbody>${list.map(x => `<tr data-xfer="${esc(x.id)}" tabindex="0"${x.void ? ` class="void"` : ""}><td><b>${esc(x.no)}</b> ${statusTag(x)}</td><td>${esc(dLong(x.date))}</td><td>${esc(M.locName(x.from))}</td><td>${esc(M.locName(x.to))}</td><td class="items">${esc(xferText(x))}</td><td class="r">${x.lines.filter(l => l.item).reduce((a, l) => a + l.qty, 0)}</td><td>${esc(who(x))}</td></tr>`).join("")}</tbody></table></div>`
+  return h + (asLines("xfer") ? `<div class="card tablecard"><table class="reg"><thead><tr><th>No.</th><th>Date</th><th>From</th><th>To</th><th>Items</th><th class="r">Pieces</th><th>By</th></tr></thead><tbody>${list.map(x => `<tr data-xfer="${esc(x.id)}" tabindex="0"${x.void ? ` class="void"` : ""}><td><b>${esc(x.no)}</b> ${statusTag(x)}</td><td data-v="${esc(x.date)}">${esc(dLong(x.date))}</td><td>${esc(M.locName(x.from))}</td><td>${esc(M.locName(x.to))}</td><td class="items">${esc(xferText(x))}</td><td class="r">${x.lines.filter(l => l.item).reduce((a, l) => a + l.qty, 0)}</td><td>${esc(who(x))}</td></tr>`).join("")}</tbody></table></div>`
     : `<ul class="list">${list.map(x => `<li class="row${x.void ? " void" : ""}"><button class="who" data-xfer="${esc(x.id)}"><div class="nm">${esc(x.no)} · ${esc(M.locName(x.from))} → ${esc(M.locName(x.to))}</div><div class="subl">${esc(dLong(x.date))} ${statusTag(x)}</div><div class="subl">${esc(xferText(x))}</div></button>${!x.void && !M.xferReceived(x) && canReceive() ? `<button class="paybtn" data-xferrecv="${esc(x.id)}">Receive</button>` : ""}</li>`).join("")}</ul>`);
 };
 A.newTransfer = () => transferSheet();
@@ -196,9 +212,10 @@ const lineName = (l, ings) => l.item || ((ings[l.ingId] || {}).name || "?");
 const lineQty = (l, v, ings) => l.item ? String(v) : (ings[l.ingId] ? qty(v, ings[l.ingId].unit) : String(v));
 const statusTag = x => x.void ? `<span class="tag t-due">Undone</span>` : !M.xferReceived(x) ? `<span class="tag t-part">In transit</span>` : M.xferShort(x) ? `<span class="tag t-due">Received short</span>` : `<span class="tag t-paid">${ICON.check}Received</span>`;
 // The receiving location confirms each line; anything short is recorded on the transfer.
-function receiveSheet(id) {
+async function receiveSheet(id) {
   const x = M.transfers().find(t => t.id === id); if (!x || x.void || M.xferReceived(x)) return; if (!canReceive()) { guard("transfer"); return; }
-  const st = { kind: "xferRecv", id, lines: x.lines.map(l => ({ ...l, recv: +l.qty })), note: "" }; st.redraw = () => drawRecv(st); drawRecv(st);
+  const lk = await L.open("transfers", id, x.no); if (!lk) return;
+  const st = { ...lk, kind: "xferRecv", id, lines: x.lines.map(l => ({ ...l, recv: +l.qty })), note: "" }; st.redraw = () => drawRecv(st); drawRecv(st);
 }
 function drawRecv(st) {
   const x = M.transfers().find(t => t.id === st.id); const ings = M.ingMap(); const short = st.lines.filter(l => l.recv < l.qty);
@@ -213,7 +230,7 @@ function drawRecv(st) {
 }
 const syncRecv = () => { const st = ui.sheet; if (!st || st.kind !== "xferRecv") return; st.note = ($("#rvNote") || {}).value || ""; st.lines.forEach((l, ix) => { const q = document.querySelector(`[data-rvq="${ix}"]`); if (q) l.recv = Math.max(0, num(q.value)); }); };
 A.saveReceive = async el => {
-  syncRecv(); const st = ui.sheet; const x = M.transfers().find(t => t.id === st.id); if (!x || M.xferReceived(x)) { closeSheet(); return; }
+  syncRecv(); const st = ui.sheet; if (!await L.saveOk(st)) return; const x = M.transfers().find(t => t.id === st.id); if (!x || M.xferReceived(x)) { closeSheet(); toast("Already received"); return; }
   el.disabled = true;
   for (const l of st.lines.filter(l => l.ingId && l.recv > 0)) await putMove({ ingId: l.ingId, type: "transfer", qty: l.recv, note: `${x.no} from ${M.locName(x.from)}`, ref: x.id, outletId: x.to });
   await ev.put("transfers", clean({ ...ev.get("transfers", x.id), status: "received", lines: st.lines, receivedAt: new Date().toISOString(), receivedBy: (R.me() || {}).id || "", recvNote: st.note.trim() }));
@@ -242,7 +259,7 @@ V.fg = () => {
   let h = band("Finished goods", (R.can("stock.count") || R.can("stock.waste")) ? `<button class="pillbtn" data-act="fgAdjust">Adjust</button>` : "",
     `<div class="stats">${locs.map(l => `<div class="st"><b>${Object.values(fg[l.id] || {}).reduce((s, v) => s + Math.max(0, v), 0)}</b><span>${esc(l.name)}</span></div>`).join("")}</div>`);
   if (!rows.length) return h + `<div class="empty"><strong>No finished goods yet</strong>Batches add pieces at the kitchen, transfers move them to outlets and sales take them off.</div>`;
-  h += `<div class="card tablecard" style="margin-top:14px"><table class="reg"><thead><tr><th>Item</th>${locs.map(l => `<th class="r">${esc(l.name)}</th>`).join("")}<th class="r">Total</th></tr></thead><tbody>${rows.map(n => `<tr style="cursor:default"><td><b>${esc(n)}</b></td>${locs.map(l => { const v = (fg[l.id] || {})[n] || 0; return `<td class="r${v < 0 ? " due" : ""}">${v || "–"}</td>`; }).join("")}<td class="r"><b>${tot(n)}</b></td></tr>`).join("")}</tbody></table></div>
+  h += `<div class="tools">${layoutSwitch("fg")}</div><div class="card tablecard" style="margin-top:6px"><table class="reg"><thead><tr><th>Item</th>${locs.map(l => `<th class="r">${esc(l.name)}</th>`).join("")}<th class="r">Total</th></tr></thead><tbody>${rows.map(n => `<tr style="cursor:default"><td><b>${esc(n)}</b></td>${locs.map(l => { const v = (fg[l.id] || {})[n] || 0; return `<td class="r${v < 0 ? " due" : ""}">${v || "–"}</td>`; }).join("")}<td class="r"><b>${tot(n)}</b></td></tr>`).join("")}</tbody></table></div>
   <p class="hint" style="padding:0 4px">Counted from ${esc(dLong(M.config().erpStart || today()))}, when ERP started: good pieces from batches, plus transfers in, less transfers out and delivered orders. A negative number means something was sold before it was recorded; fix it with Adjust → Count.</p>`;
   if (adj.length) h += `<div class="card"><h3>Recent adjustments</h3><table><tbody>${adj.map(a => `<tr><td>${esc(a.item)} <small class="mut">${esc(M.locName(a.loc))} · ${a.type === "waste" ? "wasted" : "count"}${a.note ? " · " + esc(a.note) : ""}</small></td><td>${a.qty > 0 ? "+" : ""}${a.qty}</td></tr>`).join("")}</tbody></table></div>`;
   return h;
@@ -274,7 +291,7 @@ H.click.push(async T => {
   const pd = T.closest("[data-proddate]"); if (pd) { S.prodDate = pd.dataset.proddate; H.render(); return true; }
   const pk = T.closest("[data-prodk]"); if (pk) { S.prodKitchen = pk.dataset.prodk; H.render(); return true; }
   const pb = T.closest("[data-prodbake]"); if (pb) { bakeSheet(pb.dataset.prodbake); return true; }
-  if (T.closest("[data-planopen]")) { S.filter.bom = "plan"; S.planDate = S.prodDate || today(); S.view = "bom"; H.render(); return true; }
+  if (T.closest("[data-planopen]")) { S.planDate = S.prodDate || today(); S.view = "plan"; H.render(); return true; }
   const xt = T.closest("[data-xferto]"); if (xt) { transferSheet({ from: prodKitchen(), to: xt.dataset.xferto }); return true; }
   if (T.closest("[data-askcopy]")) { const ok = await copyText(S.askText || ""); toast(ok ? "Request copied. Paste it to the kitchen." : "Couldn’t copy here"); return true; }
   const gr = T.closest("[data-grn]"); if (gr) { grnDetail(gr.dataset.grn); return true; }

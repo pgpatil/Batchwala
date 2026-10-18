@@ -428,3 +428,111 @@ kbd{font:inherit;font-size:11px;font-weight:800;border:1px solid var(--line);bor
 .rm{border:0;background:var(--surface);width:36px;height:36px;border-radius:18px;font-size:18px;flex:0 0 auto}
 .reg td.due{color:var(--due);font-weight:800}
 @media (min-width:1024px){ .moresw{display:none} .nav .nav-sw.dx{display:block} .nav-sw .locsel{margin-top:8px} .nav-sw .seg button{height:36px;font-size:13.5px} }
+
+/* v2.6: help, import & export */
+.bandnote{margin:0;padding:0 22px 16px;font-weight:600;font-size:14px;opacity:.8;max-width:760px}
+.helplist,.datalist{display:grid;gap:10px;padding:8px 12px 28px}
+.helplist .bakecard,.datalist .datacard{margin:0}
+.helpbody{padding:4px 16px 14px;border-top:1px solid var(--line);font-size:15px;line-height:1.55}
+.helpbody p{margin:10px 0}.helpbody ul,.helpbody ol{margin:8px 0;padding-left:22px}.helpbody li{margin:4px 0}
+.helpbody table{margin:8px 0;border:1px solid var(--line);border-radius:10px;overflow:hidden;font-size:14px}
+.helpbody th,.helpbody td{text-align:left;padding:8px 10px}
+.helpbody .btn{margin-top:6px}
+.datacard{background:var(--card);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);padding:12px 14px}
+.dc-head{display:flex;align-items:center;gap:12px}
+.dc-head .ic{width:38px;height:38px;border-radius:12px;background:var(--surface);display:grid;place-items:center;flex:0 0 auto}
+.dc-head .ic svg{width:20px;height:20px}
+.dc-head b{display:block}.dc-head small{display:block;color:var(--muted);font-size:13px}
+.dc-btns{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.dc-btns .btn{width:auto;flex:1 1 120px;height:44px;margin:0;font-size:15px}
+@media (min-width:1024px){ .helplist{padding:8px 0 28px;max-width:900px} .datalist{grid-template-columns:repeat(auto-fill,minmax(400px,1fr));padding:8px 0 28px} .bandnote{padding:0 22px 18px} }
+
+/* v2.7: inventory tabs, checks, shelf life */
+.invtabs{grid-template-columns:repeat(4,1fr);flex:1 1 100%}
+.invtabs button{font-size:13.5px}
+.invtabs em{font-style:normal;opacity:.6;font-weight:700;margin-left:2px}
+.banner.warn{background:var(--warn-bg);color:var(--warn)}
+.pendlist>div{flex-direction:column;align-items:stretch;gap:6px}
+.pendlist select{height:44px}
+.expbanner{display:block;width:100%;text-align:left;border:0;cursor:pointer;margin:12px 0 0}
+.exprow{align-items:center}
+.exbtns{display:flex;align-items:center;gap:10px}
+.dangerbtn{background:var(--due)}
+@media (min-width:1024px){ .invtabs{max-width:640px} }
+.chkline{display:flex;align-items:center;gap:8px;margin-top:10px;font-weight:700;font-size:14px}
+.chkline input{width:20px;height:20px}
+.ivstatus:empty{display:none}
+.ivstatus{font-weight:700;color:var(--ink)}
+.ivclaude,.ivtext{margin-top:14px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:10px 14px}
+.ivclaude summary,.ivtext summary{font-weight:700;cursor:pointer}
+.ivtext pre{max-height:220px;overflow:auto;font-size:13px}
+
+/* ---------- v2.8: planning, buckets, batch cards ---------- */
+.stepin{width:52px;border:0;background:none;text-align:center;font:inherit;font-weight:800;color:var(--ink);padding:0}
+.stepin:focus{outline:2px solid var(--accent);border-radius:6px}
+.bucketbar{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;padding:10px 12px 0;background:var(--bg)}
+.bucketbar button{flex:0 0 auto;border:1px solid var(--line);background:var(--card);border-radius:999px;padding:7px 14px;font-weight:700;color:var(--muted)}
+.bucketbar button[aria-current="page"]{background:var(--ink);border-color:var(--ink);color:var(--bg)}
+.datechip{position:relative;cursor:pointer;display:inline-flex;align-items:center}
+.datechip input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%}
+.plan tr.grp td{background:var(--surface);font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+.plan .rate{width:72px}
+.plan .cardform{padding:12px 14px}
+.bcard{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px;margin:10px 0}
+.bc-head{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;border-bottom:2px solid var(--ink);padding-bottom:8px;margin-bottom:6px}
+.bc-head h3{margin:2px 0 0;font-size:19px}
+.bc-meta{display:flex;flex-direction:column;align-items:flex-end;font-size:13px;gap:2px}
+.bc-step h4{margin:12px 0 4px;font-size:15px}
+.bc-step table{width:100%;border-collapse:collapse}
+.bc-step td,.bc-step th{padding:6px 4px;border-bottom:1px solid var(--line);text-align:left;font-size:14px}
+.bc-step .num{text-align:right;white-space:nowrap}
+.bc-step .tick{width:60px;text-align:center;font-size:18px}
+.bc-sign{display:grid;grid-template-columns:repeat(3,1fr);gap:16px 10px;margin-top:22px;font-size:13px}
+.nmform{margin-top:10px;border:1px dashed var(--line);border-radius:14px;padding:10px 12px;background:var(--surface)}
+#printArea{display:none}
+@media print{
+  body.printing > *:not(#printArea){display:none !important}
+  body.printing #printArea{display:block;color:#000;font:13px/1.4 system-ui,sans-serif}
+  #printArea .bcard{border:0;padding:0}
+  #printArea .tag{border:0;padding:0;font-size:10px;color:#555;background:none}
+  #printArea .shortrow td{background:none}
+}
+@media (min-width:1024px){
+  .nav .nb.mx{display:none}
+  .bucketbar{display:none}
+}
+/* sortable, filterable tables; grid / lines switch */
+th[data-tsort]{cursor:pointer;user-select:none;white-space:nowrap}
+th[data-tsort]::after{content:"↕";opacity:.3;margin-left:4px;font-size:.85em}
+th[aria-sort="ascending"]::after{content:"↑";opacity:1}
+th[aria-sort="descending"]::after{content:"↓";opacity:1}
+tr.tfilter th{padding:2px 4px 6px;background:none}
+tr.tfilter input{width:100%;min-width:52px;border:1px solid var(--line);border-radius:8px;padding:4px 6px;font:inherit;font-size:12.5px;font-weight:500;background:var(--bg);color:var(--ink)}
+.tshown:empty{display:none}
+.tshown{margin:6px 4px 0}
+.tools .layoutsw{display:inline-flex;width:auto;flex:0 0 auto}
+.layoutsw button{padding:6px 12px}
+.card > p.hint{padding:0 14px 12px;margin:6px 0 0}
+/* Grid layout of a table: one card per row with labelled fields */
+table.cards,table.cards tbody,table.cards thead{display:block;width:100%}
+table.cards thead tr:first-child{display:flex;flex-wrap:wrap;gap:6px;padding:4px 0 6px}
+table.cards thead tr:first-child th{border:1px solid var(--line);border-radius:999px;padding:4px 10px;background:var(--card);font-size:12px}
+table.cards thead tr:first-child th:empty{display:none}
+table.cards tr.tfilter{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:6px;padding:0 0 6px}
+table.cards tr.tfilter th:empty{display:none}
+table.cards tbody{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:10px}
+table.cards tbody tr{display:grid;grid-template-columns:1fr 1fr;gap:6px 12px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px;align-content:start}
+table.cards tbody tr[hidden]{display:none}
+table.cards tbody td{display:flex;flex-direction:column;gap:1px;border:0;padding:0;text-align:left !important;white-space:normal !important;background:none !important}
+table.cards tbody td::before{content:attr(data-label);font-size:11px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
+table.cards tbody td[data-label=""]::before{content:none}
+table.cards tbody td:first-child{grid-column:1/-1;font-size:16px}
+table.cards tbody td:first-child::before{content:none}
+table.cards tbody tr.shortrow{border-color:var(--due)}
+table.cards tbody tr.grp,table.cards tbody tr:has(td[colspan]){grid-column:1/-1;display:block;background:none;border:0;padding:4px 2px}
+table.cards tfoot{display:block}
+table.cards tfoot tr{display:flex;flex-wrap:wrap;gap:6px 16px;padding:10px 4px;font-weight:700}
+table.cards tfoot td{border:0;padding:0}
+table.cards tfoot td:empty{display:none}
+.tablecard:has(table.cards){background:none;border:0;box-shadow:none;overflow:visible}
+table.reg td:not(.items){white-space:nowrap}
