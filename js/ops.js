@@ -4,7 +4,7 @@ import * as M from "./model.js";
 import * as R from "./roles.js";
 import { parseOrderMessage } from "./waparse.js";
 import { asLines, layoutSwitch } from "./table.js";
-import { S, A, V, H, guard, saveOrder, payOrders, addPayment, band, toran, payTag, noLabel } from "./core.js";
+import { S, A, V, H, guard, saveOrder, payOrders, addPayment, reversePayments, band, toran, payTag, noLabel } from "./core.js";
 import { confirmDeliver, compose, openOrder } from "./orders.js";
 import { $, esc, rs, uid, today, addDays, dObj, dLabel, dLong, plate, flatKey, ICON } from "./util.js";
 import { ui, toast, openSheet, closeSheet, ask, yesNo } from "./ui.js";
@@ -34,7 +34,7 @@ V.run = () => {
 H.click.push(async T => {
   const rd = T.closest("[data-rundate]"); if (rd) { S.runDate = rd.dataset.rundate; H.render(); return true; }
   const rv = T.closest("[data-rundeliver]"); if (rv) { const o = M.orders().find(x => x.id === rv.dataset.rundeliver); if (o) await confirmDeliver(o, true); return true; }
-  const us = T.closest("[data-undosale]"); if (us) { const o = M.orders().find(x => x.id === us.dataset.undosale); if (o) { await saveOrder({ ...o, status: "cancelled", cancelReason: "Undone at counter" }); for (const p of M.paymentsFor(o.id)) if (p.amount > 0) await addPayment(o, -p.amount, p.mode, "Sale undone", p.id); toast("Sale undone"); } return true; }
+  const us = T.closest("[data-undosale]"); if (us) { if (us.disabled) return true; us.disabled = true; const o = M.orders().find(x => x.id === us.dataset.undosale); if (o && o.status === "cancelled") { toast("Already undone"); return true; } if (o) { await saveOrder({ ...o, status: "cancelled", cancelReason: "Undone at counter" }); await reversePayments(o); toast("Sale undone"); } return true; }
   return false;
 });
 

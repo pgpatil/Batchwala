@@ -112,11 +112,14 @@ export function expirySheet() {
   <button class="btn btn-ghost" data-close>Later</button>`);
 }
 // gone: pieces leaving this batch's count. how: "discarded" (thrown away) or "cleared" (sold or used without a record). With ERP, finished-goods stock at this location changes too.
+// Unsold pieces are where they were baked unless transfers moved them; take them off where the most of that item is now, starting with the batch's own kitchen.
+const fgLocOf = l => { const fg = M.fgStock(); const home = l.b.outletId || M.locations()[0].id; if ((fg[home] || {})[l.item] > 0) return home;
+  return Object.keys(fg).sort((a, b) => ((fg[b] || {})[l.item] || 0) - ((fg[a] || {})[l.item] || 0))[0] || home; };
 async function clearLot(l, gone, how) {
   const raw = ev.get("bakes", l.b.id); const b = M.batches().find(x => x.id === l.b.id); if (!raw || !b || gone <= 0) return;
   const lines = b.lines.map((x, ix) => ix === l.ix ? { ...x, [how]: (x[how] || 0) + gone } : x);
   await ev.put("bakes", clean({ ...raw, lines }));
-  if (M.erpOn()) await ev.put("fg", { id: uid("f"), loc: M.here(), item: l.item, qty: -gone, type: how === "discarded" ? "waste" : "count", date: today(), note: `Past shelf life · batch ${b.no ? "#" + b.no : ""}` });
+  if (M.erpOn()) await ev.put("fg", { id: uid("f"), ref: b.id, loc: fgLocOf(l), item: l.item, qty: -gone, type: how === "discarded" ? "waste" : "count", date: today(), note: `Past shelf life · batch ${b.no ? "#" + b.no : ""}` });
   sync.soon();
 }
 H.expiryCheck = () => { if (R.me() && canClear() && !ui.sheet && M.expiredLots().length) expirySheet(); };

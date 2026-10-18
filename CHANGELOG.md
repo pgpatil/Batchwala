@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.11.1 — 18 Oct 2026 · audit fixes
+- Money: cancelling a paid order offers to refund it; a cancelled order with money on it, or one paid above its total, shows a refund button; deleting an order with money received is refused; a part payment above what's owed is refused instead of being cut down silently; Undo sale can't reverse twice
+- Tax: orders saved before tax was switched on stay untaxed when ticked delivered or edited; repeat orders start fresh (no "bill sent", today's tax); bill summaries no longer invent a discount when the menu price rises later
+- Counter: a double tap on Open table can't create two tabs
+- WhatsApp reading: times ("7.30 pm") and weights ("1.5 kg") aren't read as dates; quantities pair with items in the order written; "do" means two only before an item; "sun dried tomato" stays an item; "here" is ignored
+- Costing: undoing a purchase or GRN removes its money from the average and its price from "last price"; opening stock is valued at the material's own price; stock below zero no longer skews the average
+- Stock: counts, wastage and lot discards apply to the location being viewed; a move can be reversed only once and not when it belongs to a document; a batch or GRN or transfer can't be undone twice; undoing a batch puts back pieces discarded from it; pieces past shelf life come off where they are; materials on open POs or work orders can't be deleted; best-before day still counts as usable; small quantities in work orders are entered in g / ml
+- Purchasing: a PO can't list a material twice (older ones are counted per material); drafts count as on order, so the reorder banner and indent don't draft twice, and the indent no longer subtracts what's on order twice; supplier names match regardless of spaces and case; a supplier payment reverses only once; a GRN against a PO recalculates its amount when the quantity changes and is refused once the PO is closed or cancelled; a transfer can't be received above what was sent, or after it was undone; document numbers stay in sequence for prefixes ending in a digit
+- Tally: customers or suppliers named like an account ledger (e.g. "Cash") get a suffix; party groups no longer depend on names containing "GST" or "Tax"; receipts of deleted orders stay with their customer
+- Security: names with HTML in them can't run as code (location chips); switching into an admin or management login needs that person's PIN; a device that already holds a team's data can't "Start fresh" over the business settings
+- Sync: a new or changed folder receives the device's whole history; restored backups are published to other devices; a lock check waits for the sync already running; editing locks renew rarely and keep their start time; open editors (PO, work orders, supplier payment) no longer lose typing when data syncs
+- Imports: duplicate rows in stock or finished-goods counts are rejected; a blank unit on a new material means kg / L; a blank Keep ready no longer resets items to 0
+- Offline: a new version always caches fresh files; the maskable icon is cached
+
 ## 2.11.0 — 18 Oct 2026
 - Requirement calculator (Planning): any mix of menu items and semi-finished, typed in or pulled from an order, worked out through every BOM level into semi-finished to make and raw and packing materials. Net of stock and open POs (what to buy) or full quantity; whole runs or exact quantities; a by-product breakdown when combining products; print, share, copy or draft purchase orders. Nothing is recorded
 - Batch card: one compact table per step (semi-finished made in the batch marked "from step n", stock shown on screen); the repeated "all materials" list is gone (a short list of materials used in more than one step remains on screen); the printed card is tightly spaced on a white page and the PDF is named after the card

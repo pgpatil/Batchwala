@@ -17,7 +17,13 @@ export const rerenderSheet = () => hooks.rerenderSheet();
 export function guard(perm) { if (can(perm)) return true; toast("Your role can’t do this. Ask an admin."); return false; }
 export const clean = o => { const { _at, _by, ...r } = o; return JSON.parse(JSON.stringify(r)); };
 // New orders belong to this device's location; tax rates are stamped on lines the first time they're saved.
-export async function saveOrder(o) { const c = M.config(); await ev.put("orders", clean(M.withTax({ businessId: c.businessId, outletId: M.here(), ...o }))); sync.soon(); return true; }
+// An order saved before tax existed keeps its untaxed lines untaxed, so ticking it delivered never adds today's tax to an old bill.
+// New lines remember the menu price of the day (list), so a later price change can't show as a discount on an old bill.
+export async function saveOrder(o) { const c = M.config(); const prev = ev.get("orders", o.id); let x = { businessId: c.businessId, outletId: M.here(), ...o };
+  if (prev && prev.taxIncl == null && (prev.items || []).every(i => i.taxPct == null)) x = { ...x, taxIncl: false, items: x.items.map(i => i.taxPct != null ? i : { ...i, taxPct: 0 }) };
+  const had = new Set((prev ? prev.items || [] : []).map(i => i.item));
+  x.items = (x.items || []).map(i => { if (i.list != null || had.has(i.item)) return i; const m = (i.menuId && M.menu().find(y => y.id === i.menuId)) || M.menuByName(i.item); return m && m.price > i.rate ? { ...i, list: m.price } : i; });
+  await ev.put("orders", clean(M.withTax(x))); sync.soon(); return true; }
 export async function addPayment(o, amount, mode, note = "", reverses = "") {
   await ev.put("payments", { id: uid("p"), orderId: o.id, customerKey: M.ckey(o), amount: Math.round(amount * 100) / 100, mode: mode || "", date: today(), note, ...(reverses ? { reverses } : {}), businessId: M.config().businessId });
   sync.soon();
@@ -31,7 +37,8 @@ export async function reversePayments(o) { for (const p of M.paymentsFor(o.id)) 
 
 export function logoHtml(c = M.config()) { return `<div class="logo">${c.logo ? `<img src="${esc(c.logo)}" alt="${esc(c.business)} logo">` : `<span class="mark">${esc((c.business || "B")[0])}</span>`}</div>`; }
 export const toran = () => M.config().festive ? `<div class="toran" aria-hidden="true"></div>` : `<div class="bandedge" aria-hidden="true"></div>`;
-export const chipBar = (key, chips) => `<div class="chips">${chips.map(c => `<button class="chip" data-filter="${key}:${c[0]}" aria-pressed="${S.filter[key] === c[0]}">${c[1]}${c[2] != null ? `<span class="n">${c[2]}</span>` : ""}</button>`).join("")}</div>`;
+// Labels are text (names of locations, categories…), so they are escaped here once for every screen.
+export const chipBar = (key, chips) => `<div class="chips">${chips.map(c => `<button class="chip" data-filter="${esc(key)}:${esc(c[0])}" aria-pressed="${S.filter[key] === c[0]}">${esc(c[1])}${c[2] != null ? `<span class="n">${c[2]}</span>` : ""}</button>`).join("")}</div>`;
 export const searchBox = (key, ph) => `<input class="search" data-search="${key}" type="search" placeholder="${ph}" value="${esc(S.query[key] || "")}" aria-label="${ph}">`;
 export const matchQ = (key, o) => { const q = (S.query[key] || "").toLowerCase().trim(); return !q || ((o.customer || "") + " " + (o.flat || "") + " " + (o.phone || "") + " " + (o.no || "")).toLowerCase().includes(q); };
 export const band = (title, right = "", extra = "") => `<div class="band"><div class="page-title"><h1 class="h">${title}</h1>${right}</div>${extra}${toran()}</div>`;

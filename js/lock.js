@@ -56,6 +56,8 @@ export async function saveOk(st) {
 }
 // Locks follow the editor: released when it closes or another sheet replaces it, renewed while it stays open.
 ui.release = key => { release(key); };
-setInterval(() => { const st = ui.sheet; if (st && st.lock && document.visibilityState === "visible") { const l = ev.get("locks", st.lock); if (l && mine(l)) take_(st.lockKind, st.lockId); } }, BEAT_MS);
+// Renewed only when close to lapsing (about every 6 minutes while open), keeping when it was taken; queued with the next sync rather than forcing one.
+setInterval(async () => { const st = ui.sheet; if (!st || !st.lock || document.visibilityState !== "visible") return; const l = ev.get("locks", st.lock);
+  if (l && mine(l) && l.until < later(3)) { await ev.put("locks", { ...l, until: later(HOLD_MIN) }); if (sync.current()) sync.soon(); } }, BEAT_MS);
 // A line for detail screens while someone else has the record open in an editor.
 export const banner = (kind, rid) => { const l = lockOf(kind, rid); return l ? `<div class="banner warn">🔒 ${esc(nameOf(l.by))} is editing this (since ${esc(when(l.at))}). Changes open again once they save.</div>` : ""; };

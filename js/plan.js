@@ -154,8 +154,8 @@ H.click.push(async T => {
   if (T.closest("[data-planbake]")) { bakeSheet(d, { lines: planLines(d) }); return true; }
   if (T.closest("[data-planwo]")) { H.woNew({ date: d, lines: planLines(d), prep: M.explode(planLines(d), stockLoc()).make }); return true; }
   if (T.closest("[data-planprep]")) { bakeSheet(d, { prep: M.explode(planLines(d), stockLoc()).make }); return true; }
-  if (T.closest("[data-planreset]")) { await ev.del("plans", M.planId(d, planLoc())); sync.soon(); toast("Plan back to the suggestion"); return true; }
-  if (T.closest("[data-indentpo]")) { const ex = M.explode(planLines(d), stockLoc()); const made = await H.draftPOs(indentRows(ex, false).filter(r => r.ind > 0).map(r => ({ ingId: r.i.id, qty: r.ind })), `For ${dLong(d)}`);
+  if (T.closest("[data-planreset]")) { if (!canPlan()) return true; await ev.del("plans", M.planId(d, planLoc())); sync.soon(); toast("Plan back to the suggestion"); return true; }
+  if (T.closest("[data-indentpo]")) { const ex = M.explode(planLines(d), stockLoc()); const made = await H.draftPOs(indentRows(ex, false).filter(r => r.ind > 0).map(r => ({ ingId: r.i.id, qty: r.need - r.have })), `For ${dLong(d)}`);   // draftPOs takes off what's already on order
     if (!made.length) { toast("Everything short is already on order"); return true; } S.filter.po = "draft"; S.view = "po"; H.render(); window.scrollTo({ top: 0 }); toast(`${made.length} draft PO${made.length > 1 ? "s" : ""} made · approve to send`); return true; }
   if (T.closest("[data-indentcopy]")) { toast(await copyText(S.indentText || "") ? "Indent copied" : "Couldn’t copy here"); return true; }
   if (T.closest("[data-indentprint]")) { printHtml(S.filter.indent === "full" ? "Store issue" : "Purchase indent", document.querySelector("#main .plan").innerHTML); return true; }
@@ -179,10 +179,10 @@ H.click.push(async T => {
 H.change.push(async T => {
   if (S.view !== "plan") return false; const d = S.planDate || today();
   if (T.matches("[data-plandatein]")) { if (T.value) { S.planDate = T.value; H.render(); } return true; }
-  if (T.matches("[data-planq]")) { const lines = planLines(d); const n = T.dataset.planq; const q = Math.max(0, Math.round(num(T.value))); const l = lines.find(x => x.item === n);
+  if (T.matches("[data-planq]")) { if (!canPlan()) return true; const lines = planLines(d); const n = T.dataset.planq; const q = Math.max(0, Math.round(num(T.value))); const l = lines.find(x => x.item === n);
     if (l) l.qty = q; else lines.push({ item: n, qty: q }); const cur = M.planOf(d, planLoc()); if (cur) cur.lines.filter(x => !x.qty && x.item !== n).forEach(x => lines.push(x));
     await savePlan(d, q ? lines : [...lines, { item: n, qty: 0 }]); return true; }
-  if (T.matches("[data-planadd]")) { if (!T.value) return true; const lines = planLines(d); lines.push({ item: T.value, qty: 1 }); await savePlan(d, lines); toast(`${T.value} added to the plan`); return true; }
+  if (T.matches("[data-planadd]")) { if (!canPlan()) return true; if (!T.value) return true; const lines = planLines(d); lines.push({ item: T.value, qty: 1 }); await savePlan(d, lines); toast(`${T.value} added to the plan`); return true; }
   if (T.matches("[data-cardref]")) { S.card = { ref: T.value, qty: 0, scratch: true }; H.render(); return true; }
   return false;
 });

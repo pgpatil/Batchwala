@@ -128,7 +128,9 @@ function syncGrn() {
   const st = ui.sheet; if (!st || st.kind !== "grn") return; const x = st.x; const g = id => document.getElementById(id);
   x.supplier = g("grSup").value; x.invoiceNo = g("grInv").value; x.date = g("grDate").value || today(); if (g("grLoc")) x.loc = g("grLoc").value; x.notes = g("grNote").value;
   x.lines.forEach((l, ix) => { const q = document.querySelector(`[data-grqty="${ix}"]`), a = document.querySelector(`[data-gramt="${ix}"]`), t = document.querySelector(`[data-grtax="${ix}"]`);
-    if (q) l.qty = num(q.value) * l.f; if (a) l.amount = num(a.value); if (t) l.taxPct = num(t.value);
+    const before = l.qty; if (q) l.qty = num(q.value) * l.f; if (t) l.taxPct = num(t.value);
+    // Against a PO, the amount follows the quantity at the PO rate until it is typed by hand.
+    if (a) { if (document.activeElement === a || num(a.value) !== r2(before * (l.poRate || 0)) || !l.poRate) l.amount = num(a.value); else { l.amount = r2(l.qty * l.poRate); if (l.qty !== before) a.value = l.amount || ""; } }
     const e = document.querySelector(`[data-grexp="${ix}"]`), lt = document.querySelector(`[data-grlot="${ix}"]`); if (e) l.exp = e.value; if (lt) l.lot = lt.value.trim(); });
 }
 A.saveGrn = async el => {
@@ -136,6 +138,7 @@ A.saveGrn = async el => {
   if (!sup) { toast("Add the supplier"); return; }
   const known = byNameOrAka(M.suppliers(), sup); if (known) sup = known.name;
   else { const r = await confirmNew("supplier", sup, M.suppliers()); if (!r) return; if (r !== "new") { sup = r.name; x.supplier = sup; } } const lines = x.lines.filter(l => l.qty > 0); if (!lines.length) { toast("Enter what was received"); return; }
+  if (x.poId) { const po = ev.get("porders", x.poId); if (!po || !["approved", "part"].includes(M.poState(po))) { toast(`${po ? po.no : "That PO"} is no longer open for receiving (${po ? M.PO_LABEL[M.poState(po)] : "removed"})`); return; } }
   const tax = r2(Object.values(grnTax(lines)).reduce((s, v) => s + v, 0)); const amount = r2(lines.reduce((s, l) => s + (+l.amount || 0), 0));
   const no = M.nextDocNo("grns", prefix(), "GRN");
   if (!await yesNo(`<p class="cq">Save ${esc(no)}?</p><div class="cdetail">${esc(sup)}${x.invoiceNo ? " · inv " + esc(x.invoiceNo) : ""}<br>${lines.map(l => esc(ings[l.ingId].name) + " " + qty(l.qty, ings[l.ingId].unit)).join("<br>")}<br><br>Total ${rs2(amount + tax)} · adds stock at ${esc(M.locName(x.loc))}</div>`, "Save GRN", "btn-ok")) return;
@@ -228,9 +231,9 @@ function drawRecv(st) {
   ${short.length ? `<p class="hint" style="color:var(--due)">Short: ${short.map(l => esc(lineName(l, ings)) + " " + esc(lineQty(l, l.qty - l.recv, ings))).join(", ")}. It stays recorded on the transfer.</p>` : ""}
   <button class="btn btn-ok" data-act="saveReceive">${ICON.check}${short.length ? "Receive with shortage" : "Received in full"}</button>`);
 }
-const syncRecv = () => { const st = ui.sheet; if (!st || st.kind !== "xferRecv") return; st.note = ($("#rvNote") || {}).value || ""; st.lines.forEach((l, ix) => { const q = document.querySelector(`[data-rvq="${ix}"]`); if (q) l.recv = Math.max(0, num(q.value)); }); };
+const syncRecv = () => { const st = ui.sheet; if (!st || st.kind !== "xferRecv") return; st.note = ($("#rvNote") || {}).value || ""; st.lines.forEach((l, ix) => { const q = document.querySelector(`[data-rvq="${ix}"]`); if (q) l.recv = Math.min(+l.qty, Math.max(0, num(q.value))); }); };
 A.saveReceive = async el => {
-  syncRecv(); const st = ui.sheet; if (!await L.saveOk(st)) return; const x = M.transfers().find(t => t.id === st.id); if (!x || M.xferReceived(x)) { closeSheet(); toast("Already received"); return; }
+  syncRecv(); const st = ui.sheet; if (!await L.saveOk(st)) return; const x = M.transfers().find(t => t.id === st.id); if (!x || M.xferReceived(x) || x.void) { closeSheet(); toast(x && x.void ? "This transfer was undone" : "Already received"); return; }
   el.disabled = true;
   for (const l of st.lines.filter(l => l.ingId && l.recv > 0)) await putMove({ ingId: l.ingId, type: "transfer", qty: l.recv, note: `${x.no} from ${M.locName(x.from)}`, ref: x.id, outletId: x.to });
   await ev.put("transfers", clean({ ...ev.get("transfers", x.id), status: "received", lines: st.lines, receivedAt: new Date().toISOString(), receivedBy: (R.me() || {}).id || "", recvNote: st.note.trim() }));
@@ -282,8 +285,12 @@ A.saveFgAdj = async () => { const st = ui.sheet; const n = num($("#faQty").value
 
 /* ---------- interactions ---------- */
 async function voidDoc(kind, id, what) {
+  if (!guard(kind === "transfers" ? "transfer" : "stock.buy")) return false;
   if (!await yesNo(`<p class="cq">Undo this ${what}?</p><div class="cdetail">Its stock moves are reversed. It stays in the list, marked undone.</div>`, "Undo", "btn-danger-solid")) return false;
-  for (const m of ev.all("moves").filter(m => m.ref === id)) await putMove({ ingId: m.ingId, type: "adjust", qty: -m.qty, note: `${what} undone`, ref: id + ":undo", outletId: m.outletId });
+  // Re-read after the question: another device may have undone it meanwhile, and its reversal may already be here.
+  const cur = ev.get(kind, id); if (!cur || cur.void || ev.all("moves").some(m => m.ref === id + ":undo")) { toast(`This ${what} was already undone`); return true; }
+  // A GRN undo takes the money back out too, so the average cost and last price drop the cancelled purchase.
+  for (const m of ev.all("moves").filter(m => m.ref === id)) await putMove({ ingId: m.ingId, type: m.type === "purchase" ? "purchase" : "adjust", qty: -m.qty, ...(m.type === "purchase" && m.amount ? { amount: -m.amount } : {}), note: `${what} undone`, ref: id + ":undo", outletId: m.outletId });
   await ev.put(kind, clean({ ...ev.get(kind, id), void: true, voidAt: new Date().toISOString() })); sync.soon(); toast(`${what[0].toUpperCase() + what.slice(1)} undone`); return true;
 }
 H.click.push(async T => {
@@ -310,7 +317,7 @@ H.click.push(async T => {
     if (T.closest("[data-xmadd]")) { syncXfer(); const m = M.ingredients().find(i => i.type === "pm") || M.ingredients()[0]; st.x.mats.push({ ingId: m.id, qty: 0 }); drawXfer(st); return true; }
     const xr = T.closest("[data-xmrm]"); if (xr) { syncXfer(); st.x.mats.splice(+xr.dataset.xmrm, 1); drawXfer(st); return true; }
   }
-  if (st.kind === "xferRecv") { const rv = T.closest("[data-rvstep]"); if (rv) { syncRecv(); const [ix, d] = rv.dataset.rvstep.split(":").map(Number); const l = st.lines[ix]; l.recv = Math.max(0, l.recv + d); drawRecv(st); return true; } }
+  if (st.kind === "xferRecv") { const rv = T.closest("[data-rvstep]"); if (rv) { syncRecv(); const [ix, d] = rv.dataset.rvstep.split(":").map(Number); const l = st.lines[ix]; l.recv = Math.min(+l.qty, Math.max(0, l.recv + d)); drawRecv(st); return true; } }
   if (st.kind === "fgAdj") { const ft = T.closest("[data-fat]"); if (ft) { st.type = ft.dataset.fat; drawFgAdj(st); return true; } }
   return false;
 });

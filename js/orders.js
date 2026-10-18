@@ -3,7 +3,7 @@ import * as ev from "./events.js";
 import * as M from "./model.js";
 import * as R from "./roles.js";
 import { asLines, layoutSwitch } from "./table.js";
-import { S, A, V, H, render, guard, saveOrder, payOrders, reversePayments, logoHtml, toran, chipBar, searchBox, matchQ, band, payTag, chanTag, noLabel } from "./core.js";
+import { S, A, V, H, render, guard, saveOrder, payOrders, reversePayments, addPayment, logoHtml, toran, chipBar, searchBox, matchQ, band, payTag, chanTag, noLabel } from "./core.js";
 import { $, esc, rs, rs2, num, uid, today, addDays, dObj, dLabel, dLong, plate, cmpFlat, ICON, copyText, waHref } from "./util.js";
 import { ui, toast, openSheet, closeSheet, ask, yesNo } from "./ui.js";
 import * as L from "./lock.js";
@@ -28,7 +28,7 @@ export function reminderText(cu) {
 
 /* ---------- bill summary ---------- */
 // Lines are shown at the menu price; a lower charged rate counts as discount, together with any offer %.
-function billLines(o) { return o.items.map(i => { const m = (i.menuId && M.menu().find(x => x.id === i.menuId)) || M.menuByName(i.item); const list = m && m.price > i.rate ? m.price : i.rate; return { ...i, list }; }); }
+function billLines(o) { return o.items.map(i => ({ ...i, list: i.list != null && i.list > i.rate ? i.list : i.rate })); }
 // Tax lines for messages and bills: exclusive tax is added ("CGST 2.5%: ₹3"); inclusive is shown as included. Round-off when the total was rounded.
 export function taxBlock(o, sep = ": ") {
   const tl = M.taxLines(o); if (!tl.length) return [];
@@ -162,7 +162,9 @@ export function openOrder(id) {
   ${cancelled ? "" : `<div class="statusrow"><button class="sbox ${M.isDelivered(o) ? "on" : "off"}" data-act="toggleDeliver" ${R.can("deliver") ? "" : "disabled"}><small>Delivery</small><b>${M.isDelivered(o) ? "Delivered ✓" : "Not delivered"}</b><em>${R.can("deliver") ? "Tap to " + (M.isDelivered(o) ? "undo" : "mark delivered") : ""}</em></button>
   ${money ? `<button class="sbox ${s === "paid" ? "on" : "off"}" data-act="${s === "paid" ? "unpay" : "payOrder"}" ${R.can("pay.record") || R.can("collect") ? "" : "disabled"}><small>Payment</small><b>${s === "paid" ? "Paid ✓" : s === "part" ? rs(M.bal(o)) + " due" : "Unpaid"}</b><em>${s === "paid" ? (M.lastPayMode(o) ? M.lastPayMode(o) + " · " : "") + "tap to undo" : "Tap to record payment"}</em></button>` : ""}</div>`}
   ${money && !cancelled ? `<button class="btn btn-primary" data-act="billSummary">Bill summary${o.billSentAt ? " · " + (billChanged(o) ? "order changed since sent" : "sent " + esc(billWhen(o))) : ""}</button>` : ""}
-  ${R.can("phone") ? `<div class="btnrow"><a class="btn btn-wa" data-wa href="${esc(waHref(o.phone, orderText(o)))}" target="_blank" rel="noopener">${ICON.wa}Send order</a><button class="btn btn-ghost" data-act="copyOrder">Copy message</button></div>` : ""}
+  ${money && cancelled && M.received(o) > 0.005 ? `<div class="banner warn">${rs(M.received(o))} was paid on this cancelled order. ${R.can("pay.reverse") ? `<button class="linkbtn" data-act="refundOrder">Refund / reverse it</button>` : "Ask an admin to refund it."}</div>` : ""}
+  ${money && !cancelled && M.received(o) - M.total(o) > 0.5 ? `<div class="banner warn">${rs(M.received(o) - M.total(o))} paid above the total. ${R.can("pay.reverse") ? `<button class="linkbtn" data-act="refundExtra">Refund the extra</button>` : ""}</div>` : ""}
+  ${R.can("phone") && !cancelled ? `<div class="btnrow"><a class="btn btn-wa" data-wa href="${esc(waHref(o.phone, orderText(o)))}" target="_blank" rel="noopener">${ICON.wa}Send order</a><button class="btn btn-ghost" data-act="copyOrder">Copy message</button></div>` : ""}
   ${edit ? `<div class="btnrow"><button class="btn btn-ghost" data-act="editOrder" ${cancelled ? "disabled" : ""}>Edit</button><button class="btn btn-ghost" data-act="repeatOrder">Repeat order</button></div>` : ""}
   ${R.can("history") ? `<button class="btn btn-ghost" data-act="orderHistory">History of changes</button>` : ""}
   ${R.can("orders.cancel") && !cancelled ? `<button class="btn btn-danger" data-act="cancelOrder">Cancel order</button>` : ""}
@@ -178,10 +180,15 @@ A.copyOrder = async () => { const o = sheetOrder(); toast(await copyText(orderTe
 A.editOrder = () => guard("orders.edit") && compose(sheetOrder());
 A.repeatOrder = () => guard("orders.edit") && compose(sheetOrder(), { repeat: true });
 A.cancelOrder = async () => { const o = sheetOrder(); if (!guard("orders.cancel")) return;
-  const v = await ask(`${plate(o.flat)}<p class="cq">Cancel this order?</p><div class="cname">${esc(o.customer)} · ${esc(dLong(o.date))}</div><input class="in" id="cxReason" placeholder="Reason (optional)" style="margin-top:12px">${M.received(o) > 0 ? `<div class="cdetail">${rs(M.received(o))} was paid. Reverse or refund it separately from the payment box.</div>` : ""}`, [{ label: "Keep order", cls: "btn-ghost", value: false }, { label: "Cancel order", cls: "btn-danger-solid", value: true }], true);
-  if (v) { await saveOrder({ ...o, status: "cancelled", cancelReason: ($("#cxReason") || {}).value || "" }); openOrder(o.id); toast("Order cancelled"); } };
+  const v = await ask(`${plate(o.flat)}<p class="cq">Cancel this order?</p><div class="cname">${esc(o.customer)} · ${esc(dLong(o.date))}</div><input class="in" id="cxReason" placeholder="Reason (optional)" style="margin-top:12px">${M.received(o) > 0 ? (R.can("pay.reverse") ? `<label class="chkline"><input type="checkbox" id="cxRefund" checked> Refund the ${rs(M.received(o))} paid</label>` : `<div class="cdetail">${rs(M.received(o))} was paid; ask an admin to refund it.</div>`) : ""}`, [{ label: "Keep order", cls: "btn-ghost", value: false }, { label: "Cancel order", cls: "btn-danger-solid", value: true }], true);
+  if (v) { const refund = ($("#cxRefund") || {}).checked; await saveOrder({ ...o, status: "cancelled", cancelReason: ($("#cxReason") || {}).value || "" }); if (refund && R.can("pay.reverse")) await reversePayments(o); openOrder(o.id); toast(refund ? "Order cancelled and payment refunded" : "Order cancelled"); } };
 A.restoreOrder = async () => { const o = sheetOrder(); if (guard("orders.cancel")) { await saveOrder({ ...o, status: "received", cancelReason: "" }); openOrder(o.id); toast("Order restored"); } };
+A.refundOrder = async () => { const o = sheetOrder(); if (!o || !guard("pay.reverse")) return;
+  if (await yesNo(`<p class="cq">Refund ${rs(M.received(o))}?</p><div class="cdetail">Reversal entries are added for the payments on this order (same mode). Hand the money back to ${esc(o.customer || "the customer")}.</div>`, "Refund", "btn-danger-solid")) { await reversePayments(o); openOrder(o.id); toast("Refund recorded"); } };
+A.refundExtra = async () => { const o = sheetOrder(); if (!o || !guard("pay.reverse")) return; const extra = Math.round((M.received(o) - M.total(o)) * 100) / 100;
+  if (extra > 0 && await yesNo(`<p class="cq">Refund ${rs(extra)}?</p><div class="cdetail">The order total is ${rs(M.total(o))}; ${rs(M.received(o))} was received.</div>`, "Refund", "btn-danger-solid")) { await addPayment(o, -extra, M.lastPayMode(o), "Refund of extra"); openOrder(o.id); toast("Refund recorded"); } };
 A.deleteOrder = async () => { const o = sheetOrder(); if (!R.isAdmin()) return;
+  if (M.received(o) > 0.005) { toast(`${rs(M.received(o))} was received on this order. Refund it first, or cancel the order instead.`); return; }
   if (await yesNo(`<p class="cq">Delete permanently?</p><div class="cname">${esc(o.customer)} · ${esc(dLong(o.date))}</div><div class="cdetail">Use Cancel for normal cases. Deleting removes it from every list and report; only its history remains.</div>`, "Delete", "btn-danger-solid", "Keep")) { await ev.del("orders", o.id); closeSheet(); toast("Order deleted"); } };
 A.orderHistory = () => { const o = sheetOrder(); historySheet("orders", o.id, `${o.customer} · ${noLabel(o)}`, () => openOrder(o.id)); };
 
@@ -229,7 +236,9 @@ export async function compose(o, opts = {}) {
   let lk = {}; if (o && !opts.repeat && o.id) { lk = await L.open("orders", o.id, `order #${o.no}`); if (!lk) return; }
   const c = M.config(); const me = R.me();
   const base = o ? JSON.parse(JSON.stringify(o)) : { id: uid("o"), no: "", customer: opts.customer || "", flat: opts.flat || "", phone: opts.phone || "", channel: opts.channel || "whatsapp", date: opts.date || (S.view === "today" ? S.date : today()), items: opts.items || [], discountPct: 0, status: "received", notes: opts.notes || "", tag: c.activeTag || "", createdAt: new Date().toISOString() };
-  if (o && opts.repeat) Object.assign(base, { id: uid("o"), no: "", date: today(), status: "received", deliveredAt: "", cancelReason: "", createdAt: new Date().toISOString(), tag: c.activeTag || "" });
+  if (o && opts.repeat) { Object.assign(base, { id: uid("o"), no: "", date: today(), status: "received", deliveredAt: "", cancelReason: "", createdAt: new Date().toISOString(), tag: c.activeTag || "" });
+    // A repeat is a new order: no bill sent yet, today's tax rates and prices-include-tax setting, this device's location.
+    ["billSentAt", "billTotal", "taxIncl", "outletId"].forEach(k => delete base[k]); base.items = base.items.map(({ taxPct, list, ...i }) => i); }
   const st = { ...lk, kind: "compose", o: base, isNew: !o || !!opts.repeat, dirty: !!opts.repeat || !!(opts.items && opts.items.length), cat: "", sugg: false, prefix: (me && me.prefix) || "" };
   st.redraw = () => drawCompose(st); drawCompose(st);
 }

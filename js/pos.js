@@ -76,8 +76,10 @@ A.posCharge = async el => { if (!guard("sale")) return; const p = P(); if (!p.it
   toast(`${rs(M.total(o))} by ${p.mode} · order ${o.no}`, `<button data-undosale="${esc(o.id)}">Undo</button>`); };
 A.posAggregator = async el => { if (!guard("sale")) return; el.disabled = true; const o = await savePos("delivered"); reset();
   toast(`${M.CHANNELS[o.channel]} order ${o.no} saved`, `<button data-undosale="${esc(o.id)}">Undo</button>`); };
-A.posSaveTab = async () => { if (!guard("sale")) return; const p = P(); if (!p.table) { toast("Pick a table"); return; }
-  const o = await savePos("received"); toast(`Table ${p.table} · ${rs(M.total(o))} on the bill`); reset(); };
+// One save at a time: a double tap would otherwise open two tabs on one table with the same number.
+let saving = false;
+A.posSaveTab = async el => { if (!guard("sale") || saving) return; const p = P(); if (!p.table) { toast("Pick a table"); return; }
+  saving = true; if (el) el.disabled = true; let o; try { o = await savePos("received"); } finally { saving = false; } toast(`Table ${p.table} · ${rs(M.total(o))} on the bill`); reset(); };
 A.posSettle = async () => { if (!guard("sale")) return; const p = P(); if (!p.table) { toast("Pick a table"); return; }
   const mode = await ask(`<p class="cq">Settle table ${esc(p.table)}</p><div class="cbig">${rs(total(p))}</div><div class="cdetail">${pcs(p)} pcs${p.disc ? ` · ${p.disc}% off` : ""}</div>`,
     [...MODES.map(m => ({ label: `Paid by ${m}`, cls: "btn-ok", value: m })), { label: "Cancel", cls: "btn-danger", value: null }]);

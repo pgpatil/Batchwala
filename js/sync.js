@@ -13,6 +13,9 @@ export const current = () => adapter;
 export async function use(a) {
   stop(); adapter = a;
   if (!a) { set("off"); return; }
+  // Bookmarks belong to one folder: a different folder starts from scratch, so it receives this device's whole history.
+  const where = `${a.id}:${a.folderName || a.base || ""}`;
+  if ((await ev.getMeta("sync.where")) !== where) { if (await ev.getMeta("sync.where")) { await ev.setMeta("sync.pushedSeq", 0); await ev.setMeta("sync.fileIds", {}); await ev.setMeta("sync.seen", {}); } await ev.setMeta("sync.where", where); }
   status.last = await ev.getMeta("sync.last") || null;
   status.account = a.account || "";
   set("idle"); start();
@@ -21,7 +24,10 @@ export async function use(a) {
 const monthOf = e => e.at.slice(0, 7);
 const fileName = (dev, month) => `events_${dev}_${month}.jsonl`;
 
-export async function syncNow() {
+// While a sync runs, callers wait for that same round instead of returning before it lands.
+let running = null;
+export function syncNow() { if (!adapter) return Promise.resolve(); if (running) return running; running = round().finally(() => { running = null; }); return running; }
+async function round() {
   if (!adapter || busy) return;
   if (typeof navigator !== "undefined" && navigator.onLine === false) { set("offline"); return; }
   busy = true; set("syncing");
@@ -40,12 +46,17 @@ export async function syncNow() {
       for (const m of months) {
         const name = fileName(dev, m);
         const text = mine.filter(e => monthOf(e) === m).map(e => JSON.stringify(e)).join("\n") + "\n";
-        const existing = ids[name] || (files.find(f => f.name === name) || {}).id;
+        // The folder's own listing wins over a remembered id (the file may have been moved, trashed or belong to an old folder).
+        const listed = (files.find(f => f.name === name) || {}).id; const existing = listed || (files.some(f => f.id === ids[name]) ? ids[name] : undefined);
         ids[name] = await adapter.writeFile(name, text, existing);
       }
       await ev.setMeta("sync.fileIds", ids);
       await ev.setMeta("sync.pushedSeq", newer.at(-1).seq);
     }
+    // After a restore: other devices' events from the backup go up as one file of this device's, once.
+    if (await ev.getMeta("sync.publishForeign")) { const all = await ev.allEvents(); const foreign = all.filter(e => e.dev !== dev);
+      if (foreign.length) await adapter.writeFile(`events_${dev}_restored.jsonl`, foreign.map(e => JSON.stringify(e)).join("\n") + "\n", (files.find(f => f.name === `events_${dev}_restored.jsonl`) || {}).id);
+      await ev.setMeta("sync.publishForeign", false); }
     // pull: read other devices' files that changed since last seen
     const seen = await ev.getMeta("sync.seen") || {};
     let changed = 0;

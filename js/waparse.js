@@ -1,10 +1,10 @@
 // Reads a WhatsApp order message into a draft order. Pure function: no storage, easy to test.
 const WORDNUM = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, twelve: 12, dozen: 12,
-  ek: 1, do: 2, teen: 3, char: 4, chaar: 4, paanch: 5, panch: 5, chhe: 6, che: 6, saat: 7, aath: 8, nau: 9, das: 10 };
+  ek: 1, teen: 3, char: 4, chaar: 4, paanch: 5, panch: 5, chhe: 6, che: 6, saat: 7, aath: 8, nau: 9, das: 10 };
 const STOP = new Set(("hi hello hey hii helo please pls plz kindly thanks thank thankyou thx ty order orders want wanted need needed send sending deliver delivery " +
   "for me i we would like the a an of to can could you your my our ma am mam maam madam sir didi bhabhi bhaiya bhai aunty ji ok okay good morning evening night " +
   "and also with is are will be by at on in it this that same as usual piece pieces pc pcs nos no qty quantity flat wing tower building block " +
-  "aaj kal today tomorrow tmrw tmr parso day after book booking put add mujhe hume chahiye dena dijiye bhej bhejna bhejiye na hai hain ho").split(" "));
+  "here there aaj kal today tomorrow tmrw tmr parso day after book booking put add mujhe hume chahiye dena dijiye bhej bhejna bhejiye na hai hain ho").split(" "));
 const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
 const DAYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
 const iso = d => d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
@@ -32,10 +32,14 @@ export function parseOrderMessage(text, { menu = [], customers = [], todayISO })
   body = body.replace(/\b(day after tomorrow|parso)\b/i, m => { setDate(plus(2), m); return " "; });
   body = body.replace(/\b(tomorrow|tmrw|tmr|kal)\b/i, m => { setDate(plus(1), m); return " "; });
   body = body.replace(/\b(today|aaj|tonight)\b/i, m => { setDate(plus(0), m); return " "; });
-  body = body.replace(/\b(\d{1,2})[\/.](\d{1,2})(?:[\/.](\d{2,4}))?\b/, (m, d, mo) => { const x = new Date(base.getFullYear(), +mo - 1, +d); if (x < plus(-1)) x.setFullYear(x.getFullYear() + 1); setDate(x, m); return " "; });
+  // dd/mm or dd.mm, but not a time ("7.30 pm") or a weight ("1.5 kg"), and only a real day of a real month.
+  body = body.replace(/\b(\d{1,2})[\/.](\d{1,2})(?:[\/.](\d{2,4}))?\b(?!\s*(?:am|pm|a\.m|p\.m|kg|kgs|g|gm|gms|ml|l|ltr|litre|hrs?|o'?clock)\b)/i, (m, d, mo) => {
+    if (+mo < 1 || +mo > 12 || +d < 1) return m; const x = new Date(base.getFullYear(), +mo - 1, +d); if (x.getMonth() !== +mo - 1) return m;
+    if (x < plus(-1)) x.setFullYear(x.getFullYear() + 1); setDate(x, m); return " "; });
   body = body.replace(/\b(\d{1,2})\s*(?:st|nd|rd|th)?\s*(?:of\s+)?(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b/i, (m, d, mo) => { const x = new Date(base.getFullYear(), MONTHS.indexOf(mo.toLowerCase().slice(0, 3)), +d); if (x < plus(-1)) x.setFullYear(x.getFullYear() + 1); setDate(x, m); return " "; });
   body = body.replace(/\b(\d{1,2})\s*(st|nd|rd|th)\b/i, (m, d) => { const x = new Date(base.getFullYear(), base.getMonth(), +d); if (x < plus(-1)) x.setMonth(x.getMonth() + 1); setDate(x, m); return " "; });
-  body = body.replace(/\b(?:on\s+|this\s+|next\s+)?(sun|mon|tue|tues|wed|thu|thur|thurs|fri|sat)(?:day|nesday|rsday|urday)?\b/i, (m, d) => { const t = DAYS.indexOf(d.toLowerCase().slice(0, 3)); let n = (t - base.getDay() + 7) % 7; if (n === 0) n = 7; setDate(plus(n), m); return " "; });
+  // A weekday needs "on / this / next" before a short form, or the full name, so "sun dried tomato" stays an item.
+  body = body.replace(/\b(?:(?:on|this|next)\s+(sun|mon|tue|tues|wed|thu|thur|thurs|fri|sat)(?:day|nesday|rsday|urday)?|(sun|mon|tues|wednes|thurs|fri|satur)day)\b/i, (m, d1, d2) => { const d = d1 || d2; const t = DAYS.indexOf(d.toLowerCase().slice(0, 3)); let n = (t - base.getDay() + 7) % 7; if (n === 0) n = 7; setDate(plus(n), m); return " "; });
 
   // items
   const keys = [];
@@ -45,17 +49,19 @@ export function parseOrderMessage(text, { menu = [], customers = [], todayISO })
     words.forEach(w => { const s = w.split(" ").map(sing).join(" "); if (s !== w) keys.push({ m, key: " " + s + " " }); });
   });
   keys.sort((a, b) => b.key.length - a.key.length);
-  const segs = body.split(/\n|,|;|\+|\band\b|&|\./i).map(s => s.trim()).filter(Boolean);
+  const segs = body.split(/\n|,|;|\+|\band\b|&|\.(?!\d)/i).map(s => s.trim()).filter(Boolean);
   const found = new Map();
   segs.forEach(seg => {
     let s = norm(seg).replace(/\bhalf dozen\b/g, "6");
-    s = " " + s.trim().split(" ").map(w => w !== "dozen" && WORDNUM[w] != null ? String(WORDNUM[w]) : w).join(" ") + " ";
+    const tk = s.trim().split(" "); const startsItem = i => keys.some(k => (" " + tk.slice(i).map(sing).join(" ") + " ").startsWith(k.key));
+    s = " " + tk.map((w, i) => w === "do" ? (startsItem(i + 1) ? "2" : w) : w !== "dozen" && WORDNUM[w] != null ? String(WORDNUM[w]) : w).join(" ") + " ";
     s = s.replace(/\b(\d{1,2}) dozen\b/g, (m, n) => String(n * 12)).replace(/\bdozen\b/g, "12");
     const s2 = " " + s.trim().split(" ").map(sing).join(" ") + " ";
     let rest = s2; const hits = [];
-    for (const k of keys) { if (rest.includes(k.key)) { rest = rest.replace(k.key, " # "); if (!hits.some(h => h.m.id === k.m.id)) hits.push(k); } }
+    for (const k of keys) { const at = rest.indexOf(k.key); if (at >= 0) { rest = rest.slice(0, at) + " " + "#".repeat(k.key.length - 2) + " " + rest.slice(at + k.key.length); if (!hits.some(h => h.m.id === k.m.id)) hits.push({ ...k, at }); } }
+    hits.sort((a, b) => a.at - b.at);   // quantities pair with items in the order they appear
     if (hits.length) {
-      const nums = (s.match(/\b\d{1,3}\b/g) || []).map(Number);
+      const nums = (s.match(/\b\d{1,3}(?:\.\d+)?\b/g) || []).map(Number).filter(n => Number.isInteger(n));
       hits.forEach((h, i) => { const q = hits.length === 1 ? (nums[0] || 1) : (nums[i] || 1); const cur = found.get(h.m.id); found.set(h.m.id, { menuId: h.m.id, item: h.m.name, rate: +h.m.price || 0, qty: (cur ? cur.qty : 0) + q }); });
     } else {
       const words = s.trim().split(" ").filter(w => w && !STOP.has(w) && !/^\d+$/.test(w) && w.length > 1);

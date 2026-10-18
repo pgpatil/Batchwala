@@ -24,7 +24,7 @@ const taxFor = i => M.taxCfg().on ? (i.taxPct != null && i.taxPct !== "" ? +i.ta
 /* ---------- creating POs ---------- */
 // Draft POs from a list of { ingId, qty }: one per usual supplier, at that supplier's last rate. Returns the POs made.
 export async function draftPOs(rows, note = "") {
-  const ings = M.ingMap(); const by = new Map(); const wait = M.onOrder();
+  const ings = M.ingMap(); const by = new Map(); const wait = M.onOrder(true);
   rows.forEach(r => { const i = ings[r.ingId]; if (!i || i.type === "sf") return; const q = roundPack(i, Math.max(0, r.qty - (wait[i.id] || 0))); if (q <= 0) return;
     const sup = M.usualSupplier(i) || ""; (by.get(sup) || by.set(sup, []).get(sup)).push({ ingId: i.id, qty: q, rate: r2((M.lastRate(sup, i.id) || M.lastPrice(i)) * 1e4) / 1e4, taxPct: taxFor(i) }); });
   const made = [];
@@ -41,7 +41,7 @@ V.po = () => {
   const q = (S.query.po || "").toLowerCase().trim();
   const groups = { open: p => ["draft", "approved", "part"].includes(p.st), draft: p => p.st === "draft", done: p => ["received", "closed", "cancelled"].includes(p.st), all: () => true };
   const list = all.filter(groups[k]).filter(p => !q || (p.no + " " + p.supplier + " " + p.lines.map(l => (ings[l.ingId] || {}).name).join(" ")).toLowerCase().includes(q));
-  const open = all.filter(groups.open); const low = M.ingredients().filter(i => i.type !== "sf" && i.reorder && M.stockLevel(i).on <= i.reorder && !(M.onOrder()[i.id] > 0));
+  const open = all.filter(groups.open); const oo = M.onOrder(true); const low = M.ingredients().filter(i => i.type !== "sf" && i.reorder && M.stockLevel(i).on <= i.reorder && !(oo[i.id] > 0));
   let h = band("Purchase orders", R.can("stock.buy") ? `<button class="pillbtn" data-ponew>${ICON.plus}New PO</button>` : "",
     `<div class="stats"><div class="st"><b>${open.length}</b><span>open</span></div><div class="st"><b>${all.filter(groups.draft).length}</b><span>waiting for approval</span></div>${R.can("money") ? `<div class="st"><b>${rs(open.filter(p => p.st !== "draft").reduce((s, p) => s + M.poValue(p), 0))}</b><span>on order</span></div>` : ""}</div>`);
   if (low.length && R.can("stock.buy")) h += `<button class="banner warn expbanner" data-polow>${low.length} material${low.length > 1 ? "s" : ""} below reorder level and not on order · tap to draft POs</button>`;
@@ -58,7 +58,7 @@ async function poSheet(po) {
   if (!guard("stock.buy")) return;
   const lk = po ? await L.open("porders", po.id, po.no) : {}; if (!lk) return; const mats = M.ingredients().filter(i => i.type !== "sf"); if (!mats.length) { toast("Add raw or packing materials in Inventory first"); return; }
   const x = po ? JSON.parse(JSON.stringify(po)) : { id: uid("po"), no: M.nextDocNo("porders", prefix(), "PO"), date: today(), supplier: "", loc: M.here(), expected: addDays(today(), 1), lines: [], status: "draft", notes: "" };
-  x.lines = x.lines.map(l => { const i = M.ingMap()[l.ingId]; const p = M.packOf(i); return { ...l, f: p && l.qty % p.size === 0 ? p.size : big(i.unit) && l.qty % big(i.unit).f === 0 ? big(i.unit).f : 1 }; });
+  x.lines = x.lines.filter(l => M.ingMap()[l.ingId]).map(l => { const i = M.ingMap()[l.ingId]; const p = M.packOf(i); return { ...l, f: p && l.qty % p.size === 0 ? p.size : big(i.unit) && l.qty % big(i.unit).f === 0 ? big(i.unit).f : 1 }; });
   if (!x.lines.length) x.lines.push(newLine(mats[0], x.supplier));
   const st = { ...lk, kind: "poEdit", x, isNew: !po }; st.redraw = () => drawPo(st); drawPo(st);
 }
@@ -93,7 +93,10 @@ function syncPo() {
 async function savePo(approve) {
   syncPo(); const st = ui.sheet, x = st.x; let sup = x.supplier.trim(); if (!sup) { toast("Add the supplier"); return; }
   const known = byNameOrAka(M.suppliers(), sup); if (known) sup = known.name; else { const r = await confirmNew("supplier", sup, M.suppliers()); if (!r) return; if (r !== "new") sup = r.name; }
-  const lines = x.lines.filter(l => l.qty > 0).map(l => ({ ingId: l.ingId, qty: l.qty, rate: +l.rate || 0, taxPct: +l.taxPct || 0 })); if (!lines.length) { toast("Enter what to order"); return; }
+  // The same material twice becomes one line (quantities added, rate weighted), so receiving matches lines one to one.
+  const lines = []; x.lines.filter(l => l.qty > 0 && M.ingMap()[l.ingId]).forEach(l => { const d = lines.find(y => y.ingId === l.ingId);
+    if (d) { d.rate = (d.rate * d.qty + (+l.rate || 0) * l.qty) / (d.qty + l.qty); d.qty += l.qty; } else lines.push({ ingId: l.ingId, qty: l.qty, rate: +l.rate || 0, taxPct: +l.taxPct || 0 }); });
+  if (!lines.length) { toast("Enter what to order"); return; }
   if (lines.some(l => !l.rate) && !await yesNo(`<p class="cq">Some lines have no rate</p><div class="cdetail">Save anyway? The GRN will take the bill amount.</div>`, "Save")) return;
   if (!await L.saveOk(st)) return;
   if (!M.supplierByName(sup)) await ev.put("suppliers", { id: uid("s"), name: sup });
@@ -138,7 +141,7 @@ V.sup = () => {
     `<div class="stats"><div class="st"><b>${rs(due)}</b><span>owed to suppliers</span></div><div class="st"><b class="${over ? "due" : ""}">${rs(over)}</b><span>overdue</span></div><div class="st"><b>${rs(paid)}</b><span>paid this month</span></div></div>`);
   h += `<div class="tools">${searchBox("sup", "Search supplier")}${layoutSwitch("sup")}</div>`;
   if (!rows.length) return h + `<div class="empty"><strong>No suppliers yet</strong>Suppliers are added with their first PO or GRN, or here. Each one’s bills (GRNs), payments and balance show here.</div>`;
-  const openPo = n => M.porders().filter(p => p.supplier.toLowerCase() === n.toLowerCase() && ["approved", "part", "draft"].includes(M.poState(p))).length;
+  const openPo = n => M.porders().filter(p => M.nameKey(p.supplier) === M.nameKey(n) && ["approved", "part", "draft"].includes(M.poState(p))).length;
   return h + (asLines("sup") ? `<div class="card tablecard"><table class="reg"><thead><tr><th>Supplier</th><th class="r">Owed</th><th class="r">Overdue</th><th>Oldest due</th><th class="r">Credit days</th><th class="r">Open POs</th><th>Phone</th></tr></thead><tbody>${rows.map(s => `<tr data-sup="${esc(s.name)}" tabindex="0"><td><b>${esc(s.name)}</b></td><td class="r" data-v="${s.balance}">${rs2(s.balance)}</td><td class="r" data-v="${s.overdue}">${s.overdue ? `<span class="due">${rs2(s.overdue)}</span>` : "–"}</td><td data-v="${esc(s.oldest)}">${s.oldest ? esc(dLong(s.oldest)) : "–"}</td><td class="r">${s.days || 0}</td><td class="r">${openPo(s.name) || "–"}</td><td>${esc(s.sup.phone || "")}</td></tr>`).join("")}</tbody></table></div>`
     : `<ul class="list">${rows.map(s => `<li class="row${s.overdue ? " warn" : ""}"><button class="who" data-sup="${esc(s.name)}"><div class="nm">${esc(s.name)}</div><div class="subl">${s.overdue ? `<span class="tag t-due">${rs(s.overdue)} overdue</span> ` : ""}${s.oldest ? "oldest due " + esc(dLong(s.oldest)) : "nothing due"}${openPo(s.name) ? ` · ${openPo(s.name)} open PO` : ""}</div></button><div class="amt">${rs(s.balance)}</div></li>`).join("")}</ul>`);
 };
@@ -153,7 +156,7 @@ function supSheet(name) {
   ${R.can("stock.buy") ? `<button class="btn btn-ghost" data-supsave="${esc(s.name)}">Save details</button>` : ""}
   ${L.open.length ? `<label class="f" style="margin-top:12px">Unpaid bills</label><div class="kv">${L.open.map(b => `<div><span>${esc(b.doc)} · ${esc(dLong(b.date))}<small class="mut" style="display:block">due ${esc(dLong(b.due))}${b.due < today() ? ` <span class="tag t-due">overdue</span>` : ""}</small></span><b>${rs2(b.open)}</b></div>`).join("")}</div>
     <div class="btnrow"><a class="btn btn-wa" href="${esc(waHref(s.phone || "", text))}" target="_blank" rel="noopener">${ICON.wa}Share statement</a></div>` : ""}
-  ${money ? `<label class="f" style="margin-top:12px">Ledger</label><div class="card tablecard" style="margin:0"><table class="reg"><thead><tr><th>Date</th><th>Entry</th><th class="r">Bill</th><th class="r">Paid</th><th class="r">Balance</th><th></th></tr></thead><tbody>${L.entries.map(e => `<tr><td data-v="${esc(e.date)}">${esc(dLong(e.date))}</td><td>${esc(e.doc)}</td><td class="r">${e.bill ? rs2(e.bill) : "–"}</td><td class="r">${e.paid ? rs2(e.paid) : "–"}</td><td class="r">${rs2(e.bal)}</td><td>${e.pay && e.pay.amount > 0 && R.can("payables") ? `<button class="linkbtn" data-suprev="${esc(e.pay.id)}">Reverse</button>` : ""}</td></tr>`).join("") || `<tr><td colspan="6">No bills or payments yet.</td></tr>`}</tbody></table></div>` : ""}`);
+  ${money ? `<label class="f" style="margin-top:12px">Ledger</label><div class="card tablecard" style="margin:0"><table class="reg"><thead><tr><th>Date</th><th>Entry</th><th class="r">Bill</th><th class="r">Paid</th><th class="r">Balance</th><th></th></tr></thead><tbody>${L.entries.map(e => `<tr><td data-v="${esc(e.date)}">${esc(dLong(e.date))}</td><td>${esc(e.doc)}</td><td class="r">${e.bill ? rs2(e.bill) : "–"}</td><td class="r">${e.paid ? rs2(e.paid) : "–"}</td><td class="r">${rs2(e.bal)}</td><td>${e.pay && e.pay.amount > 0 && R.can("payables") && !M.spays().some(x => x.revOf === e.pay.id) ? `<button class="linkbtn" data-suprev="${esc(e.pay.id)}">Reverse</button>` : ""}</td></tr>`).join("") || `<tr><td colspan="6">No bills or payments yet.</td></tr>`}</tbody></table></div>` : ""}`);
 }
 function payDraw(st) {
   const L = M.supplierLedger(st.name);
@@ -174,7 +177,7 @@ H.click.push(async T => {
     const made = await draftPOs(low.map(i => ({ ingId: i.id, qty: Math.max(i.reorder * 2 - Math.max(0, M.stockLevel(i).on), i.reorder) })), "Reorder");
     toast(made.length ? `${made.length} draft PO${made.length > 1 ? "s" : ""} made` : "Everything low is already on order"); return true; }
   const pe = T.closest("[data-poedit]"); if (pe) { poSheet(ev.get("porders", pe.dataset.poedit)); return true; }
-  const busy = T.closest("[data-poapprove],[data-poreceive],[data-poclose],[data-pocancel]"); if (busy) { const id = Object.values(busy.dataset)[0]; const l = L.lockOf("porders", id);
+  const busy = T.closest("[data-poapprove],[data-poreceive],[data-poclose],[data-pocancel]"); if (busy) { if (!busy.matches("[data-poapprove]") && !guard("stock.buy")) return true; const id = Object.values(busy.dataset)[0]; const l = L.lockOf("porders", id);
     if (l) { toast(`${(ev.get("members", l.by) || {}).name || "Someone"} is editing this PO. Try once they save.`); return true; } }
   const pa = T.closest("[data-poapprove]"); if (pa) { if (!guard("po.approve")) return true; const p = ev.get("porders", pa.dataset.poapprove); if (!p.supplier) { toast("Give the PO a supplier first"); poSheet(p); return true; }
     await ev.put("porders", { ...clean(p), status: "approved", approvedBy: (R.me() || {}).id || "", approvedAt: new Date().toISOString() }); sync.soon(); toast(`${p.no} approved`); poDetail(p.id); return true; }
@@ -192,7 +195,7 @@ H.click.push(async T => {
   if (T.closest("[data-supnew]")) { const ok = await ask(`<p class="cq">New supplier</p><input class="in" id="supNewName" placeholder="Supplier name">`, [{ label: "Cancel", cls: "btn-ghost", value: false }, { label: "Add", cls: "btn-primary", value: true }], true);
     const name = ok ? (document.getElementById("supNewName") || {}).value?.trim() : ""; if (!name) return true; const r = await confirmNew("supplier", name, M.suppliers()); if (!r) return true;
     if (r === "new") { await ev.put("suppliers", { id: uid("s"), name }); sync.soon(); } supSheet(r === "new" ? name : r.name); return true; }
-  const ss = T.closest("[data-supsave]"); if (ss) { const s = M.supplierByName(ss.dataset.supsave) || { id: uid("s"), name: ss.dataset.supsave };
+  const ss = T.closest("[data-supsave]"); if (ss) { if (!guard("stock.buy")) return true; const s = M.supplierByName(ss.dataset.supsave) || { id: uid("s"), name: ss.dataset.supsave };
     await ev.put("suppliers", { ...clean(s), phone: $("#spPhone").value.trim(), gstin: $("#spGst").value.trim().toUpperCase(), days: Math.max(0, Math.round(num($("#spDays").value))) }); sync.soon(); toast("Supplier saved"); supSheet(s.name); return true; }
   const pay = T.closest("[data-suppay]"); if (pay) { if (!guard("payables")) return true; const s2 = { kind: "spay", name: pay.dataset.suppay, mode: "Bank" }; s2.redraw = () => payDraw(s2); payDraw(s2); return true; }
   if (st && st.kind === "spay") { const m = T.closest("[data-spmode]"); if (m) { const a = $("#spAmt").value, d = $("#spDate").value, r = $("#spRef").value; st.mode = m.dataset.spmode; payDraw(st); $("#spAmt").value = a; $("#spDate").value = d; $("#spRef").value = r; return true; }
@@ -200,7 +203,8 @@ H.click.push(async T => {
       if (!await yesNo(`<p class="cq">Record ${rs2(amt)} paid to ${esc(st.name)}?</p><div class="cdetail">${esc(st.mode)}${$("#spRef").value.trim() ? " · " + esc($("#spRef").value.trim()) : ""}</div>`, "Save payment", "btn-ok")) return true;
       await ev.put("spays", { id: uid("sp"), supplier: st.name, date: $("#spDate").value || today(), amount: amt, mode: st.mode, ref: $("#spRef").value.trim(), by: (R.me() || {}).id || "" }); sync.soon(); toast("Payment recorded"); supSheet(st.name); return true; } }
   const rv = T.closest("[data-suprev]"); if (rv) { if (!guard("payables")) return true; const p = ev.get("spays", rv.dataset.suprev);
-    if (p && await yesNo(`<p class="cq">Reverse this payment?</p><div class="cdetail">${rs2(p.amount)} on ${esc(dLong(p.date))}. A reversing entry is added; the original stays.</div>`, "Reverse")) { await ev.put("spays", { id: uid("sp"), supplier: p.supplier, date: today(), amount: -p.amount, mode: "Reversal", ref: p.ref || "", by: (R.me() || {}).id || "" }); sync.soon(); supSheet(p.supplier); } return true; }
+    if (p && M.spays().some(x => x.revOf === p.id)) { toast("Already reversed"); return true; }
+    if (p && await yesNo(`<p class="cq">Reverse this payment?</p><div class="cdetail">${rs2(p.amount)} on ${esc(dLong(p.date))}. A reversing entry is added; the original stays.</div>`, "Reverse")) { await ev.put("spays", { id: uid("sp"), supplier: p.supplier, date: today(), amount: -p.amount, mode: "Reversal", ref: p.ref || "", revOf: p.id, by: (R.me() || {}).id || "" }); sync.soon(); supSheet(p.supplier); } return true; }
   return false;
 });
 H.input.push(T => { const st = ui.sheet; if (!st || st.kind !== "poEdit" || !(T.dataset.poqty != null || T.dataset.porate != null || T.dataset.potax != null)) return false; syncPo(); const el = $("#poTot"); if (el) el.innerHTML = poTotals(st.x); return true; });

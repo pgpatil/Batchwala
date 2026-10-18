@@ -101,16 +101,17 @@ function drawIssue(st) {
   const w = ev.get("wos", st.id); const ings = M.ingMap(); const sm = M.stockMap(M.erpOn() ? w.loc : null);
   openSheet(st, `<div class="sh-head"><h2 class="h">Issue materials · ${esc(w.no)}</h2><button class="x" data-close aria-label="Close">×</button></div>
   <p class="hint" style="margin-top:-4px">What leaves the store for the kitchen now. Change any quantity to what was really handed over.</p>
-  <div class="kv">${st.rows.map((r, ix) => { const i = ings[r.ingId]; const b = UNITF(i); return `<div style="align-items:center;gap:8px"><span>${esc(i.name)}<small class="mut" style="display:block">standard ${qty(r.std, i.unit)}${r.done ? ` · issued ${qty(r.done, i.unit)}` : ""} · in store ${qty(Math.max(0, sm[i.id] || 0), i.unit)}</small></span><span style="display:flex;align-items:center;gap:6px"><input class="rate" data-wiq="${ix}" inputmode="decimal" value="${+(r.now / b.f).toFixed(3) || ""}" placeholder="0"><span class="unitlbl">${b.u}</span></span></div>`; }).join("") || "<div>Nothing to issue</div>"}</div>
+  <div class="kv">${st.rows.map((r, ix) => { const i = ings[r.ingId]; const b = UNITF(i, r.std); return `<div style="align-items:center;gap:8px"><span>${esc(i.name)}<small class="mut" style="display:block">standard ${qty(r.std, i.unit)}${r.done ? ` · issued ${qty(r.done, i.unit)}` : ""} · in store ${qty(Math.max(0, sm[i.id] || 0), i.unit)}</small></span><span style="display:flex;align-items:center;gap:6px"><input class="rate" data-wiq="${ix}" inputmode="decimal" value="${+(r.now / b.f).toFixed(3) || ""}" placeholder="0"><span class="unitlbl">${b.u}</span></span></div>`; }).join("") || "<div>Nothing to issue</div>"}</div>
   <button class="btn btn-primary" data-wiss>Issue · takes it off stock</button>`);
 }
-const UNITF = i => i.unit === "pcs" ? { f: 1, u: "pcs" } : { f: 1000, u: i.unit === "g" ? "kg" : "L" };
+// Quantities under a kilo or litre are typed in g / ml, so small amounts (saffron, essence) aren't rounded away.
+const UNITF = (i, q) => i.unit === "pcs" || q < 1000 ? { f: 1, u: i.unit } : { f: 1000, u: i.unit === "g" ? "kg" : "L" };
 
 /* ---------- complete ---------- */
 async function doneSheet(id) {
   const lk = await L.open("wos", id, (ev.get("wos", id) || {}).no || "this work order"); if (!lk) return;
   const w = ev.get("wos", id);
-  const st = { ...lk, kind: "woDone", id, lines: w.lines.filter(l => l.qty > 0).map(l => ({ item: l.item, good: l.qty, spoiled: 0 })), prep: (w.prep || []).filter(p => p.runs > 0).map(p => ({ ingId: p.ingId, runs: p.runs })), ret: {}, date: today() };
+  const st = { ...lk, kind: "woDone", id, lines: w.lines.filter(l => l.qty > 0).map(l => ({ item: l.item, good: l.qty, spoiled: 0 })), prep: (w.prep || []).filter(p => p.runs > 0 && M.ingMap()[p.ingId]).map(p => ({ ingId: p.ingId, runs: p.runs })), ret: {}, date: today() };
   st.redraw = () => drawDone(st); drawDone(st);
 }
 function drawDone(st) {
@@ -120,7 +121,7 @@ function drawDone(st) {
   <label class="f" for="wdDate">Made on</label><input class="in" id="wdDate" type="date" value="${st.date}">
   <label class="f">What was made</label><div class="kv">${st.lines.map((l, ix) => `<div style="align-items:center;gap:8px"><span>${esc(l.item)}</span><span style="display:flex;gap:6px;align-items:center"><label class="mini">Good <input class="rate" data-wdg="${ix}" inputmode="numeric" value="${l.good}"></label><label class="mini">Spoiled <input class="rate" data-wds="${ix}" inputmode="numeric" value="${l.spoiled || ""}" placeholder="0"></label></span></div>`).join("")}
   ${st.prep.map((p, ix) => `<div style="align-items:center"><span>${esc(ings[p.ingId].name)} <small class="mut">runs made</small></span><input class="rate" data-wdr="${ix}" inputmode="decimal" value="${p.runs}"></div>`).join("")}</div>
-  <label class="f" style="margin-top:12px">Returned to the store unused</label><div class="kv">${Object.keys(issued).filter(x => ings[x]).map(x => { const i = ings[x]; const b = UNITF(i); const used = issued[x] - (st.ret[x] || 0); const d = used - (use[x] || 0);
+  <label class="f" style="margin-top:12px">Returned to the store unused</label><div class="kv">${Object.keys(issued).filter(x => ings[x]).map(x => { const i = ings[x]; const b = UNITF(i, issued[x]); const used = issued[x] - (st.ret[x] || 0); const d = used - (use[x] || 0);
     return `<div style="align-items:center;gap:8px"><span>${esc(i.name)}<small class="mut" style="display:block">issued ${qty(issued[x], i.unit)} · standard for this output ${qty(use[x] || 0, i.unit)}${Math.abs(d) > 1e-6 ? ` · <b class="${d > 0 ? "due" : ""}">${d > 0 ? "over" : "under"} ${qty(Math.abs(d), i.unit)}</b>` : ""}</small></span><span style="display:flex;align-items:center;gap:6px"><input class="rate" data-wdret="${esc(x)}" inputmode="decimal" value="${st.ret[x] ? +(st.ret[x] / b.f).toFixed(3) : ""}" placeholder="0"><span class="unitlbl">${b.u}</span></span></div>`; }).join("")}</div>
   <p class="hint">Used = issued − returned. The difference from the BOM for what was made is the variance, shown on the work order and in Reports.</p>
   <button class="btn btn-ok" data-wdsave>${ICON.oven}Complete · record the batch</button>`);
@@ -129,7 +130,7 @@ function syncDone() { const st = ui.sheet; const w = ev.get("wos", st.id); const
   st.date = $("#wdDate").value || today();
   st.lines.forEach((l, ix) => { l.good = Math.max(0, Math.round(num(v(`[data-wdg="${ix}"]`).value))); l.spoiled = Math.max(0, Math.round(num(v(`[data-wds="${ix}"]`).value))); });
   st.prep.forEach((p, ix) => { p.runs = Math.max(0, num(v(`[data-wdr="${ix}"]`).value)); });
-  Object.keys(w.issued || {}).forEach(x => { const el = v(`[data-wdret="${x}"]`); if (el && ings[x]) st.ret[x] = Math.min(w.issued[x], Math.max(0, num(el.value) * UNITF(ings[x]).f)); }); }
+  Object.keys(w.issued || {}).forEach(x => { const el = v(`[data-wdret="${x}"]`); if (el && ings[x]) st.ret[x] = Math.min(w.issued[x], Math.max(0, num(el.value) * UNITF(ings[x], w.issued[x]).f)); }); }
 async function complete(st) {
   syncDone(); if (!await L.saveOk(st)) return; const w = ev.get("wos", st.id); if (w.status !== "issued") { toast("This work order was already completed or cancelled"); woDetail(w.id); return; } const ings = M.ingMap(); const issued = w.issued || {};
   const lines = st.lines.filter(l => l.good + l.spoiled > 0).map(l => ({ item: l.item, qty: l.good + l.spoiled, spoiled: l.spoiled }));
@@ -168,10 +169,12 @@ H.click.push(async T => {
   const wi = T.closest("[data-woissue]"); if (wi) { if (guard("bake.record")) issueSheet(wi.dataset.woissue); return true; }
   const wd = T.closest("[data-wodone]"); if (wd) { if (guard("bake.record")) doneSheet(wd.dataset.wodone); return true; }
   const wp = T.closest("[data-woprint]"); if (wp) { printWo(wp.dataset.woprint); return true; }
-  const wc = T.closest("[data-wocancel]"); if (wc) { const w = ev.get("wos", wc.dataset.wocancel); const ings = M.ingMap();
-    if (!await yesNo(`<p class="cq">Cancel ${esc(w.no)}?</p><div class="cdetail">${Object.keys(w.issued || {}).length ? "Everything issued goes back into the store. " : ""}It stays in the list marked cancelled.</div>`, "Cancel work order", "btn-danger-solid", "Keep it")) return true;
+  const wc = T.closest("[data-wocancel]"); if (wc) { if (!guard("bake.record")) return true; const lk = await L.open("wos", wc.dataset.wocancel, (ev.get("wos", wc.dataset.wocancel) || {}).no || "this work order"); if (!lk) return true;
+    if (!["planned", "issued"].includes((ev.get("wos", wc.dataset.wocancel) || {}).status)) { await L.release(lk.lock); toast("This work order is already closed"); woDetail(wc.dataset.wocancel); return true; }
+    const w = ev.get("wos", wc.dataset.wocancel); const ings = M.ingMap();
+    if (!await yesNo(`<p class="cq">Cancel ${esc(w.no)}?</p><div class="cdetail">${Object.keys(w.issued || {}).length ? "Everything issued goes back into the store. " : ""}It stays in the list marked cancelled.</div>`, "Cancel work order", "btn-danger-solid", "Keep it")) { await L.release(lk.lock); return true; }
     for (const [x, q] of Object.entries(w.issued || {})) if (q > 0 && ings[x]) await putMove({ ingId: x, type: "return", qty: q, note: `${w.no} cancelled`, ref: w.id, outletId: w.loc });
-    await ev.put("wos", { ...clean(w), status: "cancelled" }); sync.soon(); woDetail(w.id); return true; }
+    await ev.put("wos", { ...clean(w), status: "cancelled" }); await L.release(lk.lock); sync.soon(); woDetail(w.id); return true; }
   if (!st) return false;
   if (st.kind === "woNew") {
     const b = T.closest("[data-wnstep]"); if (b) { const [ix, d] = b.dataset.wnstep.split(":").map(Number); st.lines[ix].qty = Math.max(0, st.lines[ix].qty + d); drawNew(st); return true; }
@@ -180,7 +183,7 @@ H.click.push(async T => {
       const id = uid("wo"); await ev.put("wos", { id, no: M.nextDocNo("wos", prefix(), "WO"), date: st.date, loc: st.loc, lines: st.lines.filter(l => l.qty > 0), prep: st.prep.filter(x => x.runs > 0), status: "planned", issued: {}, notes: st.notes, by: (R.me() || {}).id || "" });
       sync.soon(); toast("Work order created"); woDetail(id); return true; } }
   if (st.kind === "woIssue" && T.closest("[data-wiss]")) { if (!await L.saveOk(st)) return true; const w = ev.get("wos", st.id); const ings = M.ingMap(); if (!["planned", "issued"].includes(w.status)) { toast("This work order is closed"); woDetail(w.id); return true; }
-    st.rows.forEach((r, ix) => { const el = document.querySelector(`[data-wiq="${ix}"]`); if (el) r.now = Math.max(0, num(el.value) * UNITF(ings[r.ingId]).f); });
+    st.rows.forEach((r, ix) => { const el = document.querySelector(`[data-wiq="${ix}"]`); if (el) r.now = Math.max(0, num(el.value) * UNITF(ings[r.ingId], r.std).f); });
     const give = st.rows.filter(r => r.now > 0); if (!give.length) { toast("Enter what was issued"); return true; }
     const sm = M.stockMap(M.erpOn() ? w.loc : null); const over = give.filter(r => r.now > Math.max(0, sm[r.ingId] || 0) + 1e-6);
     if (over.length && !await yesNo(`<p class="cq">More than the store holds</p><div class="cdetail">${over.map(r => `${esc(ings[r.ingId].name)}: issuing ${qty(r.now, ings[r.ingId].unit)}, store shows ${qty(Math.max(0, sm[r.ingId] || 0), ings[r.ingId].unit)}`).join("<br>")}<br><br>Stock will go below zero until a GRN or count is recorded.</div>`, "Issue anyway")) return true;

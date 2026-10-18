@@ -62,7 +62,7 @@ const T = {
         const price = numOr(r.price), tax = numOr(r.tax), par = numOr(r.par, 0), life = numOr(r.life); if ([price, tax, par, life].some(Number.isNaN)) return out.err(r, "Price, Tax %, Shelf life and Keep ready must be numbers");
         let ex = byName(menu, name); if (!ex) { const same = askSame(out, "menu item", name, menu); if (same === undefined) return; if (same !== "new") { ex = same; name = ex.name; } }
         if (!ex && price == null) return out.err(r, `${name} is new and needs a Price`);
-        const rec = { ...(ex ? clean(ex) : { id: uid("m"), recipe: [], sort: menu.length + out.adds + 1 }), name, shelfLife: r.life === "" ? (ex ? ex.shelfLife ?? null : null) : Math.max(1, Math.round(life)), category: r.category || (ex ? ex.category : ""), price: price ?? ex.price, par,
+        const rec = { ...(ex ? clean(ex) : { id: uid("m"), recipe: [], sort: menu.length + out.adds + 1 }), name, shelfLife: r.life === "" ? (ex ? ex.shelfLife ?? null : null) : Math.max(1, Math.round(life)), category: r.category || (ex ? ex.category : ""), price: price ?? ex.price, par: r.par === "" ? (ex ? ex.par || 0 : 0) : par,
           aliases: r.aliases || (ex ? ex.aliases : ""), active: r.active === "" ? (ex ? ex.active !== false : true) : yes(r.active), taxPct: r.tax === "" ? (ex ? ex.taxPct ?? null : null) : tax };
         out.upsert(ex, rec, name, () => ev.put("menu", rec)); });
       return out; } },
@@ -75,7 +75,7 @@ const T = {
     plan(recs, dec) { const out = newPlan(dec); const ings = M.ingredients(); const seen = new Set();
       recs.forEach(r => { let name = r.name.trim(); if (!name) return out.err(r, "Name is blank"); if (seen.has(name.toLowerCase())) return out.err(r, `${name} appears twice`); seen.add(name.toLowerCase());
         let ex = byNameOrAka(ings, name); if (!ex) { const same = askSame(out, "material", name, ings); if (same === undefined) return; if (same !== "new") ex = same; } if (ex) name = ex.name; const type = r.type ? TYPE_IN[r.type.trim().toLowerCase()] : (ex ? ex.type : "rm"); if (!type) return out.err(r, `Type “${r.type}” isn’t RM, PM or Semi-finished`);
-        const uu = r.unit ? unitIn(r.unit) : [ex ? ex.unit : "g", ex && BIG[ex.unit] ? BIG[ex.unit][1] : 1]; if (!uu) return out.err(r, `Unit “${r.unit}” isn’t g, kg, ml, L or pcs`);
+        const uu = r.unit ? unitIn(r.unit) : ex ? [ex.unit, BIG[ex.unit] ? BIG[ex.unit][1] : 1] : ["g", 1000];   // blank unit: the existing unit (kg / L), or kg for a new material if (!uu) return out.err(r, `Unit “${r.unit}” isn’t g, kg, ml, L or pcs`);
         const [unit, f] = uu; if (ex && ex.unit !== unit && (M.stockMap()[ex.id] || 0)) return out.err(r, `${name} has stock in ${ex.unit}; its unit can’t change to ${unit}`);
         const reorder = numOr(r.reorder), price = numOr(r.price), tax = numOr(r.tax), y = numOr(r.yield); if ([reorder, price, tax, y].some(Number.isNaN)) return out.err(r, "Reorder level, Price, Tax % and Yield must be numbers");
         const rec = { ...(ex ? clean(ex) : { id: uid("i"), recipe: [], barcode: "", supplier: "" }), name, type, unit, reorder: reorder != null ? reorder * f : (ex ? ex.reorder : 0), cost: price != null ? price / f : (ex ? ex.cost : 0),
@@ -112,7 +112,8 @@ const T = {
     count: () => M.ingredients().length,
     rows: () => { const out = []; M.locations().forEach(l => { const sm = M.stockMap(l.id); M.ingredients().forEach(i => { const [u, f] = BIG[i.unit] || [i.unit, 1]; out.push([i.name, l.name, r4((sm[i.id] || 0) / f), u]); }); }); return out; },
     plan(recs) { const out = newPlan(); const ings = M.ingredients();
-      recs.forEach(r => { const i = byNameOrAka(ings, r.material); if (!i) return out.err(r, `“${r.material}” isn’t in inventory`); const l = locByName(r.location); if (!l) return out.err(r, `Location “${r.location}” doesn’t exist`);
+      const seenS = new Set(); recs.forEach(r => { const i = byNameOrAka(ings, r.material); if (!i) return out.err(r, `“${r.material}” isn’t in inventory`); const l = locByName(r.location); if (!l) return out.err(r, `Location “${r.location}” doesn’t exist`);
+        if (seenS.has(i.id + "@" + l.id)) return out.err(r, `${i.name} at ${l.name} appears twice; a count needs one row`); seenS.add(i.id + "@" + l.id);
         const q = numOr(r.qty); if (q == null || Number.isNaN(q) || q < 0) return out.err(r, "Quantity must be 0 or more"); const uu = r.unit ? unitIn(r.unit) : [i.unit, 1]; if (!uu || uu[0] !== i.unit) return out.err(r, `${i.name} is measured in ${i.unit}`);
         const target = q * uu[1]; const d = target - (M.stockMap(l.id)[i.id] || 0); if (!d) return out.skip(`${i.name} at ${l.name} already ${target} ${i.unit}`);
         out.put("update", `${i.name} at ${l.name}: ${d > 0 ? "+" : ""}${r4(d)} ${i.unit}`, () => putMove({ ingId: i.id, type: "count", qty: d, note: "Imported count", outletId: l.id })); });
@@ -123,7 +124,8 @@ const T = {
     count: () => Object.values(M.fgStock()).reduce((s, o) => s + Object.keys(o).length, 0),
     rows: () => { const fg = M.fgStock(); const out = []; M.locations().forEach(l => Object.entries(fg[l.id] || {}).forEach(([n, q]) => out.push([l.name, n, q]))); return out; },
     plan(recs) { const out = newPlan(); const fg = M.fgStock();
-      recs.forEach(r => { const m = byName(M.menu(), r.item); if (!m) return out.err(r, `“${r.item}” isn’t on the menu`); const l = locByName(r.location); if (!l) return out.err(r, `Location “${r.location}” doesn’t exist`);
+      const seenF = new Set(); recs.forEach(r => { const m = byName(M.menu(), r.item); if (!m) return out.err(r, `“${r.item}” isn’t on the menu`); const l = locByName(r.location); if (!l) return out.err(r, `Location “${r.location}” doesn’t exist`);
+        if (seenF.has(m.id + "@" + l.id)) return out.err(r, `${m.name} at ${l.name} appears twice; a count needs one row`); seenF.add(m.id + "@" + l.id);
         const q = numOr(r.qty); if (q == null || Number.isNaN(q) || q < 0 || q % 1) return out.err(r, "Pieces must be a whole number, 0 or more");
         const d = q - ((fg[l.id] || {})[m.name] || 0); if (!d) return out.skip(`${m.name} at ${l.name} already ${q}`);
         out.put("update", `${m.name} at ${l.name}: ${d > 0 ? "+" : ""}${d}`, () => ev.put("fg", { id: uid("f"), loc: l.id, item: m.name, qty: d, type: "count", date: today(), note: "Imported count" })); });
