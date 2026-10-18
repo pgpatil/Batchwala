@@ -52,18 +52,21 @@ function cardRef() {
   if (rec && !(c.qty > 0)) c.qty = rec.type === "sf" ? rec.yield : 10;
   return { c, rec, fgs, sfs };
 }
+// One table per step. In print it is the whole card (steps already list every material); on screen each raw line shows stock,
+// and with more than one step a collapsed issue list adds up materials used in several steps.
 function cardHtml(rec, c, d, forPrint) {
   const sf = rec.type === "sf"; const card = M.batchCard(rec, c.qty, c.scratch); const sm = M.stockMap(stockLoc()); const me = R.me();
+  const made = new Map(card.steps.filter(s => s.made).map((s, n) => [s.made.ing.id, n + 1]));
   const head = sf ? `${esc(rec.name)} · ${qty(c.qty, rec.unit)} <small class="mut">(${runsTxt(c.qty / rec.yield)})</small>` : `${esc(rec.name)} × ${c.qty}`;
-  const box = forPrint ? `<td class="tick">☐</td>` : "";
-  return `<div class="bcard"><div class="bc-head"><div><small class="mut">${esc(M.config().business)} · Batch card</small><h3>${head}</h3></div>
-    <div class="bc-meta"><span>Batch <b>#${esc(M.nextBatchNo((me && me.prefix) || ""))}</b></span><span>${esc(dLong(d))}</span></div></div>
-    ${card.steps.map((s, n) => `<div class="bc-step"><h4>Step ${n + 1} · ${s.made ? `Make ${esc(s.made.ing.name)} · ${qty(s.made.qty, s.made.ing.unit)} <small class="mut">(${runsTxt(s.made.runs)})</small>` : `${esc(rec.name)}${sf ? "" : ` × ${c.qty}`}`}</h4>
-      <table><tbody>${s.lines.map(l => `<tr><td>${esc(l.ing.name)} ${typeTag(l.ing)}</td><td class="num">${qty(l.qty, l.ing.unit)}</td>${box}</tr>`).join("")}</tbody></table></div>`).join("")}
-    <div class="bc-step"><h4>All materials for this batch</h4><table><thead><tr><th>Material</th><th class="num">Qty</th>${forPrint ? `<th>Issued</th>` : `<th class="num">In stock</th>`}</tr></thead><tbody>${card.total.map(t => { const have = Math.max(0, sm[t.ing.id] || 0); const short = have < t.qty;
-      return `<tr${!forPrint && short ? ` class="shortrow"` : ""}><td>${esc(t.ing.name)} ${typeTag(t.ing)}</td><td class="num">${qty(t.qty, t.ing.unit)}</td>${forPrint ? box : `<td class="num">${short ? `<b class="due">${qty(have, t.ing.unit)}</b>` : qty(have, t.ing.unit)}</td>`}</tr>`; }).join("") || `<tr><td colspan="3">No materials in this BOM yet.</td></tr>`}</tbody></table></div>
-    ${money() ? `<p class="hint">Material cost ${rs2(card.cost)}${sf ? ` · ${rs2(card.cost / (c.qty / (rec.unit === "pcs" ? 1 : 1000)))}/${rec.unit === "pcs" ? "pc" : UNITS[rec.unit].big}` : ` · ${rs2(card.cost / c.qty)} per piece`}</p>` : ""}
-    ${forPrint ? `<div class="bc-sign"><span>Made by ________</span><span>Start __:__</span><span>End __:__</span><span>Made ______</span><span>Spoiled ______</span><span>Checked by ________</span></div>` : ""}</div>`;
+  const row = l => { const from = made.get(l.ing.id); const have = Math.max(0, sm[l.ing.id] || 0); const short = !from && have < l.qty;
+    return `<tr${!forPrint && short ? ` class="shortrow"` : ""}><td>${esc(l.ing.name)}${from ? ` <small class="mut">from step ${from}</small>` : ""}</td><td class="num">${qty(l.qty, l.ing.unit)}</td>${forPrint ? `<td class="chk">☐</td>` : `<td class="num">${from ? "" : short ? `<b class="due">have ${qty(have, l.ing.unit)}</b>` : `<small class="mut">have ${qty(have, l.ing.unit)}</small>`}</td>`}</tr>`; };
+  const shared = card.total.filter(t => card.steps.filter(s => s.lines.some(l => l.ing.id === t.ing.id)).length > 1);
+  return `<div class="bcard${forPrint ? " tight" : ""}"><div class="bc-head"><div><small class="mut">${esc(M.config().business)} · Batch card</small><h3>${head}</h3></div>
+    <div class="bc-meta"><span>Batch <b>#${esc(M.nextBatchNo((me && me.prefix) || ""))}</b> · ${esc(dLong(d))}</span>${money() ? `<span class="mut">Material cost ${rs2(card.cost)}${sf ? "" : ` · ${rs2(card.cost / c.qty)}/pc`}</span>` : ""}</div></div>
+    ${card.steps.map((s, n) => `<div class="bc-step"><h4>${card.steps.length > 1 ? `${n + 1}. ` : ""}${s.made ? `Make ${esc(s.made.ing.name)} · ${qty(s.made.qty, s.made.ing.unit)} <small class="mut">(${runsTxt(s.made.runs)})</small>` : `${esc(rec.name)}${sf ? "" : ` × ${c.qty}`}`}</h4>
+      <table><tbody>${s.lines.map(row).join("")}</tbody></table></div>`).join("")}
+    ${!forPrint && shared.length ? `<details class="bc-step"><summary>Used in more than one step</summary><table><tbody>${shared.map(t => `<tr><td>${esc(t.ing.name)}</td><td class="num">${qty(t.qty, t.ing.unit)} in all</td></tr>`).join("")}</tbody></table></details>` : ""}
+    ${forPrint ? `<div class="bc-sign"><span>Made by ______</span><span>Start __:__</span><span>End __:__</span><span>Good ____</span><span>Spoiled ____</span><span>Checked ______</span></div>` : ""}</div>`;
 }
 function cardText(rec, c, d) {
   const card = M.batchCard(rec, c.qty, c.scratch); const sf = rec.type === "sf";
@@ -72,16 +75,21 @@ function cardText(rec, c, d) {
 }
 
 /* ---------- printing ---------- */
-export function printHtml(title, html) {
+// The title also names the PDF when printing to a file. bare: the content has its own heading.
+export function printHtml(title, html, bare = false) {
   let el = document.getElementById("printArea"); if (!el) { el = document.createElement("div"); el.id = "printArea"; document.body.appendChild(el); }
-  el.innerHTML = `<h2>${esc(title)}</h2>` + html; document.body.classList.add("printing");
+  el.innerHTML = (bare ? "" : `<h2>${esc(title)}</h2>`) + html; document.body.classList.add("printing");
+  const was = document.title; document.title = title; setTimeout(() => { document.title = was; }, 2000);
   const done = () => { document.body.classList.remove("printing"); window.removeEventListener("afterprint", done); };
   window.addEventListener("afterprint", done); window.print(); setTimeout(done, 1500);
 }
 
 /* ---------- screen ---------- */
+const TABS = [["fg", "Finished goods"], ["sf", "Semi-finished"], ["indent", "Indent"], ["card", "Batch card"], ["calc", "Requirement calculator"]];
 V.plan = () => {
   S.filter.plan = S.filter.plan || "fg"; S.filter.indent = S.filter.indent || "short"; const k = S.filter.plan;
+  if (k === "calc") return band("Planning", "", `<p class="bandnote">Work out raw and packing materials for any mix of products, such as a bulk order. Nothing is recorded.</p>`)
+    + `<div class="tools">${layoutSwitch("plan")}${chipBar("plan", TABS)}</div>` + calcView();
   const t = today(); const d = S.planDate || t; const ings = M.ingMap();
   const lines = planLines(d); const ex = M.explode(lines, stockLoc()); const saved = !!M.planOf(d, planLoc());
   const sfIds = Object.keys(ex.need).filter(id => ings[id] && ings[id].type === "sf").sort((a, b) => (ex.level[a] || 0) - (ex.level[b] || 0) || ings[a].name.localeCompare(ings[b].name));
@@ -90,7 +98,7 @@ V.plan = () => {
   let h = band(erp() ? `Planning · ${esc(M.locName(H.prodKitchen()))}` : "Planning", `${lines.length ? `<button class="pillbtn" data-planprint>${ICON.print}Print plan</button>` : ""}`,
     `<div class="stats"><div class="st"><b>${pcs}</b><span>pieces to make</span></div><div class="st"><b>${runs}</b><span>semi-finished runs</span></div><div class="st"><b>${short.length}</b><span>materials to buy</span></div></div>`);
   h += `<div class="tools"><div class="chips">${[t, addDays(t, 1), addDays(t, 2)].map((x, i) => `<button class="chip" data-plandate="${x}" aria-pressed="${d === x}">${["Today", "Tomorrow", esc(dLong(x))][i]}</button>`).join("")}<label class="chip datechip">${[t, addDays(t, 1), addDays(t, 2)].includes(d) ? "Other date" : esc(dLong(d))}<input type="date" data-plandatein value="${d}"></label></div></div>
-    <div class="tools" style="padding-top:0">${layoutSwitch("plan")}${chipBar("plan", [["fg", "Finished goods", lines.length], ["sf", "Semi-finished", sfIds.length], ["indent", "Indent", short.length || null], ["card", "Batch card"]])}</div>`;
+    <div class="tools" style="padding-top:0">${layoutSwitch("plan")}${chipBar("plan", [["fg", "Finished goods", lines.length], ["sf", "Semi-finished", sfIds.length], ["indent", "Indent", short.length || null], ["card", "Batch card"], ["calc", "Requirement calculator"]])}</div>`;
   if (k === "card") return h + cardView(d);
   if (k === "fg") return h + fgView(d, lines, ex, saved);
   if (!lines.length) return h + `<div class="empty"><strong>Nothing planned for ${esc(dLong(d))}</strong>Add finished goods in the Finished goods tab; semi-finished and the indent follow from their BOMs.</div>`;
@@ -152,15 +160,15 @@ H.click.push(async T => {
   if (T.closest("[data-indentcopy]")) { toast(await copyText(S.indentText || "") ? "Indent copied" : "Couldn’t copy here"); return true; }
   if (T.closest("[data-indentprint]")) { printHtml(S.filter.indent === "full" ? "Store issue" : "Purchase indent", document.querySelector("#main .plan").innerHTML); return true; }
   if (T.closest("[data-planprint]")) { const lines = planLines(d); const ex = M.explode(lines, stockLoc()); const ings = M.ingMap();
-    const sf = Object.keys(ex.make).filter(id => ings[id]).map(id => `<tr><td>${esc(ings[id].name)}</td><td class="num">${qty(ex.make[id] * ings[id].yield, ings[id].unit)} (${runsTxt(ex.make[id])})</td><td class="tick">☐</td></tr>`).join("");
+    const sf = Object.keys(ex.make).filter(id => ings[id]).map(id => `<tr><td>${esc(ings[id].name)}</td><td class="num">${qty(ex.make[id] * ings[id].yield, ings[id].unit)} (${runsTxt(ex.make[id])})</td><td class="chk">☐</td></tr>`).join("");
     const ind = indentRows(ex, true).map(r => `<tr><td>${esc(r.i.name)}</td><td class="num">${qty(r.ind, r.i.unit)}</td><td class="num">${qty(r.have, r.i.unit)}</td></tr>`).join("");
-    printHtml(`Production plan · ${dLong(d)}`, `<div class="bcard"><div class="bc-step"><h4>Finished goods</h4><table><tbody>${lines.map(l => `<tr><td>${esc(l.item)}</td><td class="num">${l.qty}</td><td class="tick">☐</td></tr>`).join("")}</tbody></table></div>
+    printHtml(`Production plan · ${dLong(d)}`, `<div class="bcard"><div class="bc-step"><h4>Finished goods</h4><table><tbody>${lines.map(l => `<tr><td>${esc(l.item)}</td><td class="num">${l.qty}</td><td class="chk">☐</td></tr>`).join("")}</tbody></table></div>
       ${sf ? `<div class="bc-step"><h4>Semi-finished to make</h4><table><tbody>${sf}</tbody></table></div>` : ""}<div class="bc-step"><h4>Materials (full quantity)</h4><table><thead><tr><th>Material</th><th class="num">Required</th><th class="num">In stock</th></tr></thead><tbody>${ind}</tbody></table></div></div>`); return true; }
   const { c, rec } = cardRef();
   const cs = T.closest("[data-cardset]"); if (cs) { c.qty = r2(+cs.dataset.cardset); H.render(); return true; }
   const sc = T.closest("[data-cardscratch]"); if (sc) { c.scratch = sc.dataset.cardscratch === "1"; H.render(); return true; }
   if (!rec) return false;
-  if (T.closest("[data-cardprint]")) { printHtml(`Batch card · ${rec.name}`, cardHtml(rec, c, d, true)); return true; }
+  if (T.closest("[data-cardprint]")) { printHtml(`Batch card · ${rec.name}`, cardHtml(rec, c, d, true), true); return true; }
   if (T.closest("[data-cardcopy]")) { toast(await copyText(cardText(rec, c, d)) ? "Batch card copied" : "Couldn’t copy here"); return true; }
   if (T.closest("[data-cardwo]")) { const card = M.batchCard(rec, c.qty, c.scratch); const prep = {}; card.steps.forEach(s => { if (s.made) prep[s.made.ing.id] = r2(s.made.runs); });
     H.woNew({ date: d, lines: rec.type === "sf" ? [] : [{ item: rec.name, qty: Math.round(c.qty) }], prep }); return true; }
@@ -182,4 +190,91 @@ H.input.push(T => {
   if (S.view !== "plan" || !T.matches("[data-cardqty]")) return false; const { c, rec } = cardRef(); if (!rec) return true;
   const b = rec.type === "sf" ? UNITS[rec.unit] : null; const v = num(T.value); if (!(v > 0) || /[.,]$/.test(T.value)) return true;
   c.qty = r2(v * (b ? b.f : 1)); H.render(); return true;
+});
+
+/* ---------- requirement calculator ---------- */
+// Any mix of menu items (pieces) and semi-finished (kg / L / pcs), exploded through every BOM level into raw and packing materials.
+// For quotes and bulk orders: it records nothing, and the list is kept on this device until cleared.
+const CALC_KEY = "bw.calc";
+function calcState() {
+  if (!S.calc) { try { S.calc = JSON.parse(localStorage.getItem(CALC_KEY) || "null"); } catch (_) {} }
+  if (!S.calc || !Array.isArray(S.calc.rows)) S.calc = { rows: [], net: true, exact: false };
+  return S.calc;
+}
+const saveCalc = () => { try { localStorage.setItem(CALC_KEY, JSON.stringify(S.calc)); } catch (_) {} };
+const calcProducts = () => ({ fgs: M.menu().filter(m => (m.recipe || []).length), sfs: M.ingredients().filter(i => i.type === "sf" && i.yield > 0 && i.recipe.length) });
+const recOf = ref => ref.startsWith("m:") ? M.menu().find(m => m.id === ref.slice(2)) : M.ingredients().find(i => i.id === ref.slice(2));
+const rowLabel = r => { const x = recOf(r.ref); if (!x) return "Removed item"; return x.type === "sf" ? `${x.name} ${qty(r.qty, x.unit)}` : `${x.name} × ${r.qty}`; };
+// lines (menu items) and extra (semi-finished) for the explode engine.
+function calcInput(rows) { const lines = [], extra = {};
+  rows.forEach(r => { const x = recOf(r.ref); if (!x || !(r.qty > 0)) return; if (r.ref.startsWith("m:")) lines.push({ item: x.name, qty: r.qty }); else extra[x.id] = (extra[x.id] || 0) + r.qty; });
+  return { lines, extra }; }
+function calcResult(c) {
+  const { lines, extra } = calcInput(c.rows); const loc = stockLoc();
+  const ex = M.explode(lines, loc, { extra, ignoreStock: !c.net, exact: c.exact }); const ings = M.ingMap(); const oo = M.onOrder(); const sm = M.stockMap(loc);
+  const mats = Object.keys(ex.need).filter(id => ings[id] && ings[id].type !== "sf" && ex.need[id] > 1e-9).map(id => { const i = ings[id]; const have = Math.max(0, sm[id] || 0); const ord = oo[id] || 0;
+    return { i, need: ex.need[id], have, ord, buy: c.net ? Math.max(0, ex.need[id] - have - ord) : ex.need[id] }; })
+    .sort((a, b) => (a.i.type + (a.i.category || "~") + a.i.name).localeCompare(b.i.type + (b.i.category || "~") + b.i.name));
+  const sfs = Object.keys(ex.make).filter(id => ings[id]).sort((a, b) => (ex.level[a] || 0) - (ex.level[b] || 0)).map(id => ({ i: ings[id], need: ex.need[id], have: Math.max(0, sm[id] || 0), runs: ex.make[id] }));
+  // Each product on its own, full recipe from scratch: what it alone needs of each material.
+  const each = c.rows.filter(r => r.qty > 0 && recOf(r.ref)).map(r => { const one = calcInput([r]); return { r, need: M.explode(one.lines, loc, { extra: one.extra, ignoreStock: true, exact: true }).need }; });
+  return { ex, mats, sfs, each, unknown: ex.unknown };
+}
+function calcView() {
+  const c = calcState(); const { fgs, sfs } = calcProducts(); const money = R.can("money") && R.role() !== "kitchen";
+  if (!fgs.length && !sfs.length) return `<div class="empty"><strong>No BOMs yet</strong>Give menu items a BOM first; then any mix of them can be worked out here.</div>`;
+  const opt = sel => `${fgs.length ? `<optgroup label="Finished items">${fgs.map(m => `<option value="m:${esc(m.id)}" ${sel === "m:" + m.id ? "selected" : ""}>${esc(m.name)}</option>`).join("")}</optgroup>` : ""}${sfs.length ? `<optgroup label="Semi-finished">${sfs.map(i => `<option value="i:${esc(i.id)}" ${sel === "i:" + i.id ? "selected" : ""}>${esc(i.name)}</option>`).join("")}</optgroup>` : ""}`;
+  const orders = M.orders(false).filter(o => o.date >= today() && !M.isDelivered(o)).sort((a, b) => (b.channel === "bulk") - (a.channel === "bulk") || (a.date < b.date ? -1 : 1)).slice(0, 30);
+  let h = `<div class="plan"><div class="card cardform"><h3 style="padding:0;margin:0 0 6px">Products</h3>
+    <div class="kv">${c.rows.map((r, ix) => { const x = recOf(r.ref); const sf = r.ref.startsWith("i:"); const b = x && sf ? UNITS[x.unit] : null;
+      return `<div style="align-items:center;gap:8px"><select class="in" data-calcref="${ix}" style="flex:1;min-width:0">${opt(r.ref)}</select><input class="rate" data-calcq="${ix}" inputmode="decimal" value="${r.qty ? +(r.qty / (b ? b.f : 1)).toFixed(3) : ""}" placeholder="0" aria-label="Quantity"><span class="unitlbl">${sf ? (b ? b.big : x ? x.unit : "") : "pcs"}</span><button class="rm" data-calcrm="${ix}" aria-label="Remove">×</button></div>`; }).join("") || `<div class="mut">Add the products to work out, as many as you like.</div>`}</div>
+    <div class="btnrow"><button class="add-line" data-calcadd>+ Add product</button>${orders.length ? `<select class="in" data-calcorder style="flex:1"><option value="">+ Add items from an order…</option>${orders.map(o => `<option value="${esc(o.id)}">#${esc(o.no)} · ${esc(o.customer || M.chanLabel(o))} · ${esc(dLong(o.date))} · ${M.pcs(o)} pcs</option>`).join("")}</select>` : ""}</div>
+    <label class="f">Stock on hand</label><div class="chips">${[[true, "Use it · show what to buy"], [false, "Ignore it · full quantity"]].map(([v, l]) => `<button class="chip" data-calcnet="${v ? 1 : 0}" aria-pressed="${c.net === v}">${l}</button>`).join("")}</div>
+    <label class="f">Semi-finished</label><div class="chips">${[[false, "Whole recipe runs"], [true, "Exact quantity"]].map(([v, l]) => `<button class="chip" data-calcexact="${v ? 1 : 0}" aria-pressed="${c.exact === v}">${l}</button>`).join("")}</div>
+    ${c.rows.length ? `<button class="linkbtn" data-calcclear style="margin-top:10px">Clear the list</button>` : ""}</div>`;
+  if (!c.rows.some(r => r.qty > 0)) return h + `</div>`;
+  const res = calcResult(c); S.calcText = calcText(c, res);
+  const val = res.mats.reduce((s, m) => s + m.buy * M.lastPrice(m.i), 0);
+  h += `<div class="card"><h3>Semi-finished to make</h3><table><thead><tr><th>Material</th><th>Needed</th>${c.net ? "<th>In stock</th>" : ""}<th>Make</th></tr></thead><tbody>${res.sfs.map(x => `<tr><td>${esc(x.i.name)}</td><td>${qty(x.need, x.i.unit)}</td>${c.net ? `<td>${qty(x.have, x.i.unit)}</td>` : ""}<td><b>${qty(x.runs * x.i.yield, x.i.unit)}</b><small class="mut" style="display:block">${runsTxt(x.runs)}</small></td></tr>`).join("") || `<tr><td colspan="4">None${c.net ? " to make: stock covers it, or no semi-finished in these BOMs" : " in these BOMs"}.</td></tr>`}</tbody></table></div>
+  <div class="card"><h3>Raw & packing materials ${c.net ? `<span class="tag ${res.mats.some(m => m.buy > 0) ? "t-due" : "t-paid"}">${res.mats.filter(m => m.buy > 0).length} to buy</span>` : ""}</h3><table><thead><tr><th>Material</th><th>Required</th>${c.net ? "<th>In stock</th><th>On order</th><th>To buy</th>" : ""}</tr></thead><tbody>${res.mats.map(m => `<tr${c.net && m.buy > 0 ? ' class="shortrow"' : ""}><td>${esc(m.i.name)} ${typeTag(m.i)}</td><td>${qty(m.need, m.i.unit)}</td>${c.net ? `<td>${qty(m.have, m.i.unit)}</td><td>${m.ord ? qty(m.ord, m.i.unit) : "–"}</td><td>${m.buy > 0 ? `<b class="due">${qty(m.buy, m.i.unit)}</b>` : "–"}</td>` : ""}</tr>`).join("") || `<tr><td colspan="5">These products have no BOM lines.</td></tr>`}</tbody></table>
+    ${money && val ? `<p class="hint">Estimated cost of ${c.net ? "what to buy" : "these materials"}: ${rs(val)} at last purchase prices.</p>` : ""}${res.unknown.length ? `<p class="hint">No BOM: ${res.unknown.map(esc).join(", ")}.</p>` : ""}</div>`;
+  if (res.each.length > 1) { const ids = res.mats.map(m => m.i.id);
+    h += `<div class="card"><h3>By product <small class="mut">full recipe each, before stock</small></h3><table><thead><tr><th>Material</th>${res.each.map(e => `<th>${esc(rowLabel(e.r))}</th>`).join("")}<th>Together</th></tr></thead><tbody>${ids.map(id => { const i = M.ingMap()[id]; const t = res.each.reduce((s, e) => s + (e.need[id] || 0), 0);
+      return `<tr><td>${esc(i.name)}</td>${res.each.map(e => `<td>${e.need[id] ? qty(e.need[id], i.unit) : "–"}</td>`).join("")}<td><b>${qty(t, i.unit)}</b></td></tr>`; }).join("")}</tbody></table></div>`; }
+  h += `</div><div class="boardfoot"><div class="btnrow3"><button class="btn btn-ghost" data-calcprint>${ICON.print}Print</button><a class="btn btn-wa" href="${esc(waHref("", S.calcText))}" target="_blank" rel="noopener">${ICON.wa}Share</a><button class="btn btn-ghost" data-calccopy>Copy</button></div>
+    ${c.net && res.mats.some(m => m.buy > 0) && R.can("stock.buy") && H.draftPOs ? `<button class="btn btn-primary" data-calcpo>${ICON.inbox}Draft purchase orders for what to buy</button>` : ""}
+    <p class="hint">Nothing here is saved as a batch or a plan. ${c.net ? "To buy = required − in stock − already on order." : "Full quantities, as if nothing were in stock."}</p></div>`;
+  return h;
+}
+function calcText(c, res) {
+  return `📋 ${M.config().business} · materials for ${c.rows.filter(r => r.qty > 0).map(rowLabel).join(", ")}\n`
+    + (res.sfs.length ? `\nMake:\n` + res.sfs.map(x => `• ${x.i.name}: ${qty(x.runs * x.i.yield, x.i.unit)} (${runsTxt(x.runs)})`).join("\n") + "\n" : "")
+    + `\n${c.net ? "To buy" : "Required"}:\n` + res.mats.filter(m => m.buy > 0).map(m => `• ${m.i.name}: ${qty(m.buy, m.i.unit)}`).join("\n");
+}
+H.click.push(async T => {
+  if (S.view !== "plan" || S.filter.plan !== "calc") return false; const c = calcState();
+  if (T.closest("[data-calcadd]")) { const { fgs, sfs } = calcProducts(); const used = new Set(c.rows.map(r => r.ref)); const x = fgs.find(m => !used.has("m:" + m.id)) || fgs[0] || sfs[0];
+    c.rows.push({ ref: (x.type === "sf" ? "i:" : "m:") + x.id, qty: x.type === "sf" ? x.yield : 0 }); saveCalc(); H.render(); setTimeout(() => { const q = document.querySelectorAll("[data-calcq]"); if (q.length) q[q.length - 1].focus(); }, 30); return true; }
+  const rm = T.closest("[data-calcrm]"); if (rm) { c.rows.splice(+rm.dataset.calcrm, 1); saveCalc(); H.render(); return true; }
+  const n = T.closest("[data-calcnet]"); if (n) { c.net = n.dataset.calcnet === "1"; saveCalc(); H.render(); return true; }
+  const e = T.closest("[data-calcexact]"); if (e) { c.exact = e.dataset.calcexact === "1"; saveCalc(); H.render(); return true; }
+  if (T.closest("[data-calcclear]")) { c.rows = []; saveCalc(); H.render(); return true; }
+  if (T.closest("[data-calccopy]")) { toast(await copyText(S.calcText || "") ? "Copied" : "Couldn’t copy here"); return true; }
+  if (T.closest("[data-calcprint]")) { const cards = [...document.querySelectorAll("#main .plan > .card:not(.cardform)")].map(x => x.outerHTML).join("");
+    printHtml(`Material requirement · ${c.rows.filter(r => r.qty > 0).map(rowLabel).join(", ")}`, `<div class="bcard tight">${cards}</div>`); return true; }
+  if (T.closest("[data-calcpo]")) { const res = calcResult(c); const made = await H.draftPOs(res.mats.filter(m => m.buy > 0).map(m => ({ ingId: m.i.id, qty: m.need - m.have })), `For ${c.rows.filter(r => r.qty > 0).map(rowLabel).join(", ")}`);
+    if (!made.length) { toast("Everything is already on order"); return true; } S.filter.po = "draft"; S.view = "po"; H.render(); window.scrollTo({ top: 0 }); toast(`${made.length} draft PO${made.length > 1 ? "s" : ""} made`); return true; }
+  return false;
+});
+H.change.push(T => {
+  if (S.view !== "plan" || S.filter.plan !== "calc") return false; const c = calcState();
+  if (T.dataset.calcref != null) { const r = c.rows[+T.dataset.calcref]; r.ref = T.value; const x = recOf(r.ref); if (x && x.type === "sf" && !r.qty) r.qty = x.yield; saveCalc(); H.render(); return true; }
+  if (T.matches("[data-calcorder]")) { const o = M.orders().find(x => x.id === T.value); if (!o) return true; let added = 0;
+    o.items.forEach(i => { const m = M.menuByName(i.item); if (!m || !(m.recipe || []).length) return; const r = c.rows.find(x => x.ref === "m:" + m.id); if (r) r.qty += i.qty; else c.rows.push({ ref: "m:" + m.id, qty: i.qty }); added++; });
+    saveCalc(); H.render(); toast(added ? `Added #${o.no}` : "That order’s items have no BOM"); return true; }
+  return false;
+});
+H.input.push(T => {
+  if (S.view !== "plan" || T.dataset.calcq == null) return false; const c = calcState(); const r = c.rows[+T.dataset.calcq]; const x = recOf(r.ref); const b = x && x.type === "sf" ? UNITS[x.unit] : null;
+  if (/[.,]$/.test(T.value)) return true; r.qty = Math.max(0, num(T.value) * (b ? b.f : 1)); if (!b) r.qty = Math.round(r.qty); saveCalc(); H.render(); return true;
 });
