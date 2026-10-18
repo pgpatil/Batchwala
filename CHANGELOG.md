@@ -5,7 +5,7 @@
 - Mark as delivered: "Delivered, not paid yet" is now the first option
 - Shelf life per menu item (default 30 days for cookies, 3 days for everything else). Unsold pieces are followed batch by batch (oldest sold first); anything past its shelf life raises a prompt when the app opens, and when it comes back after 30 minutes away, until each line is discarded or its count updated. Bake boards show a banner; batches show unsold pieces and the last good day
 - Stock is now Inventory, with tabs for raw materials, packing and semi-finished, and categories within each (Dairy, Flour & grains, Boxes…)
-- Upload a purchase invoice (Excel, CSV or pasted lines): supplier item names are matched to inventory items (remembered for next time) or added as new, then a GRN opens filled in
+- Upload a purchase invoice from a photo or PDF: text PDFs are read directly and photos or scanned pages by on-device text recognition (pdf.js and Tesseract, loaded on first use); optionally Claude (claude-opus-5-5) reads hard photos with an API key kept on that device only. Also from Excel, CSV or pasted lines: supplier item names are matched to inventory items (remembered for next time) or added as new, then a GRN opens filled in
 - Upload BOM from Excel on the BOM screen: components and parents not found are matched to inventory or created before saving
 - Checks before creating new records: customers (same flat or phone under another name, or a near-identical name), menu items, materials and suppliers (similar names), and new names in imports, are confirmed first
 

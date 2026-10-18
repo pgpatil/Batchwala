@@ -8,6 +8,7 @@ import { putMove } from "./inventory.js";
 import { esc, uid, today, ICON } from "./util.js";
 import { ui, toast, openSheet, closeSheet } from "./ui.js";
 import { similar, byNameOrAka, norm } from "./match.js";
+import { readText, claudeRead, getKey, setKey, isPdf } from "./ocr.js";
 
 /* ---------- CSV ---------- */
 // Spreadsheet apps run cells starting with = + - @ as formulas; text like that is prefixed with ' (numbers are left alone).
@@ -252,7 +253,7 @@ function drawPreview(st) {
   <div class="kpis" style="padding:0;margin:10px 0"><div class="kpi"><b>${out.adds}</b><span>to add</span></div><div class="kpi"><b>${out.updates}</b><span>to update</span></div><div class="kpi"><b>${out.skips.length}</b><span>skipped or unchanged</span></div><div class="kpi"><b style="${out.errors.length ? "color:var(--due)" : ""}">${out.errors.length}</b><span>rows with problems</span></div></div>
   ${out.errors.length ? `<label class="f">Problems · these rows won’t be imported</label><div class="kv">${out.errors.slice(0, 40).map(e => `<div><span>${e.line ? `Line ${e.line}` : "File"}</span><span style="text-align:right">${esc(e.msg)}</span></div>`).join("")}${out.errors.length > 40 ? `<div><span>…and ${out.errors.length - 40} more</span></div>` : ""}</div>` : ""}
   ${ok ? `<label class="f">Changes</label><div class="kv">${out.ops.slice(0, 60).map(o => `<div><span>${esc(o.what)}</span><span class="tag ${o.kind === "add" ? "t-paid" : "t-part"}">${o.kind === "add" ? "Add" : "Update"}</span></div>`).join("")}${ok > 60 ? `<div><span>…and ${ok - 60} more</span></div>` : ""}</div>` : ""}
-  ${t.summary ? t.summary(out) : ""}
+  ${t.summary ? t.summary(out, st) : ""}
   ${out.skips.length ? `<label class="f">Skipped or unchanged</label><div class="kv">${out.skips.slice(0, 20).map(x => `<div><span>${esc(x)}</span></div>`).join("")}${out.skips.length > 20 ? `<div><span>…and ${out.skips.length - 20} more</span></div>` : ""}</div>` : ""}
   ${pend.length ? `<button class="btn btn-primary" disabled>Answer the ${pend.length} question${pend.length > 1 ? "s" : ""} above first</button>`
     : t.finish ? `<button class="btn btn-primary" data-act="applyImport" ${t.ready && !t.ready(out) ? "disabled" : ""}>${esc(t.finishLabel(out))}</button>`
@@ -303,6 +304,10 @@ function pastedLines(text) {
     out.push({ line: li + 1, item: name, qty: q.n, unit: q.u, amount: amt.n, tax: null }); });
   return out;
 }
+// Text with columns (PDF text keeps gaps between columns; pasted spreadsheet cells are tab-separated): read it as a table when a header row is found, else line by line.
+// Text recognition often reads a lone 1 as i, l, I or |, and 0 as O inside numbers; fix those before reading quantities.
+const fixOcr = t => t.split("\n").map(l => l.replace(/(^|\s)[il|I](?=\s+\d)/g, "$11").replace(/(\d)[oO](?=\d|\b)/g, "$10").replace(/\b[oO](\d)/g, "0$1")).join("\n");
+function linesFromText(text) { const r = invoiceLines(text.split(/\r?\n/).map(l => l.trim().split(/\t|\s{2,}/))); return !r.error && r.recs.length ? r.recs : pastedLines(text); }
 T.invoice = { label: "Purchase invoice", verb: "Read", hidden: true,
   plan(recs, dec, st) { const out = newPlan(dec); const ings = M.ingredients().filter(i => i.type !== "sf"); const made = {}; out.lines = [];
     recs.forEach(r => { const uu = r.unit ? unitIn(r.unit) : null; if (r.unit && !uu) return out.err(r, `Unit “${r.unit}” for ${r.item} isn’t g, kg, ml, L or pcs`);
@@ -311,18 +316,27 @@ T.invoice = { label: "Purchase invoice", verb: "Read", hidden: true,
       const [u, f] = uu || [m.unit, (BIG[m.unit] || [m.unit, 1])[1]]; if (u !== m.unit) return out.err(r, `${r.item}: ${m.name} is measured in ${m.unit}, the invoice says ${r.unit}`);
       out.lines.push({ ingId: m.id, name: m.name, from: r.item, qty: r.qty * f, f, amount: +r.amount || 0, taxPct: r.tax }); });
     return out; },
-  summary: out => out.lines.length ? `<label class="f">GRN draft · ${out.lines.length} line${out.lines.length > 1 ? "s" : ""}</label><div class="kv">${out.lines.map(l => { const i = M.ingMap()[l.ingId]; return `<div><span>${esc(l.name)}${norm(l.from) !== norm(l.name) ? ` <small class="mut">from “${esc(l.from)}”</small>` : ""}</span><span>${i ? esc(qtyText(l.qty, i)) : l.qty} · ₹${l.amount}</span></div>`; }).join("")}</div>` : "",
+  summary: (out, st) => (st && st.text ? `<details class="ivtext"><summary>Text that was read · ${esc(st.how === "pdf" ? "from the PDF" : st.how === "paste" ? "pasted" : "by text recognition")}</summary><pre class="billbox">${esc(st.text.trim())}</pre><button class="btn btn-ghost" data-invedit>Fix the text and read again</button></details>` : "") + (out.lines.length ? `<label class="f">GRN draft · ${out.lines.length} line${out.lines.length > 1 ? "s" : ""}</label><div class="kv">${out.lines.map(l => { const i = M.ingMap()[l.ingId]; return `<div><span>${esc(l.name)}${norm(l.from) !== norm(l.name) ? ` <small class="mut">from “${esc(l.from)}”</small>` : ""}</span><span>${i ? esc(qtyText(l.qty, i)) : l.qty} · ₹${l.amount}</span></div>`; }).join("")}</div>` : ""),
   ready: out => out.lines.length > 0,
   finishLabel: out => `Open GRN with ${out.lines.length} line${out.lines.length === 1 ? "" : "s"}`,
   finish: (out, st) => { H.grnSheet && H.grnSheet({ supplier: st.supplier, invoiceNo: st.invoiceNo, lines: out.lines }); toast("Check the GRN and save it to add the stock"); } };
 const qtyText = (q, i) => { const [u, f] = BIG[i.unit] || [i.unit, 1]; return `${r4(q / f)} ${u}`; };
-A.invoiceIn = () => { if (!R.can("stock.buy")) return toast("Your role can’t record purchases.");
-  openSheet({ kind: "invin" }, `<div class="sh-head"><h2 class="h">Purchase invoice</h2><button class="x" data-close aria-label="Close">×</button></div>
-  <p class="hint" style="margin-top:-4px">Load the supplier’s invoice as Excel or CSV, or paste its lines. Items the app doesn’t know are matched to inventory (and remembered), then a GRN opens for you to check and save.</p>
-  <div class="two"><div><label class="f" for="ivSup">Supplier</label><input class="in" id="ivSup" list="ivsups" placeholder="Name"><datalist id="ivsups">${M.suppliers().map(x => `<option value="${esc(x.name)}">`).join("")}</datalist></div><div><label class="f" for="ivNo">Invoice no.</label><input class="in" id="ivNo" placeholder="Optional"></div></div>
-  <label class="btn btn-primary" style="margin-top:14px">${ICON.inbox}Choose invoice file (.xlsx or .csv)<input type="file" accept=".csv,text/csv,.xlsx" data-invfile hidden></label>
-  <label class="f" for="ivText">Or paste the item lines</label><textarea class="in" id="ivText" style="height:140px" placeholder="Amul Butter 500g   4 kg   2200&#10;Maida 50kg bag   1   1850&#10;6pc box   100 pcs   1000"></textarea>
+// opts: { text, supplier, invoiceNo } to come back to the sheet with what was read, for editing.
+A.invoiceIn = async (el, e, opts = {}) => { if (!R.can("stock.buy")) return toast("Your role can’t record purchases.");
+  const key = await getKey(); const st = { kind: "invin", redraw: () => A.invoiceIn(null, null, { ...invMeta(), text: (document.getElementById("ivText") || {}).value || "" }) };
+  openSheet(st, `<div class="sh-head"><h2 class="h">Purchase invoice</h2><button class="x" data-close aria-label="Close">×</button></div>
+  <p class="hint" style="margin-top:-4px">Take a photo of the bill, or load the supplier’s PDF or Excel. Items the app doesn’t know are matched to inventory (and remembered), then a GRN opens for you to check and save.</p>
+  <div class="two"><div><label class="f" for="ivSup">Supplier</label><input class="in" id="ivSup" list="ivsups" placeholder="Name (read from the bill if blank)" value="${esc(opts.supplier || "")}"><datalist id="ivsups">${M.suppliers().map(x => `<option value="${esc(x.name)}">`).join("")}</datalist></div><div><label class="f" for="ivNo">Invoice no.</label><input class="in" id="ivNo" placeholder="Optional" value="${esc(opts.invoiceNo || "")}"></div></div>
+  <label class="btn btn-primary" style="margin-top:14px">${ICON.inbox}Take a photo or choose a PDF<input type="file" accept="image/*,application/pdf" data-invimg hidden></label>
+  ${key ? `<label class="chkline"><input type="checkbox" id="ivClaude" checked> Read with Claude <small class="mut">(better for photos and crumpled or handwritten bills)</small></label>` : `<p class="hint">Photos are read on this phone. For hard-to-read photos, add a Claude API key below.</p>`}
+  <p class="hint ivstatus" id="ivStatus" role="status"></p>
+  <label class="btn btn-ghost">Choose Excel or CSV invoice<input type="file" accept=".csv,text/csv,.xlsx" data-invfile hidden></label>
+  <label class="f" for="ivText">Or paste the item lines</label><textarea class="in" id="ivText" style="height:140px" placeholder="Amul Butter 500g   4 kg   2200&#10;Maida 50kg bag   1   1850&#10;6pc box   100 pcs   1000">${esc(opts.text || "")}</textarea>
   <button class="btn btn-ghost" data-invpaste>Read pasted lines</button>
+  <details class="ivclaude"><summary>Claude reading for photos and PDFs · ${key ? "on for this device" : "off"}</summary>
+    <p class="hint">Claude (Anthropic) reads the photo or PDF and returns the item lines. You need your own API key from console.anthropic.com; each invoice costs a few rupees on your Anthropic account. The key is kept only on this device, never synced, and anyone using this device can use it. The photo is sent to Anthropic to be read.</p>
+    ${key ? `<div class="kv"><div><span>Key</span><span>${esc(key.slice(0, 10))}…${esc(key.slice(-4))}</span></div></div><button class="btn btn-danger" data-invkeyrm>Remove the key from this device</button>`
+      : `<input class="in" id="ivKey" type="password" placeholder="sk-ant-…" autocomplete="off" autocapitalize="off"><button class="btn btn-ghost" data-invkey>Save key on this device</button>`}</details>
   <button class="btn btn-ghost" data-tpl="invoice">Download an invoice template</button>`); };
 T.invoice.cols = [{ label: "Item" }, { label: "Qty" }, { label: "Unit" }, { label: "Rate" }, { label: "Amount" }, { label: "GST %" }];
 T.invoice.notes = ["Any supplier layout works if it has a header row with an item and a quantity column. Reading stops at a Total row.", "Unit: g, kg, ml, L or pcs; blank = kg, L or pcs for that item. Amount is before tax; blank = Qty × Rate."];
@@ -334,8 +348,12 @@ H.click.push(async T0 => {
   const tp = T0.closest("[data-tpl]"); if (tp) { const t = T[tp.dataset.tpl];
     download(fileName(tp.dataset.tpl, "template"), [[`# Batchwala template: ${t.label}. Lines starting with # are ignored. Fill one row per record under the header line.`], ...t.notes.map(n => ["# " + n]), ["# Example: " + t.ex.join(" | ")], t.cols.map(c => c.label)]);
     toast(`${t.label} template downloaded`); return true; }
-  if (T0.closest("[data-invpaste]")) { const recs = pastedLines((document.getElementById("ivText") || {}).value || ""); if (!recs.length) { toast("No item lines found. Each line needs a name and a quantity."); return true; }
-    startImport("invoice", recs, "Pasted lines", invMeta()); return true; }
+  if (T0.closest("[data-invkey]")) { const k = ((document.getElementById("ivKey") || {}).value || "").trim(); if (!/^sk-ant-/.test(k)) { toast("That doesn’t look like a Claude API key (it starts with sk-ant-)"); return true; }
+    await setKey(k); toast("Key saved on this device"); ui.sheet.redraw(); return true; }
+  if (T0.closest("[data-invkeyrm]")) { await setKey(""); toast("Key removed from this device"); ui.sheet.redraw(); return true; }
+  if (T0.closest("[data-invedit]")) { const st = ui.sheet; A.invoiceIn(null, null, { text: st.text, supplier: st.supplier, invoiceNo: st.invoiceNo }); return true; }
+  if (T0.closest("[data-invpaste]")) { const recs = linesFromText((document.getElementById("ivText") || {}).value || ""); if (!recs.length) { toast("No item lines found. Each line needs a name and a quantity."); return true; }
+    startImport("invoice", recs, "Pasted lines", { ...invMeta(), text: (document.getElementById("ivText") || {}).value || "", how: "paste" }); return true; }
   const st = ui.sheet;
   if (st && st.kind === "imp" && T0.closest("[data-pendall]")) { st.out.pend.forEach(p => { if (p.suggest) st.dec[p.key] = p.suggest; }); replan(st); return true; }
   return false;
@@ -343,6 +361,23 @@ H.click.push(async T0 => {
 H.change.push(async T0 => {
   const st = ui.sheet;
   if (st && st.kind === "imp" && T0.dataset && T0.dataset.pend != null) { if (T0.value) { st.dec[T0.dataset.pend] = T0.value; replan(st); } return true; }
+  if (T0.dataset && T0.dataset.invimg != null) { const f = T0.files && T0.files[0]; T0.value = ""; if (!f) return true; const meta = invMeta();
+    const useClaude = !!(document.getElementById("ivClaude") || {}).checked; const status = t => { const el = document.getElementById("ivStatus"); if (el) el.textContent = t; };
+    if (!isPdf(f) && !/^image\//.test(f.type)) { toast("Choose a photo or a PDF"); return true; }
+    try {
+      if (useClaude) {
+        const r = await claudeRead(f, await getKey(), status);
+        const recs = (r.lines || []).map((l, i) => ({ line: i + 1, item: String(l.item || "").trim(), qty: +l.qty || 0, unit: String(l.unit || "").trim(), amount: +l.amount || 0, tax: +l.tax_pct >= 0 ? +l.tax_pct : null })).filter(x => x.item && x.qty > 0);
+        if (!recs.length) { status("Claude found no item lines on this file."); return true; }
+        startImport("invoice", recs, `${f.name} · read by Claude`, { supplier: meta.supplier || r.supplier || "", invoiceNo: meta.invoiceNo || r.invoice_no || "" });
+      } else {
+        const read = await readText(f, status); const how = read.how; const text = how === "ocr" ? fixOcr(read.text) : read.text; const ta = document.getElementById("ivText"); if (ta) ta.value = text.trim();
+        const recs = linesFromText(text);
+        if (!recs.length) { status(`Read the ${how === "pdf" ? "PDF’s text" : "photo"}, but found no item lines with a quantity and amount. Fix the text below, then tap Read pasted lines.`); return true; }
+        startImport("invoice", recs, `${f.name} · ${how === "pdf" ? "PDF text" : "text recognition"}`, { ...meta, text, how });
+      }
+    } catch (e) { status(""); toast(e.message || "Couldn’t read that file"); }
+    return true; }
   if (T0.dataset && T0.dataset.invfile != null) { const f = T0.files && T0.files[0]; T0.value = ""; if (!f) return true; const meta = invMeta();
     try { const { recs, error } = invoiceLines(await readFile(f)); if (error) { toast(error); return true; } if (!recs.length) { toast("No item lines found under the header"); return true; } startImport("invoice", recs, f.name, meta); }
     catch (e) { toast(e.message || "Couldn’t read that file"); } return true; }

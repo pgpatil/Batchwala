@@ -19,7 +19,7 @@ It is a Progressive Web App: it opens from a link, installs to the home screen, 
 | Delivery run | Today’s pre-orders by wing and floor; Delivered + paid by UPI or cash in one confirm |
 | Bill summary | Per order: items with quantity, rate and amount, then Total, Discount and Total payable. Copy marks it “Bill summary sent”; editing the order afterwards flags it |
 | Payments | Balances by customer, one-tap UPI or cash, part payments oldest-first, reversals instead of edits, WhatsApp reminders with your UPI ID |
-| Inventory | Tabs for raw materials (RM), packing (PM) and semi-finished items, with categories; upload a supplier invoice to fill a GRN, matching their item names to yours. Raw materials (RM), packing materials (PM) and semi-finished items in g, ml or pieces; purchases with price and supplier, wastage, stock counts, reorder levels, shopping list, barcode search |
+| Inventory | Tabs for raw materials (RM), packing (PM) and semi-finished items, with categories; upload a supplier invoice (photo, PDF, Excel or pasted) to fill a GRN, matching their item names to yours. Raw materials (RM), packing materials (PM) and semi-finished items in g, ml or pieces; purchases with price and supplier, wastage, stock counts, reorder levels, shopping list, barcode search |
 | BOM | Multilevel bills of materials: menu items use raw, packing and semi-finished materials; semi-finished items have their own recipe and yield and can use other semi-finished items. Costs roll up through every level. Plan & explode turns a day’s bake into what to prepare and what to buy |
 | Menu | Prices, categories, short names for WhatsApp reading, par levels, recipes with cost and margin |
 | Reports | Sales by day and channel, best sellers with margin, wastage value, repeat customers |
@@ -107,10 +107,13 @@ No build step: plain HTML, CSS and JavaScript modules. Run locally with `python3
 | `js/help.js` | In-app Help topics |
 | `js/data.js` | Import & export by data type, templates, purchase invoices |
 | `js/match.js` | Name matching and checks before creating new records |
+| `js/ocr.js` | Reading invoice photos and PDFs: pdf.js, Tesseract, optional Claude |
 | `js/ops.js` | Delivery run, WhatsApp import, New-order menu |
 | `js/waparse.js` | Reads a WhatsApp message into a draft order |
 | `js/admin.js` | More, first run, users, settings, sync, backup, Excel |
 | `tests/` | Fake shared folder for testing two-phone sync locally |
 | `sw.js` | Offline cache; **bump `VERSION` on every release** |
+
+Invoice reading loads pdf.js, Tesseract and the Anthropic SDK from jsDelivr on first use (versions pinned in `js/ocr.js`). To test against a local mirror, set `localStorage.setItem("bw.cdn","http://127.0.0.1:8766/npm")`. The optional Claude reading calls the Anthropic API from the browser with a key stored on the device (IndexedDB meta, not synced); it is meant for the owner’s own devices.
 
 To test sync without Google: run `python3 tests/fake_drive.py . 8767`, open two browser profiles at `http://127.0.0.1:8767`, and in each run `localStorage.setItem("bw.testAdapter","http://127.0.0.1:8767")` in the console, then reload.

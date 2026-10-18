@@ -80,13 +80,15 @@ const TOPICS = [
     <p>Filter by category, level (low, out) and, with ERP and several locations, by location. Scanners in keyboard mode type into the search to find a barcode. Open a material for its stock, cost, where it’s used and its history; <b>Bought</b> (or a GRN in ERP), <b>Make</b> for semi-finished, <b>Wasted</b> and <b>Count</b>.</p>
     <p><b>Shopping list</b>: bought materials at or below their reorder level, brought back to twice that level.</p>
     <p>Costs: bought materials use the last purchase price; semi-finished cost rolls up through their recipe. With tax on, the admin sets per material whether purchase tax is recoverable or added to cost.</p>` },
-  { id: "invoice", title: "Upload a purchase invoice", tags: "invoice upload supplier bill purchase grn map match item names excel csv paste pdf", body: `
+  { id: "invoice", title: "Upload a purchase invoice", tags: "invoice upload supplier bill purchase grn map match item names excel csv paste pdf photo camera scan ocr claude", body: `
     <p>Inventory, Purchases or Import & export → <b>Upload invoice</b>.</p>
-    <ol><li>Enter the supplier and invoice number.</li>
-    <li>Choose the supplier’s invoice as Excel or CSV (any layout with an item and a quantity column; reading stops at the Total row), or paste the item lines copied from a PDF or message (e.g. <i>Amul Butter 500g 4 kg 2200</i>).</li>
+    <ol><li>Enter the supplier and invoice number (or leave them for the app to read from the bill).</li>
+    <li><b>Take a photo or choose a PDF</b>, choose the supplier’s <b>Excel or CSV</b>, or <b>paste</b> the item lines.</li>
     <li>Items the app doesn’t recognise are listed with the closest inventory items. Pick the item each one is, add it as a new raw or packing material, or skip it. Your choice is remembered, so the same supplier name matches by itself next time.</li>
     <li>A GRN opens with the lines filled in. Check quantities and units, then save it to add the stock.</li></ol>
-    <p>With no unit on the invoice, quantities are read in kg, L or pieces. Photos and scanned PDFs can’t be read yet; copy the lines as text instead.</p>` },
+    <p><b>How photos and PDFs are read.</b> PDFs from billing software are read from their own text, on the phone. Photos and scanned PDFs go through text recognition on the phone (the first time it downloads about 10 MB). Clear, flat, well-lit photos read best. The text that was read is shown on the check screen; <b>Fix the text and read again</b> lets you correct it.</p>
+    <p><b>Read with Claude</b> (optional): for crumpled, faded or handwritten bills, add a Claude API key in the invoice sheet. The photo or PDF is then sent to Anthropic’s Claude to read, and each invoice costs a few rupees on your Anthropic account. The key stays on that device only and isn’t synced; remove it there any time.</p>
+    <p>With no unit on the invoice, quantities are read in kg, L or pieces.</p>` },
   { id: "grn", view: "grn", title: "Purchases (GRN)", tags: "grn goods received note purchase supplier invoice tax receive stock", body: `
     <p>Record each delivery from a supplier as a <b>GRN</b>: supplier (new names are added to your supplier list), invoice number, date, the location receiving it, and each item’s quantity, amount and tax %. Saving adds the stock at that location.</p>
     <p>The list shows this month, 30 days or all, with totals and spend by supplier. <b>Undo</b> takes the stock back off and keeps the GRN marked undone.</p>` },

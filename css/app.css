@@ -459,3 +459,10 @@ kbd{font:inherit;font-size:11px;font-weight:800;border:1px solid var(--line);bor
 .exbtns{display:flex;align-items:center;gap:10px}
 .dangerbtn{background:var(--due)}
 @media (min-width:1024px){ .invtabs{max-width:640px} }
+.chkline{display:flex;align-items:center;gap:8px;margin-top:10px;font-weight:700;font-size:14px}
+.chkline input{width:20px;height:20px}
+.ivstatus:empty{display:none}
+.ivstatus{font-weight:700;color:var(--ink)}
+.ivclaude,.ivtext{margin-top:14px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:10px 14px}
+.ivclaude summary,.ivtext summary{font-weight:700;cursor:pointer}
+.ivtext pre{max-height:220px;overflow:auto;font-size:13px}
