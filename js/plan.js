@@ -3,6 +3,7 @@ import * as ev from "./events.js";
 import * as sync from "./sync.js";
 import * as M from "./model.js";
 import * as R from "./roles.js";
+import { asLines, layoutSwitch } from "./table.js";
 import { S, V, H, chipBar, band } from "./core.js";
 import { bakeSheet } from "./inventory.js";
 import { esc, rs, rs2, num, today, addDays, dLong, qty, UNITS, ICON, copyText, waHref } from "./util.js";
@@ -89,7 +90,7 @@ V.plan = () => {
   let h = band(erp() ? `Planning · ${esc(M.locName(H.prodKitchen()))}` : "Planning", `${lines.length ? `<button class="pillbtn" data-planprint>${ICON.print}Print plan</button>` : ""}`,
     `<div class="stats"><div class="st"><b>${pcs}</b><span>pieces to make</span></div><div class="st"><b>${runs}</b><span>semi-finished runs</span></div><div class="st"><b>${short.length}</b><span>materials to buy</span></div></div>`);
   h += `<div class="tools"><div class="chips">${[t, addDays(t, 1), addDays(t, 2)].map((x, i) => `<button class="chip" data-plandate="${x}" aria-pressed="${d === x}">${["Today", "Tomorrow", esc(dLong(x))][i]}</button>`).join("")}<label class="chip datechip">${[t, addDays(t, 1), addDays(t, 2)].includes(d) ? "Other date" : esc(dLong(d))}<input type="date" data-plandatein value="${d}"></label></div></div>
-    <div class="tools" style="padding-top:0">${chipBar("plan", [["fg", "Finished goods", lines.length], ["sf", "Semi-finished", sfIds.length], ["indent", "Indent", short.length || null], ["card", "Batch card"]])}</div>`;
+    <div class="tools" style="padding-top:0">${layoutSwitch("plan")}${chipBar("plan", [["fg", "Finished goods", lines.length], ["sf", "Semi-finished", sfIds.length], ["indent", "Indent", short.length || null], ["card", "Batch card"]])}</div>`;
   if (k === "card") return h + cardView(d);
   if (k === "fg") return h + fgView(d, lines, ex, saved);
   if (!lines.length) return h + `<div class="empty"><strong>Nothing planned for ${esc(dLong(d))}</strong>Add finished goods in the Finished goods tab; semi-finished and the indent follow from their BOMs.</div>`;

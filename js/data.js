@@ -3,6 +3,7 @@ import * as ev from "./events.js";
 import * as sync from "./sync.js";
 import * as M from "./model.js";
 import * as R from "./roles.js";
+import { asLines, layoutSwitch } from "./table.js";
 import { S, A, V, H, band, clean, saveOrder } from "./core.js";
 import { putMove } from "./inventory.js";
 import { esc, uid, today, ICON } from "./util.js";
@@ -227,6 +228,9 @@ const fileName = (k, kind) => `${(M.config().business || "bakery").replace(/[^\w
 const canExport = () => R.can("export"); const canImport = () => R.isAdmin();
 V.data = () => {
   let h = band("Import & export", R.can("stock.buy") ? `<button class="pillbtn" data-act="invoiceIn">${ICON.inbox}Purchase invoice → GRN</button>` : "", `<p class="bandnote">Export what’s in the app as CSV (opens in Excel or Google Sheets), download a template, or import a filled file. Imports show a check screen first.</p>`);
+  const types = Object.entries(T).filter(([, t]) => !t.hidden);
+  h += `<div class="tools">${layoutSwitch("data")}</div>`;
+  if (asLines("data")) return h + `<div class="card tablecard"><table class="reg"><thead><tr><th>Data</th><th>What it holds</th><th class="r">Records</th><th>Export</th><th>Template</th><th>Import</th></tr></thead><tbody>${types.map(([k, t]) => `<tr><td><b>${esc(t.label)}</b></td><td class="items">${esc(t.desc)}</td><td class="r">${t.count()}</td><td>${canExport() ? `<button class="linkbtn" data-exp="${k}">Export</button>` : ""}</td><td>${t.exportOnly ? "–" : `<button class="linkbtn" data-tpl="${k}">Template</button>`}</td><td>${!t.exportOnly && canImport() ? `<label class="linkbtn">Import<input type="file" accept=".csv,text/csv,.xlsx" data-imp="${k}" hidden></label>` : "–"}</td></tr>`).join("")}</tbody></table></div>${!canImport() ? `<p class="hint" style="padding:0 4px">Only the admin can import.</p>` : ""}`;
   return h + `<div class="datalist">${Object.entries(T).filter(([, t]) => !t.hidden).map(([k, t]) => `<div class="datacard"><div class="dc-head"><span class="ic">${ICON[t.icon] || ICON.dl}</span><div class="grow"><b>${esc(t.label)}</b><small>${esc(t.desc)}</small></div><span class="tag t-camp">${t.count()}</span></div>
     <div class="dc-btns">${canExport() ? `<button class="btn btn-ghost" data-exp="${k}">${ICON.dl}Export</button>` : ""}${t.exportOnly ? "" : `<button class="btn btn-ghost" data-tpl="${k}">Template</button>${canImport() ? `<label class="btn btn-primary">${ICON.inbox}Import<input type="file" accept=".csv,text/csv,.xlsx" data-imp="${k}" hidden></label>` : ""}`}</div></div>`).join("")}</div>
   ${!canImport() ? `<p class="hint" style="padding:0 4px">Only the admin can import.</p>` : ""}`;

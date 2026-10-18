@@ -5,6 +5,7 @@ import * as M from "./model.js";
 import * as R from "./roles.js";
 import { APP_NAME, GOOGLE_CLIENT_ID, DATA_FOLDER } from "./config.js";
 import { createDriveAdapter } from "./storage/drive.js";
+import * as L from "./lock.js";
 import { S, A, V, H, guard, logoHtml, toran, clean } from "./core.js";
 import { $, esc, rs, rs2, num, uid, today, cmpFlat, ICON } from "./util.js";
 import { ui, toast, openSheet, closeSheet, ask, yesNo } from "./ui.js";
@@ -36,7 +37,7 @@ V.more = () => {
   return `<div class="band"><div class="top">${logoHtml(c)}<div class="biz"><div class="name">${esc(c.business)}</div><div class="sub">${esc(me ? me.name + " · " + R.ROLES[me.role].label : "")}</div></div></div>${toran()}</div>
   ${H.switchers ? `<div class="moresw">${H.switchers()}</div>` : ""}
   <div class="menu-list" style="margin-top:14px">${items.map(([a, ic, t, s]) => `<button class="mi" ${a[0] === "@" ? `data-go="${a.slice(1)}"` : `data-act="${a}"`}><span class="ic">${ICON[ic]}</span><span class="grow">${t}<small>${esc(s)}</small></span><span class="chev">${ICON.chev}</span></button>`).join("")}</div>
-  <p class="hint" style="padding:4px 18px">${APP_NAME} 2.9${R.mode() !== "classic" ? " · " + esc(M.MODES[R.mode()]) + " mode" : ""} · ${st.state === "off" ? "data saved on this phone only" : "synced through Google Drive"}${st.last ? " · last sync " + new Date(st.last).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" }) : ""}</p>`;
+  <p class="hint" style="padding:4px 18px">${APP_NAME} 2.10${R.mode() !== "classic" ? " · " + esc(M.MODES[R.mode()]) + " mode" : ""} · ${st.state === "off" ? "data saved on this phone only" : "synced through Google Drive"}${st.last ? " · last sync " + new Date(st.last).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" }) : ""}</p>`;
 };
 
 /* ---------- first run ---------- */
@@ -87,10 +88,11 @@ function usersSheet() {
   <div class="kv">${R.ROLE_KEYS.map(k => `<div><span><b>${esc(R.ROLES[k].label)}</b><small class="mut" style="display:block">${esc(R.ROLES[k].note)}</small></span></div>`).join("")}</div>`);
 }
 const modeKey = x => { const mm = Array.isArray(x.modes) ? x.modes : (x.role === "admin" && R.mode() !== "classic" ? ["restaurant", "erp"] : ["restaurant"]); return mm.length > 1 ? "both" : mm[0]; };
-function memberSheet(m) {
+async function memberSheet(m) {
+  const lk = m ? await L.open("members", m.id, m.name) : {}; if (!lk) return;
   const isNew = !m; const x = m ? { ...m } : { id: uid("u"), name: "", role: "management", email: "", prefix: "", pin: "" };
   const a = sync.current();
-  openSheet({ kind: "member", x, isNew }, `<div class="sh-head"><h2 class="h">${isNew ? "Add a person" : esc(x.name)}</h2><button class="x" data-close aria-label="Close">×</button></div>
+  openSheet({ ...lk, kind: "member", x, isNew }, `<div class="sh-head"><h2 class="h">${isNew ? "Add a person" : esc(x.name)}</h2><button class="x" data-close aria-label="Close">×</button></div>
   <label class="f" for="mbName">Name</label><input class="in" id="mbName" value="${esc(x.name)}">
   <label class="f">Role</label><div class="chips">${R.ROLE_KEYS.map(k => `<button class="chip" data-mrole="${k}" aria-pressed="${x.role === k}">${R.ROLES[k].label}</button>`).join("")}</div>
   <p class="hint" id="mbNote">${esc(R.ROLES[x.role].note)}</p>
@@ -112,6 +114,7 @@ A.saveMember = async () => {
   if (!x.prefix) x.prefix = prefixFor(x.name);
   if (x.id === (R.me() || {}).id && x.role !== "admin" && R.members().filter(m => m.role === "admin").length < 2) { toast("Keep at least one admin"); return; }
   if ($("#mbLoc")) x.loc = $("#mbLoc").value;
+  if (!await L.saveOk(st)) return;
   const erpBefore = M.erpOn(); const { _at, _by, ...rec } = x; await ev.put("members", rec);
   // ERP starts counting finished goods from the day it is first given to someone.
   if (!erpBefore && M.erpOn() && !M.config().erpStart) await ev.put("config", clean({ ...M.config(), erpStart: today(), id: "app" }));
@@ -147,8 +150,8 @@ H.click.push(async T => {
 });
 
 /* ---------- business settings ---------- */
-function settingsSheet() { if (!R.isAdmin()) return; const c = JSON.parse(JSON.stringify(M.config())); c.tax = M.taxCfg(); c.locations = M.locations().map(l => ({ ...l }));
-  const st = { kind: "settings", c }; st.redraw = () => drawSettings(st); drawSettings(st); }
+async function settingsSheet() { if (!R.isAdmin()) return; const lk = await L.open("config", "app", "Business settings"); if (!lk) return; const c = JSON.parse(JSON.stringify(M.config())); c.tax = M.taxCfg(); c.locations = M.locations().map(l => ({ ...l }));
+  const st = { ...lk, kind: "settings", c }; st.redraw = () => drawSettings(st); drawSettings(st); }
 function hue(hex) { const n = parseInt(hex.slice(1), 16); const r = (n >> 16) / 255, g = (n >> 8 & 255) / 255, b = (n & 255) / 255; const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn; if (!d) return -1; let h = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4; return (h * 60 + 360) % 360; }
 function drawSettings(st) {
   const c = st.c;
@@ -192,7 +195,7 @@ A.toggleTax = () => { syncSettings(); ui.sheet.c.tax.on = !ui.sheet.c.tax.on; dr
 A.addLocation = () => { syncSettings(); const c = ui.sheet.c; c.locations.push({ id: uid("l"), name: `Outlet ${c.locations.filter(l => l.kind === "outlet").length + 1}`, kind: "outlet" }); drawSettings(ui.sheet); };
 A.toggleFestive = () => { syncSettings(); ui.sheet.c.festive = !ui.sheet.c.festive; drawSettings(ui.sheet); };
 A.addTag = () => { syncSettings(); const v = $("#sNewTag").value.trim(); if (!v) { toast("Type the occasion name"); return; } ui.sheet.c.tags = [...new Set([...(ui.sheet.c.tags || []), v])]; drawSettings(ui.sheet); };
-A.saveSettings = async () => { syncSettings(); const h = hue(ui.sheet.c.accent);
+A.saveSettings = async () => { syncSettings(); const h = hue(ui.sheet.c.accent); if (!await L.saveOk(ui.sheet)) return;
   if ((h >= 0 && (h < 15 || h > 340)) || (h > 100 && h < 170)) { toast("That colour is too close to the red or green used for status. Pick another."); return; }
   await ev.put("config", clean({ ...ui.sheet.c, id: "app" })); sync.soon(); closeSheet(); toast("Settings saved"); };
 H.change.push(async T => {

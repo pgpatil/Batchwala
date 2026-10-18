@@ -21,14 +21,17 @@ export function openSheet(state, html, full = false) {
   const s = $("#sheet"); const o = ui.sheet;   // the same sheet redrawn (same state, or same kind of sheet for the same record): keep the place and the cursor
   const again = !!o && s.classList.contains("open") && (o === state || (o.kind === state.kind && o.id === state.id));
   const top = s.scrollTop, f = again ? focusKey(s) : null;
+  if (o && o !== state && o.lock && o.lock !== state.lock && ui.release) ui.release(o.lock);   // leaving an editor frees its lock
   ui.sheet = state; s.className = "sheet" + (again ? " open" : "") + (full ? " full" : ""); s.innerHTML = `<div class="grab"></div>` + html;
   if (again || s.dataset.keep) s.scrollTop = top; else s.scrollTop = 0; delete s.dataset.keep;
   if (f) refocus(s, f);
+  if (ui.after) ui.after(s, state);
   requestAnimationFrame(() => { if (ui.sheet === state) s.classList.add("open"); });   // not if it was closed meanwhile
   $("#scrim").classList.add("open"); document.body.style.overflow = "hidden";
 }
 export function closeSheet() {
   $("#scrim").classList.remove("open"); $("#sheet").classList.remove("open"); document.body.style.overflow = "";
+  if (ui.sheet && ui.sheet.lock && ui.release) ui.release(ui.sheet.lock);
   ui.sheet = null; ui.onClose && ui.onClose();
 }
 export function ask(html, buttons, pair = false) {

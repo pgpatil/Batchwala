@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.10.0 — 18 Oct 2026
+- Editing locks: opening a saved order, menu item, material, PO, work order, transfer receipt, batch, person or the business settings locks it for everyone else until it's saved or closed. Others see who is editing and since when (and a 🔒 line on the record's page); the admin can take over. Locks lapse 8 minutes after the editor's app goes quiet. Because devices sync about once a minute, saving also checks whether someone else saved the record after it was opened and asks before overwriting
+- Day book in Tally's shape: Sales, Receipt, Purchase and Payment vouchers with ledger entries (party, sales/purchase, CGST/SGST per rate, round off, cash/bank), a Day Book view, Tally XML for ledgers (Sundry Debtors/Creditors with GSTIN, account ledgers) and for vouchers, and an Excel copy in Day Book columns. Ledger names are set once to match the Tally company
+- Grid or lines on every list screen and the Customers and Menu drawers: Today, Payments, Delivery run, bake boards, BOM and Import & export gain table views; Planning, Finished goods and Reports gain card views. Tables in drawers sort and filter too
+
 ## 2.9.0 — 18 Oct 2026
 - Purchase orders: raise, approve (admin or management; managers can raise but not approve), send to the supplier on WhatsApp, receive in one or more GRNs against the PO with a warning when the bill's rate differs, or close short. Planning's indent and a reorder banner draft POs per usual supplier for what's short after stock and anything already on order, rounded up to whole packs at each supplier's last price
 - Suppliers & payables: what is owed to each supplier from their GRNs, overdue by credit days, ledger with running balance, payments (bank, UPI, cash, cheque with reference) that settle the oldest bills first, reversals, WhatsApp statements

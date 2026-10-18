@@ -5,6 +5,7 @@ import * as sync from "./sync.js";
 import * as M from "./model.js";
 import * as R from "./roles.js";
 import { asLines, layoutSwitch } from "./table.js";
+import * as L from "./lock.js";
 import { S, A, V, H, guard, chipBar, searchBox, band, clean } from "./core.js";
 import { putMove } from "./inventory.js";
 import { printHtml } from "./plan.js";
@@ -77,7 +78,7 @@ function woDetail(id) {
   const w = ev.get("wos", id); if (!w) { closeSheet(); return; } const ings = M.ingMap(); const { use } = stdUse(w.lines, w.prep || []); const b = w.batchId && ev.get("bakes", w.batchId);
   const issued = w.issued || {}, ret = w.returned || {}; const ids = [...new Set([...Object.keys(use), ...Object.keys(issued)])].filter(x => ings[x]); const money = R.can("money");
   const variance = b && Array.isArray(b.variance) ? Object.fromEntries(b.variance.map(v => [v.ingId, v])) : null;
-  openSheet({ kind: "woView", id, redraw: () => woDetail(id) }, `<div class="sh-head"><h2 class="h">${esc(w.no)}</h2><button class="x" data-close aria-label="Close">×</button></div>
+  openSheet({ kind: "woView", id, redraw: () => woDetail(id) }, `<div class="sh-head"><h2 class="h">${esc(w.no)}</h2><button class="x" data-close aria-label="Close">×</button></div>${L.banner("wos", id)}
   <div class="subl" style="margin:-4px 0 10px">${esc(dLong(w.date))}${M.locations().length > 1 ? " · " + esc(M.locName(w.loc)) : ""} ${tag(w.status)}${b ? ` · batch <button class="linkbtn" data-batch="${esc(b.id)}">#${esc(b.no)}</button>` : ""}</div>
   <div class="kv">${w.lines.filter(l => l.qty > 0).map(l => { const d = b && (b.lines || []).find(x => x.item === l.item); return `<div><span>${esc(l.item)}</span><span>${l.qty} planned${d ? ` · <b>${d.qty - (d.spoiled || 0)}</b> made${d.spoiled ? `, ${d.spoiled} spoiled` : ""}` : ""}</span></div>`; }).join("")}
   ${(w.prep || []).filter(p => p.runs > 0).map(p => `<div><span>${esc((ings[p.ingId] || {}).name || "?")}</span><span>${runsTxt(p.runs)}</span></div>`).join("")}</div>
@@ -90,10 +91,11 @@ function woDetail(id) {
 }
 
 /* ---------- issue ---------- */
-function issueSheet(id) {
+async function issueSheet(id) {
+  const lk = await L.open("wos", id, (ev.get("wos", id) || {}).no || "this work order"); if (!lk) return;
   const w = ev.get("wos", id); const { use } = stdUse(w.lines, w.prep || []); const issued = w.issued || {};
   const rows = Object.keys(use).filter(x => M.ingMap()[x]).map(x => ({ ingId: x, std: use[x], done: issued[x] || 0, now: r4(Math.max(0, use[x] - (issued[x] || 0))) }));
-  const st = { kind: "woIssue", id, rows }; st.redraw = () => drawIssue(st); drawIssue(st);
+  const st = { ...lk, kind: "woIssue", id, rows }; st.redraw = () => drawIssue(st); drawIssue(st);
 }
 function drawIssue(st) {
   const w = ev.get("wos", st.id); const ings = M.ingMap(); const sm = M.stockMap(M.erpOn() ? w.loc : null);
@@ -105,9 +107,10 @@ function drawIssue(st) {
 const UNITF = i => i.unit === "pcs" ? { f: 1, u: "pcs" } : { f: 1000, u: i.unit === "g" ? "kg" : "L" };
 
 /* ---------- complete ---------- */
-function doneSheet(id) {
+async function doneSheet(id) {
+  const lk = await L.open("wos", id, (ev.get("wos", id) || {}).no || "this work order"); if (!lk) return;
   const w = ev.get("wos", id);
-  const st = { kind: "woDone", id, lines: w.lines.filter(l => l.qty > 0).map(l => ({ item: l.item, good: l.qty, spoiled: 0 })), prep: (w.prep || []).filter(p => p.runs > 0).map(p => ({ ingId: p.ingId, runs: p.runs })), ret: {}, date: today() };
+  const st = { ...lk, kind: "woDone", id, lines: w.lines.filter(l => l.qty > 0).map(l => ({ item: l.item, good: l.qty, spoiled: 0 })), prep: (w.prep || []).filter(p => p.runs > 0).map(p => ({ ingId: p.ingId, runs: p.runs })), ret: {}, date: today() };
   st.redraw = () => drawDone(st); drawDone(st);
 }
 function drawDone(st) {
@@ -128,7 +131,7 @@ function syncDone() { const st = ui.sheet; const w = ev.get("wos", st.id); const
   st.prep.forEach((p, ix) => { p.runs = Math.max(0, num(v(`[data-wdr="${ix}"]`).value)); });
   Object.keys(w.issued || {}).forEach(x => { const el = v(`[data-wdret="${x}"]`); if (el && ings[x]) st.ret[x] = Math.min(w.issued[x], Math.max(0, num(el.value) * UNITF(ings[x]).f)); }); }
 async function complete(st) {
-  syncDone(); const w = ev.get("wos", st.id); const ings = M.ingMap(); const issued = w.issued || {};
+  syncDone(); if (!await L.saveOk(st)) return; const w = ev.get("wos", st.id); if (w.status !== "issued") { toast("This work order was already completed or cancelled"); woDetail(w.id); return; } const ings = M.ingMap(); const issued = w.issued || {};
   const lines = st.lines.filter(l => l.good + l.spoiled > 0).map(l => ({ item: l.item, qty: l.good + l.spoiled, spoiled: l.spoiled }));
   const prep = st.prep.filter(p => p.runs > 0 && ings[p.ingId]).map(p => ({ ingId: p.ingId, runs: p.runs, qty: ings[p.ingId].yield * p.runs }));
   if (!lines.length && !prep.length) { toast("Enter what was made"); return; }
@@ -176,7 +179,7 @@ H.click.push(async T => {
     if (T.closest("[data-wosave]")) { st.date = $("#woDate").value || today(); if ($("#woLoc")) st.loc = $("#woLoc").value; st.notes = $("#woNote").value.trim();
       const id = uid("wo"); await ev.put("wos", { id, no: M.nextDocNo("wos", prefix(), "WO"), date: st.date, loc: st.loc, lines: st.lines.filter(l => l.qty > 0), prep: st.prep.filter(x => x.runs > 0), status: "planned", issued: {}, notes: st.notes, by: (R.me() || {}).id || "" });
       sync.soon(); toast("Work order created"); woDetail(id); return true; } }
-  if (st.kind === "woIssue" && T.closest("[data-wiss]")) { const w = ev.get("wos", st.id); const ings = M.ingMap();
+  if (st.kind === "woIssue" && T.closest("[data-wiss]")) { if (!await L.saveOk(st)) return true; const w = ev.get("wos", st.id); const ings = M.ingMap(); if (!["planned", "issued"].includes(w.status)) { toast("This work order is closed"); woDetail(w.id); return true; }
     st.rows.forEach((r, ix) => { const el = document.querySelector(`[data-wiq="${ix}"]`); if (el) r.now = Math.max(0, num(el.value) * UNITF(ings[r.ingId]).f); });
     const give = st.rows.filter(r => r.now > 0); if (!give.length) { toast("Enter what was issued"); return true; }
     const sm = M.stockMap(M.erpOn() ? w.loc : null); const over = give.filter(r => r.now > Math.max(0, sm[r.ingId] || 0) + 1e-6);

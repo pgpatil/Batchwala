@@ -2,6 +2,9 @@
 // Filters match text, or compare numbers with >, <, >=, <= or = (quantities in kg / L count as g / ml).
 import { S, H } from "./core.js";
 import { esc } from "./util.js";
+import { ui } from "./ui.js";
+// Drawers get the same treatment as pages once they are drawn.
+ui.after = (el, st) => enhance(el, "sh-" + (st.kind || "x"), st.kind);
 
 S.tbl = S.tbl || {};
 const MIN_FILTER_ROWS = 5;   // smaller tables get sorting only
@@ -25,19 +28,25 @@ function apply(t, st) {
   [...t.tHead.rows[0].cells].forEach((th, i) => { if (th.dataset.tsort) th.setAttribute("aria-sort", st.col === i ? (st.dir > 0 ? "ascending" : "descending") : "none"); });
   const cap = t.parentElement.querySelector(".tshown"); if (cap) cap.textContent = active && shown < data.length ? `Showing ${shown} of ${data.length}` : "";
 }
-export function enhance(root, view) {
+// Each table is registered under "screen:index" so sorting and filtering can find it again without a redraw.
+const live = new Map();
+// layoutKey: the screen (or drawer kind) whose Grid / Lines choice applies. In Grid, tables show as cards: one card per row, labelled fields.
+export function enhance(root, view, layoutKey = view) {
+  const cards = S.layoutKeys.has(layoutKey) && !asLines(layoutKey);
   root.querySelectorAll("table").forEach((t, k) => {
-    if (!t.tHead || !t.tHead.rows.length || !t.tBodies[0] || t.closest(".bcard")) return;
-    const key = view + ":" + k; const st = S.tbl[key] || (S.tbl[key] = { col: -1, dir: 1, f: {} }); const cols = [...t.tHead.rows[0].cells];
+    if (!t.tHead || !t.tHead.rows.length || !t.tBodies[0] || t.closest(".bcard") || t.dataset.done) return; t.dataset.done = "1";
+    const key = view + ":" + k; live.set(key, t); const st = S.tbl[key] || (S.tbl[key] = { col: -1, dir: 1, f: {} }); const cols = [...t.tHead.rows[0].cells];
     const n = cols.length; const many = [...t.tBodies[0].rows].filter(r => r.cells.length === n).length >= MIN_FILTER_ROWS || Object.values(st.f).some(Boolean);
     cols.forEach((th, i) => { if (th.textContent.trim() && th.colSpan === 1) { th.dataset.tsort = key + "|" + i; th.tabIndex = 0; } });
+    [...t.tBodies[0].rows].forEach(r => { if (r.cells.length === n) [...r.cells].forEach((c, i) => { c.dataset.label = cols[i].textContent.trim(); }); });
+    if (cards) t.classList.add("cards");
     if (many) { const fr = document.createElement("tr"); fr.className = "tfilter";
-      fr.innerHTML = cols.map((th, i) => th.textContent.trim() ? `<th><input data-tfilter="${esc(key)}|${i}" value="${esc(st.f[i] || "")}" placeholder="Filter" aria-label="Filter ${esc(th.textContent.trim())}"></th>` : "<th></th>").join("");
+      fr.innerHTML = cols.map((th, i) => th.textContent.trim() ? `<th><input data-tfilter="${esc(key)}|${i}" value="${esc(st.f[i] || "")}" placeholder="${cards ? "Filter " + esc(th.textContent.trim()) : "Filter"}" aria-label="Filter ${esc(th.textContent.trim())}"></th>` : "<th></th>").join("");
       t.tHead.appendChild(fr); const cap = document.createElement("p"); cap.className = "tshown hint"; t.after(cap); }
     apply(t, st);
   });
 }
-const tableOf = key => { const [view, k] = key.split(":"); return view === S.view ? document.querySelectorAll("#main table")[+k] : null; };
+const tableOf = key => { const t = live.get(key); return t && t.isConnected ? t : null; };
 H.click.push(T => {
   const th = T.closest("[data-tsort]"); if (!th) return false; const [key, i] = th.dataset.tsort.split("|"); const st = S.tbl[key]; const c = +i;
   if (st.col !== c) { st.col = c; st.dir = 1; } else if (st.dir > 0) st.dir = -1; else st.col = -1;
@@ -50,10 +59,14 @@ H.input.push(T => {
 /* ---------- grid or lines ---------- */
 // Lists can show as cards (grid) or as a register (lines). Default: lines on wide screens, cards on phones; the choice is kept on this device.
 S.layout = (() => { try { return JSON.parse(localStorage.getItem("bw.layout") || "{}"); } catch (_) { return {}; } })();
-export const asLines = v => S.layout[v] != null ? S.layout[v] === "lines" : S.wide;
-export const layoutSwitch = v => `<div class="seg layoutsw" role="group" aria-label="Layout">${[["grid", "Grid"], ["lines", "Lines"]].map(([k, l]) => `<button data-layout="${v}:${k}" aria-pressed="${asLines(v) === (k === "lines")}">${l}</button>`).join("")}</div>`;
+// Screens that were cards before the switch existed open as cards until someone picks Lines; the rest follow the screen width.
+const GRID_FIRST = new Set(["today", "pay", "run", "bake", "bom", "data", "customers", "menu"]);
+export const asLines = v => S.layout[v] != null ? S.layout[v] === "lines" : !GRID_FIRST.has(v) && S.wide;
+S.layoutKeys = new Set();   // screens and drawers that offer the switch
+export const layoutSwitch = v => (S.layoutKeys.add(v), "") + `<div class="seg layoutsw" role="group" aria-label="Layout">${[["grid", "Grid"], ["lines", "Lines"]].map(([k, l]) => `<button data-layout="${v}:${k}" aria-pressed="${asLines(v) === (k === "lines")}">${l}</button>`).join("")}</div>`;
 H.click.push(T => {
   const b = T.closest("[data-layout]"); if (!b) return false; const [v, k] = b.dataset.layout.split(":"); S.layout[v] = k;
-  try { localStorage.setItem("bw.layout", JSON.stringify(S.layout)); } catch (_) {} H.render(); return true;
+  try { localStorage.setItem("bw.layout", JSON.stringify(S.layout)); } catch (_) {}
+  if (ui.sheet && ui.sheet.kind === v && ui.sheet.redraw) ui.sheet.redraw(); else H.render(); return true;
 });
 document.addEventListener("keydown", e => { if (e.key === "Enter" && e.target.dataset && e.target.dataset.tsort) e.target.click(); });

@@ -4,6 +4,7 @@ import * as sync from "./sync.js";
 import * as M from "./model.js";
 import * as R from "./roles.js";
 import { asLines, layoutSwitch } from "./table.js";
+import * as L from "./lock.js";
 import { S, A, V, H, guard, chipBar, searchBox, band, clean } from "./core.js";
 import { bakeSheet, undoBatch } from "./inventory.js";
 import { historySheet } from "./orders.js";
@@ -51,7 +52,7 @@ export function batchSheet(id) {
   const money = R.can("money"); const edit = R.can("bake.record");
   const ings = Object.fromEntries(M.ingredients().map(i => [i.id, i])); const stock = M.batchStock(b);
   const p = M.batchPcs(b), s = M.batchSpoiled(b), c = M.batchCost(b);
-  openSheet({ kind: "batch", id, redraw: () => batchSheet(id) }, `<div class="sh-head"><h2 class="h">Batch ${b.no ? "#" + esc(b.no) : ""}</h2><button class="x" data-close aria-label="Close">×</button></div>
+  openSheet({ kind: "batch", id, redraw: () => batchSheet(id) }, `<div class="sh-head"><h2 class="h">Batch ${b.no ? "#" + esc(b.no) : ""}</h2><button class="x" data-close aria-label="Close">×</button></div>${L.banner("bakes", id)}
   <div class="subl" style="margin:-4px 0 10px">${esc(dLong(b.date))} · ${esc(time(b))}${who(b) ? " · " + esc(who(b)) : ""}</div>
   ${b.void ? `<div class="banner bad">Undone${b.voidAt ? " " + esc(new Date(b.voidAt).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })) : ""}. Not on the bake board; its stock moves were reversed.</div>` : ""}
   <div class="kpis" style="padding:0;margin-bottom:10px"><div class="kpi"><b>${p - s}</b><span>good pieces${s ? ` of ${p}` : ""}</span></div><div class="kpi"><b style="${s ? "color:var(--due)" : ""}">${s}</b><span>spoiled</span></div>
@@ -66,8 +67,9 @@ export function batchSheet(id) {
   ${R.can("history") ? `<button class="btn btn-ghost" data-bt="history">History of changes</button>` : ""}
   ${edit && !b.void ? `<button class="btn btn-danger" data-bt="undo">Undo this batch</button>` : ""}`);
 }
-function spoilSheet(b) {
-  const st = { kind: "batchSpoil", id: b.id, lines: b.lines.map(l => ({ ...l })) }; st.redraw = () => drawSpoil(st); drawSpoil(st);
+async function spoilSheet(b) {
+  const lk = await L.open("bakes", b.id, `batch #${b.no}`); if (!lk) return;
+  const st = { ...lk, kind: "batchSpoil", id: b.id, lines: b.lines.map(l => ({ ...l })) }; st.redraw = () => drawSpoil(st); drawSpoil(st);
 }
 function drawSpoil(st) {
   openSheet(st, `<div class="sh-head"><h2 class="h">Spoiled pieces</h2><button class="x" data-close aria-label="Close">×</button></div>
@@ -79,7 +81,7 @@ const sheetBatch = () => M.batches().find(x => x.id === (ui.sheet && ui.sheet.id
 async function saveBatch(b, change) { await ev.put("bakes", clean({ ...b, ...change })); sync.soon(); }
 const BT = {
   spoil: () => { if (guard("bake.record")) spoilSheet(sheetBatch()); },
-  saveSpoil: async () => { const st = ui.sheet; await saveBatch(sheetBatch(), { lines: st.lines }); toast("Spoiled pieces saved"); batchSheet(st.id); },
+  saveSpoil: async () => { const st = ui.sheet; if (!await L.saveOk(st)) return; await saveBatch(sheetBatch(), { lines: st.lines }); toast("Spoiled pieces saved"); batchSheet(st.id); },
   note: async () => { const b = sheetBatch(); if (!guard("bake.record")) return;
     const v = await ask(`<p class="cq">Batch note</p><input class="in" id="btNote" value="${esc(b.notes)}" placeholder="Oven, tray, flavour, who baked" style="margin-top:12px">`, [{ label: "Cancel", cls: "btn-ghost", value: false }, { label: "Save", cls: "btn-primary", value: true }], true);
     if (v) { await saveBatch(b, { notes: ($("#btNote").value || "").trim() }); batchSheet(b.id); } },

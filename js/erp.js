@@ -5,6 +5,7 @@ import * as sync from "./sync.js";
 import * as M from "./model.js";
 import * as R from "./roles.js";
 import { asLines, layoutSwitch } from "./table.js";
+import * as L from "./lock.js";
 import { S, A, V, H, guard, chipBar, searchBox, band, clean } from "./core.js";
 import { bakeSheet, putMove } from "./inventory.js";
 import { $, esc, rs, rs2, num, uid, today, addDays, dLong, qty, UNITS, ICON, copyText, waHref } from "./util.js";
@@ -56,10 +57,11 @@ function outletBoardView() {
   let h = band(`Bake board · ${esc(M.locName(loc))}`, short.length ? `<button class="pillbtn" data-askcopy>${ICON.wa}Ask kitchen</button>` : "",
     `<div class="stats"><div class="st"><b>${rows.reduce((s, r) => s + Math.max(0, r.onHand), 0)}</b><span>pieces on hand</span></div><div class="st"><b>${rows.reduce((s, r) => s + r.committed, 0)}</b><span>pre-orders to hand over</span></div><div class="st"><b>${short.reduce((s, r) => s + r.short, 0)}</b><span>short · ask the kitchen</span></div></div>`);
   if (H.expiryBanner) h += `<div class="boardfoot" style="padding-bottom:0">${H.expiryBanner()}</div>`;
-  h += `<div class="tools">${dateChips("bakedate", d)}</div>`;
+  h += `<div class="tools">${dateChips("bakedate", d)}${layoutSwitch("bake")}</div>`;
   if (coming.length) h += `<div class="boardfoot"><label class="f">On the way · confirm when it arrives</label><div class="kv">${coming.map(x => `<div style="align-items:center"><button class="who" data-xfer="${esc(x.id)}"><div class="nm" style="font-size:15px">${esc(x.no)} from ${esc(M.locName(x.from))}</div><div class="subl">${esc(xferText(x))}</div></button>${canReceive() ? `<button class="paybtn" data-xferrecv="${esc(x.id)}">Receive</button>` : ""}</div>`).join("")}</div></div>`;
   if (!rows.length) return h + `<div class="empty"><strong>Nothing here yet</strong>Pieces the kitchen sends to ${esc(M.locName(loc))} show here, with pre-orders and kept-ready levels.</div>`;
-  h += `<ul class="list">${rows.map(r => `<li class="row board${r.short ? "" : " done"}"><div class="who"><div class="nm big">${esc(r.item)}</div><div class="subl">${r.committed ? `${r.committed} pre-ordered · ` : ""}${r.par ? `${r.par} kept ready · ` : ""}${r.sold} sold${r.coming ? ` · <span class="tag t-part">${r.coming} on the way</span>` : ""}${r.short ? ` <span class="tag t-due">short ${r.short}</span>` : ""}</div></div><div class="side"><div class="bignum">${r.onHand}</div><small class="mut">on hand</small></div></li>`).join("")}</ul>`;
+  if (asLines("bake")) h += `<div class="card tablecard"><table class="reg"><thead><tr><th>Item</th><th class="r">Pre-orders</th><th class="r">Kept ready</th><th class="r">On hand</th><th class="r">Sold</th><th class="r">On the way</th><th class="r">Short</th></tr></thead><tbody>${rows.map(r => `<tr${r.short ? ' class="shortrow"' : ""}><td><b>${esc(r.item)}</b></td><td class="r">${r.committed || "–"}</td><td class="r">${r.par || "–"}</td><td class="r">${r.onHand}</td><td class="r">${r.sold || "–"}</td><td class="r">${r.coming || "–"}</td><td class="r">${r.short ? `<b class="due">${r.short}</b>` : "–"}</td></tr>`).join("")}</tbody></table></div>`;
+  else h += `<ul class="list">${rows.map(r => `<li class="row board${r.short ? "" : " done"}"><div class="who"><div class="nm big">${esc(r.item)}</div><div class="subl">${r.committed ? `${r.committed} pre-ordered · ` : ""}${r.par ? `${r.par} kept ready · ` : ""}${r.sold} sold${r.coming ? ` · <span class="tag t-part">${r.coming} on the way</span>` : ""}${r.short ? ` <span class="tag t-due">short ${r.short}</span>` : ""}</div></div><div class="side"><div class="bignum">${r.onHand}</div><small class="mut">on hand</small></div></li>`).join("")}</ul>`;
   if (inToday.length) h += `<div class="boardfoot"><label class="f">Received today</label><div class="kv">${inToday.map(x => `<div><button class="who" data-xfer="${esc(x.id)}"><div class="nm" style="font-size:15px">${esc(x.no)} from ${esc(M.locName(x.from))}</div><div class="subl">${esc(xferText(x))}</div></button></div>`).join("")}</div></div>`;
   return h;
 }
@@ -210,9 +212,10 @@ const lineName = (l, ings) => l.item || ((ings[l.ingId] || {}).name || "?");
 const lineQty = (l, v, ings) => l.item ? String(v) : (ings[l.ingId] ? qty(v, ings[l.ingId].unit) : String(v));
 const statusTag = x => x.void ? `<span class="tag t-due">Undone</span>` : !M.xferReceived(x) ? `<span class="tag t-part">In transit</span>` : M.xferShort(x) ? `<span class="tag t-due">Received short</span>` : `<span class="tag t-paid">${ICON.check}Received</span>`;
 // The receiving location confirms each line; anything short is recorded on the transfer.
-function receiveSheet(id) {
+async function receiveSheet(id) {
   const x = M.transfers().find(t => t.id === id); if (!x || x.void || M.xferReceived(x)) return; if (!canReceive()) { guard("transfer"); return; }
-  const st = { kind: "xferRecv", id, lines: x.lines.map(l => ({ ...l, recv: +l.qty })), note: "" }; st.redraw = () => drawRecv(st); drawRecv(st);
+  const lk = await L.open("transfers", id, x.no); if (!lk) return;
+  const st = { ...lk, kind: "xferRecv", id, lines: x.lines.map(l => ({ ...l, recv: +l.qty })), note: "" }; st.redraw = () => drawRecv(st); drawRecv(st);
 }
 function drawRecv(st) {
   const x = M.transfers().find(t => t.id === st.id); const ings = M.ingMap(); const short = st.lines.filter(l => l.recv < l.qty);
@@ -227,7 +230,7 @@ function drawRecv(st) {
 }
 const syncRecv = () => { const st = ui.sheet; if (!st || st.kind !== "xferRecv") return; st.note = ($("#rvNote") || {}).value || ""; st.lines.forEach((l, ix) => { const q = document.querySelector(`[data-rvq="${ix}"]`); if (q) l.recv = Math.max(0, num(q.value)); }); };
 A.saveReceive = async el => {
-  syncRecv(); const st = ui.sheet; const x = M.transfers().find(t => t.id === st.id); if (!x || M.xferReceived(x)) { closeSheet(); return; }
+  syncRecv(); const st = ui.sheet; if (!await L.saveOk(st)) return; const x = M.transfers().find(t => t.id === st.id); if (!x || M.xferReceived(x)) { closeSheet(); toast("Already received"); return; }
   el.disabled = true;
   for (const l of st.lines.filter(l => l.ingId && l.recv > 0)) await putMove({ ingId: l.ingId, type: "transfer", qty: l.recv, note: `${x.no} from ${M.locName(x.from)}`, ref: x.id, outletId: x.to });
   await ev.put("transfers", clean({ ...ev.get("transfers", x.id), status: "received", lines: st.lines, receivedAt: new Date().toISOString(), receivedBy: (R.me() || {}).id || "", recvNote: st.note.trim() }));
@@ -256,7 +259,7 @@ V.fg = () => {
   let h = band("Finished goods", (R.can("stock.count") || R.can("stock.waste")) ? `<button class="pillbtn" data-act="fgAdjust">Adjust</button>` : "",
     `<div class="stats">${locs.map(l => `<div class="st"><b>${Object.values(fg[l.id] || {}).reduce((s, v) => s + Math.max(0, v), 0)}</b><span>${esc(l.name)}</span></div>`).join("")}</div>`);
   if (!rows.length) return h + `<div class="empty"><strong>No finished goods yet</strong>Batches add pieces at the kitchen, transfers move them to outlets and sales take them off.</div>`;
-  h += `<div class="card tablecard" style="margin-top:14px"><table class="reg"><thead><tr><th>Item</th>${locs.map(l => `<th class="r">${esc(l.name)}</th>`).join("")}<th class="r">Total</th></tr></thead><tbody>${rows.map(n => `<tr style="cursor:default"><td><b>${esc(n)}</b></td>${locs.map(l => { const v = (fg[l.id] || {})[n] || 0; return `<td class="r${v < 0 ? " due" : ""}">${v || "–"}</td>`; }).join("")}<td class="r"><b>${tot(n)}</b></td></tr>`).join("")}</tbody></table></div>
+  h += `<div class="tools">${layoutSwitch("fg")}</div><div class="card tablecard" style="margin-top:6px"><table class="reg"><thead><tr><th>Item</th>${locs.map(l => `<th class="r">${esc(l.name)}</th>`).join("")}<th class="r">Total</th></tr></thead><tbody>${rows.map(n => `<tr style="cursor:default"><td><b>${esc(n)}</b></td>${locs.map(l => { const v = (fg[l.id] || {})[n] || 0; return `<td class="r${v < 0 ? " due" : ""}">${v || "–"}</td>`; }).join("")}<td class="r"><b>${tot(n)}</b></td></tr>`).join("")}</tbody></table></div>
   <p class="hint" style="padding:0 4px">Counted from ${esc(dLong(M.config().erpStart || today()))}, when ERP started: good pieces from batches, plus transfers in, less transfers out and delivered orders. A negative number means something was sold before it was recorded; fix it with Adjust → Count.</p>`;
   if (adj.length) h += `<div class="card"><h3>Recent adjustments</h3><table><tbody>${adj.map(a => `<tr><td>${esc(a.item)} <small class="mut">${esc(M.locName(a.loc))} · ${a.type === "waste" ? "wasted" : "count"}${a.note ? " · " + esc(a.note) : ""}</small></td><td>${a.qty > 0 ? "+" : ""}${a.qty}</td></tr>`).join("")}</tbody></table></div>`;
   return h;

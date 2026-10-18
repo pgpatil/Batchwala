@@ -4,6 +4,7 @@ import * as sync from "./sync.js";
 import * as M from "./model.js";
 import * as R from "./roles.js";
 import { asLines, layoutSwitch } from "./table.js";
+import * as L from "./lock.js";
 import { S, A, V, H, guard, chipBar, searchBox, band, clean } from "./core.js";
 import { $, esc, rs, rs2, num, uid, today, addDays, dLong, qty, UNITS, ICON, copyText, waHref } from "./util.js";
 import { ui, toast, openSheet, closeSheet, yesNo, ask } from "./ui.js";
@@ -53,12 +54,13 @@ V.po = () => {
 };
 
 /* ---------- PO editor ---------- */
-function poSheet(po) {
-  if (!guard("stock.buy")) return; const mats = M.ingredients().filter(i => i.type !== "sf"); if (!mats.length) { toast("Add raw or packing materials in Inventory first"); return; }
+async function poSheet(po) {
+  if (!guard("stock.buy")) return;
+  const lk = po ? await L.open("porders", po.id, po.no) : {}; if (!lk) return; const mats = M.ingredients().filter(i => i.type !== "sf"); if (!mats.length) { toast("Add raw or packing materials in Inventory first"); return; }
   const x = po ? JSON.parse(JSON.stringify(po)) : { id: uid("po"), no: M.nextDocNo("porders", prefix(), "PO"), date: today(), supplier: "", loc: M.here(), expected: addDays(today(), 1), lines: [], status: "draft", notes: "" };
   x.lines = x.lines.map(l => { const i = M.ingMap()[l.ingId]; const p = M.packOf(i); return { ...l, f: p && l.qty % p.size === 0 ? p.size : big(i.unit) && l.qty % big(i.unit).f === 0 ? big(i.unit).f : 1 }; });
   if (!x.lines.length) x.lines.push(newLine(mats[0], x.supplier));
-  const st = { kind: "poEdit", x, isNew: !po }; st.redraw = () => drawPo(st); drawPo(st);
+  const st = { ...lk, kind: "poEdit", x, isNew: !po }; st.redraw = () => drawPo(st); drawPo(st);
 }
 const newLine = (i, sup) => ({ ingId: i.id, qty: 0, f: M.packOf(i) ? M.packOf(i).size : big(i.unit) ? big(i.unit).f : 1, rate: r2((M.lastRate(sup, i.id) || M.lastPrice(i)) * 1e4) / 1e4, taxPct: taxFor(i) });
 function drawPo(st) {
@@ -93,6 +95,7 @@ async function savePo(approve) {
   const known = byNameOrAka(M.suppliers(), sup); if (known) sup = known.name; else { const r = await confirmNew("supplier", sup, M.suppliers()); if (!r) return; if (r !== "new") sup = r.name; }
   const lines = x.lines.filter(l => l.qty > 0).map(l => ({ ingId: l.ingId, qty: l.qty, rate: +l.rate || 0, taxPct: +l.taxPct || 0 })); if (!lines.length) { toast("Enter what to order"); return; }
   if (lines.some(l => !l.rate) && !await yesNo(`<p class="cq">Some lines have no rate</p><div class="cdetail">Save anyway? The GRN will take the bill amount.</div>`, "Save")) return;
+  if (!await L.saveOk(st)) return;
   if (!M.supplierByName(sup)) await ev.put("suppliers", { id: uid("s"), name: sup });
   const rec = { ...clean(x), supplier: sup, lines, status: approve ? "approved" : "draft", ...(approve ? { approvedBy: (R.me() || {}).id || "", approvedAt: new Date().toISOString() } : {}) };
   await ev.put("porders", rec); sync.soon(); toast(approve ? `${x.no} approved` : `${x.no} saved as draft`); poDetail(x.id);
@@ -105,7 +108,7 @@ const poText = p => { const ings = M.ingMap(); return `🧾 Purchase order ${p.n
 function poDetail(id) {
   const p = ev.get("porders", id); if (!p) { closeSheet(); return; } const ings = M.ingMap(); const st = M.poState(p); const got = M.poReceived(p); const sup = M.supplierByName(p.supplier) || {};
   const grnsFor = M.grns().filter(g => g.poId === id && !g.void); const appr = p.approvedBy && ev.get("members", p.approvedBy);
-  openSheet({ kind: "poView", id, redraw: () => poDetail(id) }, `<div class="sh-head"><h2 class="h">${esc(p.no)}</h2><button class="x" data-close aria-label="Close">×</button></div>
+  openSheet({ kind: "poView", id, redraw: () => poDetail(id) }, `<div class="sh-head"><h2 class="h">${esc(p.no)}</h2><button class="x" data-close aria-label="Close">×</button></div>${L.banner("porders", id)}
   <div class="subl" style="margin:-4px 0 10px">${esc(p.supplier || "No supplier")} · ${esc(dLong(p.date))}${p.expected ? " · expected " + esc(dLong(p.expected)) : ""} ${stateTag(st)}${appr ? ` · approved by ${esc(appr.name)}` : ""}</div>
   <div class="card tablecard" style="margin:0"><table class="reg"><thead><tr><th>Material</th><th class="r">Ordered</th><th class="r">Received</th><th class="r">Pending</th>${R.can("money") ? `<th class="r">Rate</th>` : ""}</tr></thead><tbody>${p.lines.map(l => { const i = ings[l.ingId] || { name: "Removed material", unit: "" }; const g = got[l.ingId] || 0;
     return `<tr><td>${esc(i.name)}</td><td class="r">${qty(l.qty, i.unit)}</td><td class="r">${g ? qty(g, i.unit) : "–"}</td><td class="r">${l.qty - g > 1e-6 && !["closed", "cancelled"].includes(st) ? `<b>${qty(l.qty - g, i.unit)}</b>` : "–"}</td>${R.can("money") ? `<td class="r">${l.rate && i.unit ? perBig(i, l.rate) : "–"}</td>` : ""}</tr>`; }).join("")}</tbody></table></div>
@@ -171,6 +174,8 @@ H.click.push(async T => {
     const made = await draftPOs(low.map(i => ({ ingId: i.id, qty: Math.max(i.reorder * 2 - Math.max(0, M.stockLevel(i).on), i.reorder) })), "Reorder");
     toast(made.length ? `${made.length} draft PO${made.length > 1 ? "s" : ""} made` : "Everything low is already on order"); return true; }
   const pe = T.closest("[data-poedit]"); if (pe) { poSheet(ev.get("porders", pe.dataset.poedit)); return true; }
+  const busy = T.closest("[data-poapprove],[data-poreceive],[data-poclose],[data-pocancel]"); if (busy) { const id = Object.values(busy.dataset)[0]; const l = L.lockOf("porders", id);
+    if (l) { toast(`${(ev.get("members", l.by) || {}).name || "Someone"} is editing this PO. Try once they save.`); return true; } }
   const pa = T.closest("[data-poapprove]"); if (pa) { if (!guard("po.approve")) return true; const p = ev.get("porders", pa.dataset.poapprove); if (!p.supplier) { toast("Give the PO a supplier first"); poSheet(p); return true; }
     await ev.put("porders", { ...clean(p), status: "approved", approvedBy: (R.me() || {}).id || "", approvedAt: new Date().toISOString() }); sync.soon(); toast(`${p.no} approved`); poDetail(p.id); return true; }
   const pr = T.closest("[data-poreceive]"); if (pr) { receivePo(pr.dataset.poreceive); return true; }

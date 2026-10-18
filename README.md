@@ -25,7 +25,8 @@ It is a Progressive Web App: it opens from a link, installs to the home screen, 
 | Purchasing | Purchase orders with approval, drafted from the indent or reorder levels, received through GRNs (in parts, with rate checks), buying packs, supplier payables with credit days, payments and statements |
 | Work orders | Production issued from the store and completed with actual output and returns; batches costed at what was really used, with variance against the BOM |
 | Costing and lots | Weighted-average material cost (or last price); GRN lots with best-before dates, used oldest first, expiry alerts and discards |
-| Cost & stock reports | Food cost, wastage, variance, stock ageing, buying and price movement, tax summary, day-book CSV |
+| Cost & stock reports | Food cost, wastage, variance, stock ageing, buying and price movement, tax summary, and the day book as Tally vouchers (Day Book view, Tally XML for ledgers and vouchers, Excel) |
+| Editing locks | A saved record being edited is locked for others until saved or closed (lapses after 8 quiet minutes; admin can take over); saves check for changes made meanwhile |
 | Menu | Prices, categories, short names for WhatsApp reading, par levels, recipes with cost and margin |
 | Reports | Sales by day and channel, best sellers with margin, wastage value, repeat customers |
 | ERP mode | For people the admin gives ERP: Production per kitchen, Purchases as GRNs, Stock by location, Transfers kitchen → outlets, Finished goods by location, Batches and BOM. Restaurant mode keeps the counter, orders, payments, deliveries and the outlet’s bake board. Nobody on ERP = the original single app |
