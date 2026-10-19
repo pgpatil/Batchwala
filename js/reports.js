@@ -28,8 +28,10 @@ V.insights = () => {
 /* food cost: sales against the standard material cost of what was sold, by item */
 function cost(a, b) {
   const list = M.orders(false).filter(o => o.date >= a && o.date <= b); const items = {};
-  list.forEach(o => o.items.forEach(i => { const x = items[i.item] = items[i.item] || { q: 0, v: 0 }; x.q += i.qty; x.v += i.qty * i.rate * (1 - (o.discountPct || 0) / 100) / (o.taxIncl && i.taxPct ? 1 + i.taxPct / 100 : 1); }));
-  let sales = 0, cogs = 0, costed = 0; const rows = Object.entries(items).sort((x, y) => y[1].v - x[1].v).map(([n, x]) => { const m = M.menuByName(n); const c = m && (m.recipe || []).length ? M.recipeCost(m).cost : null;
+  // Each sale is costed with the recipe in force on its order date (recipe versions), at today's material costs.
+  list.forEach(o => o.items.forEach(i => { const x = items[i.item] = items[i.item] || { q: 0, v: 0, c: 0, has: false }; x.q += i.qty; x.v += i.qty * i.rate * (1 - (o.discountPct || 0) / 100) / (o.taxIncl && i.taxPct ? 1 + i.taxPct / 100 : 1);
+    const m = M.recipeAt(M.menuByName(i.item), o.date); if (m && (m.recipe || []).length) { x.c += M.recipeCost(m).cost * i.qty; x.has = true; } }));
+  let sales = 0, cogs = 0, costed = 0; const rows = Object.entries(items).sort((x, y) => y[1].v - x[1].v).map(([n, x]) => { const c = x.has && x.q ? x.c / x.q : null;
     sales += x.v; if (c != null) { cogs += c * x.q; costed += x.v; }
     return `<tr>${td(esc(n))}${td(x.q, 1)}${td(rs(x.v), 1, x.v)}${td(c != null ? rs2(c) : "no BOM", 1, c ?? -1)}${td(c != null ? pct(c * x.q, x.v) : "–", 1, c != null && x.v ? c * x.q / x.v : -1)}</tr>`; });
   const bt = M.batches().filter(x => !x.void && x.date >= a && x.date <= b); const made = bt.reduce((s, x) => s + M.batchPcs(x) - M.batchSpoiled(x), 0), bc = bt.reduce((s, x) => s + M.batchCost(x), 0);
@@ -91,6 +93,7 @@ function tax(a, b) {
   const months = {}; const m = d => d.slice(0, 7); const row = k => months[k] = months[k] || { out: 0, inp: 0, blocked: 0 }; const ings = M.ingMap();
   M.orders(false).filter(o => o.date >= a && o.date <= b).forEach(o => { row(m(o.date)).out += M.taxOf(o).tax; });
   M.grns().filter(g => !g.void && g.date >= a && g.date <= b).forEach(g => g.lines.forEach(l => { const t = (+l.amount || 0) * (+l.taxPct || 0) / 100; if (ings[l.ingId] && ings[l.ingId].taxInCost) row(m(g.date)).blocked += t; else row(m(g.date)).inp += t; }));
+  M.preturns().filter(d => !d.void && d.date >= a && d.date <= b).forEach(d => d.lines.forEach(l => { const t = (+l.amount || 0) * (+l.taxPct || 0) / 100; if (ings[l.ingId] && ings[l.ingId].taxInCost) row(m(d.date)).blocked -= t; else row(m(d.date)).inp -= t; }));
   const ks = Object.keys(months).sort(); const T = M.taxCfg().name || "GST";
   const s = ks.reduce((x, k) => ({ out: x.out + months[k].out, inp: x.inp + months[k].inp }), { out: 0, inp: 0 });
   return `<div class="kpis" style="padding:0"><div class="kpi"><b>${rs2(s.out)}</b><span>${esc(T)} on sales</span></div><div class="kpi"><b>${rs2(s.inp)}</b><span>${esc(T)} on purchases to claim</span></div><div class="kpi"><b>${rs2(s.out - s.inp)}</b><span>net payable</span></div></div>`
@@ -119,7 +122,8 @@ export function vouchers(a, b) {
     out.push({ date: o.date, type: "Sales", no: o.no, party, narration: `${M.chanLabel(o)} · ${o.items.map(i => i.item + " × " + i.qty).join(", ")}`, entries: ent }); });
   // A payment whose order was deleted still belongs to its customer (kept on the payment); otherwise it goes to an unallocated ledger to sort out.
   const custs = Object.fromEntries(M.customers(M.orders()).map(x => [x.key, x]));
-  ev.all("payments").filter(p => p.date >= a && p.date <= b && +p.amount).forEach(p => { const raw = ev.get("orders", p.orderId); const o = M.normOrder(raw || {}); const cu = !raw && custs[p.customerKey];
+  // Credit moved onto an order and off the customer's credit is within the same party, so it isn't a voucher.
+  ev.all("payments").filter(p => p.date >= a && p.date <= b && +p.amount && p.mode !== "Credit").forEach(p => { const raw = ev.get("orders", p.orderId); const o = M.normOrder(raw || {}); const cu = !raw && custs[p.customerKey];
     const party = raw ? custLedger(o) : cu ? custLedger({ customer: cu.customer, flat: cu.flat, channel: "whatsapp" }) : "Unallocated receipts"; const v = +p.amount;
     out.push({ date: p.date, type: "Receipt", no: "", party, narration: `Order #${o.no || "?"}${p.mode ? " · " + p.mode : ""}${v < 0 ? " · reversal" : ""}`, entries: [{ ledger: bankOf(p.mode), amt: v }, { ledger: party, amt: -v }] }); });
   const ings = M.ingMap();
@@ -128,6 +132,12 @@ export function vouchers(a, b) {
     const ent = [{ ledger: c.purchase, amt: r2((+g.amount || 0) + blocked) }, ...taxEntries(rec, c.inTax, 1), { ledger: partyName(g.supplier, "supplier"), amt: -(+g.total || 0) }];
     const diff = r2(ent.reduce((s, e) => s + e.amt, 0)); if (diff) ent.push({ ledger: c.roundOff, amt: -diff });
     out.push({ date: g.date, type: "Purchase", no: g.invoiceNo || g.no, party: partyName(g.supplier, "supplier"), narration: `${g.no}${g.invoiceNo ? " · supplier invoice " + g.invoiceNo : ""}`, entries: ent }); });
+  // Goods returned: the supplier is debited, purchases and the input tax claimed on them are credited back.
+  M.preturns().filter(d => !d.void && d.date >= a && d.date <= b).forEach(d => { const rec = {}; let blocked = 0;
+    d.lines.forEach(l => { const t = (+l.amount || 0) * (+l.taxPct || 0) / 100; if (!t) return; if (ings[l.ingId] && ings[l.ingId].taxInCost) blocked += t; else rec[l.taxPct] = (rec[l.taxPct] || 0) + t; });
+    const ent = [{ ledger: partyName(d.supplier, "supplier"), amt: +d.total || 0 }, { ledger: c.purchase, amt: -r2((+d.amount || 0) + blocked) }, ...taxEntries(rec, c.inTax, -1)];
+    const diff = r2(ent.reduce((s, e) => s + e.amt, 0)); if (diff) ent.push({ ledger: c.roundOff, amt: -diff });
+    out.push({ date: d.date, type: "Debit Note", no: d.no, party: partyName(d.supplier, "supplier"), narration: `${d.no}${d.grnNo ? " · against " + d.grnNo : ""}${d.reason ? " · " + d.reason : ""}`, entries: ent }); });
   M.spays().filter(p => p.date >= a && p.date <= b && +p.amount).forEach(p => { const v = +p.amount;
     out.push({ date: p.date, type: "Payment", no: "", party: partyName(p.supplier, "supplier"), narration: [p.mode, p.ref].filter(Boolean).join(" ") + (v < 0 ? " · reversal" : ""), entries: [{ ledger: partyName(p.supplier, "supplier"), amt: v }, { ledger: bankOf(p.mode), amt: -v }] }); });
   return out.sort((x, y) => x.date < y.date ? -1 : x.date > y.date ? 1 : 0);
@@ -147,7 +157,7 @@ function vouchersXml(a, b) {
 function mastersXml(a, b) {
   const c = tcfg(); const vs = vouchers(a, b); const groups = new Map(); const set = (n, g, extra = "") => { if (n && !groups.has(n)) groups.set(n, [g, extra]); };
   set(c.sales, "Sales Accounts"); set(c.purchase, "Purchase Accounts"); set(c.cash, "Cash-in-Hand"); set(c.bank, "Bank Accounts"); set(c.roundOff, "Indirect Expenses");
-  vs.filter(v => ["Purchase", "Payment"].includes(v.type)).forEach(v => { const s = M.supplierByName(v.party.replace(/ \(supplier\)$/, "")) || {}; set(v.party, "Sundry Creditors", s.gstin ? `<PARTYGSTIN>${xe(s.gstin)}</PARTYGSTIN>` : ""); });
+  vs.filter(v => ["Purchase", "Payment", "Debit Note"].includes(v.type)).forEach(v => { const s = M.supplierByName(v.party.replace(/ \(supplier\)$/, "")) || {}; set(v.party, "Sundry Creditors", s.gstin ? `<PARTYGSTIN>${xe(s.gstin)}</PARTYGSTIN>` : ""); });
   vs.filter(v => ["Sales", "Receipt"].includes(v.type)).forEach(v => set(v.party, v.party === "Unallocated receipts" ? "Suspense A/c" : "Sundry Debtors"));
   vs.forEach(v => v.entries.forEach(e => { if (e.tax) set(e.ledger, "Duties & Taxes"); }));
   return envelope("All Masters", [...groups].map(([n, [g, extra]]) => `   <TALLYMESSAGE xmlns:UDF="TallyUDF">\n    <LEDGER NAME="${xe(n)}" ACTION="Create">\n     <NAME.LIST><NAME>${xe(n)}</NAME></NAME.LIST>\n     <PARENT>${xe(g)}</PARENT>${["Sundry Debtors", "Sundry Creditors"].includes(g) ? "<ISBILLWISEON>No</ISBILLWISEON>" : ""}${extra}\n    </LEDGER>\n   </TALLYMESSAGE>\n`).join(""));
@@ -156,7 +166,7 @@ function saveText(name, text, type) { const blob = new Blob([text], { type }); c
 function book(a, b) {
   const vs = vouchers(a, b); const c = tcfg(); const by = {}; vs.forEach(v => { by[v.type] = (by[v.type] || 0) + 1; });
   const unbalanced = vs.filter(v => Math.abs(v.entries.reduce((s, e) => s + e.amt, 0)) > 0.005).length;
-  return `<div class="kpis" style="padding:0">${["Sales", "Receipt", "Purchase", "Payment"].map(k => `<div class="kpi"><b>${by[k] || 0}</b><span>${k} vouchers</span></div>`).join("")}</div>`
+  return `<div class="kpis" style="padding:0">${["Sales", "Receipt", "Purchase", "Payment", "Debit Note"].map(k => `<div class="kpi"><b>${by[k] || 0}</b><span>${k} vouchers</span></div>`).join("")}</div>`
     + card("Day Book", table([["Date"], ["Particulars"], ["Vch Type"], ["Vch No."], ["Debit", 1], ["Credit", 1]], vs.map(v => { const x = partyAmt(v);
       return `<tr>${td(esc(tdate(v.date)), 0, v.date)}${td(`<b>${esc(v.party)}</b><small class="mut" style="display:block">${v.entries.map(e => `${esc(e.ledger)} ${e.amt > 0 ? "Dr" : "Cr"} ${rs2(Math.abs(e.amt))}`).join(" · ")}</small>`)}${td(esc(v.type))}${td(esc(v.no))}${td(x > 0 ? rs2(x) : "", 1, x > 0 ? x : 0)}${td(x < 0 ? rs2(-x) : "", 1, x < 0 ? -x : 0)}</tr>`; })),
       `Laid out like Tally’s Day Book, with each voucher’s ledger entries under the party.${unbalanced ? ` <b class="due">${unbalanced} voucher(s) don’t balance.</b>` : " Every voucher balances (debits = credits)."}`)

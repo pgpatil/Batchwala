@@ -14,7 +14,7 @@ import { ui, toast, openSheet, closeSheet, yesNo } from "./ui.js";
 
 const r2 = v => Math.round(v * 100) / 100;
 const r4 = v => Math.round(v * 1e4) / 1e4;
-const prefix = () => (R.me() || {}).prefix || "";
+const prefix = () => R.numPrefix();
 const LABEL = { planned: "Planned", issued: "Materials issued", done: "Done", cancelled: "Cancelled" };
 const tag = s => `<span class="tag ${{ planned: "t-camp", issued: "t-part", done: "t-paid", cancelled: "t-due" }[s]}">${LABEL[s]}</span>`;
 const runsTxt = n => `${+(+n).toFixed(2)} run${+(+n).toFixed(2) === 1 ? "" : "s"}`;
@@ -23,8 +23,9 @@ const woText = (w, ings = M.ingMap()) => [...w.lines.filter(l => l.qty > 0).map(
 
 // Standard materials from the store for an output: the BOM one level down, plus the recipes of semi-finished made in the order.
 // Semi-finished made here is used here first; only the rest comes from the store, and any extra goes into stock.
-export function stdUse(lines, prep) {
-  const { need, made } = M.batchNeed(lines.filter(l => l.qty > 0), prep.filter(p => p.runs > 0)); const use = {}, surplus = {};
+// The standard is the recipe in force on the work order's date (see recipe versions).
+export function stdUse(lines, prep, at) {
+  const { need, made } = M.batchNeed(lines.filter(l => l.qty > 0), prep.filter(p => p.runs > 0), at); const use = {}, surplus = {};
   Object.keys(need).forEach(id => { const n = need[id] - (made[id] || 0); if (n > 1e-9) use[id] = n; });
   Object.keys(made).forEach(id => { const x = made[id] - (need[id] || 0); if (x > 1e-9) surplus[id] = x; });
   return { use, surplus };
@@ -61,7 +62,7 @@ export function woNew(opts = {}) {
 }
 H.woNew = woNew;
 function drawNew(st) {
-  const ings = M.ingMap(); const { use } = stdUse(st.lines, st.prep); const sm = M.stockMap(M.erpOn() ? st.loc : null); const ids = Object.keys(use).filter(id => ings[id]);
+  const ings = M.ingMap(); const { use } = stdUse(st.lines, st.prep, st.date); const sm = M.stockMap(M.erpOn() ? st.loc : null); const ids = Object.keys(use).filter(id => ings[id]);
   openSheet(st, `<div class="sh-head"><h2 class="h">New work order</h2><button class="x" data-close aria-label="Close">×</button></div>
   <p class="hint" style="margin-top:-4px">${esc(M.nextDocNo("wos", prefix(), "WO"))}</p>
   <div class="two"><div><label class="f" for="woDate">For</label><input class="in" id="woDate" type="date" value="${st.date}"></div>${M.locations().length > 1 ? `<div><label class="f" for="woLoc">At</label><select class="in" id="woLoc">${M.locations().map(l => `<option value="${esc(l.id)}" ${l.id === st.loc ? "selected" : ""}>${esc(l.name)}</option>`).join("")}</select></div>` : "<div></div>"}</div>
@@ -75,7 +76,7 @@ function drawNew(st) {
 
 /* ---------- detail ---------- */
 function woDetail(id) {
-  const w = ev.get("wos", id); if (!w) { closeSheet(); return; } const ings = M.ingMap(); const { use } = stdUse(w.lines, w.prep || []); const b = w.batchId && ev.get("bakes", w.batchId);
+  const w = ev.get("wos", id); if (!w) { closeSheet(); return; } const ings = M.ingMap(); const { use } = stdUse(w.lines, w.prep || [], w.date); const b = w.batchId && ev.get("bakes", w.batchId);
   const issued = w.issued || {}, ret = w.returned || {}; const ids = [...new Set([...Object.keys(use), ...Object.keys(issued)])].filter(x => ings[x]); const money = R.can("money");
   const variance = b && Array.isArray(b.variance) ? Object.fromEntries(b.variance.map(v => [v.ingId, v])) : null;
   openSheet({ kind: "woView", id, redraw: () => woDetail(id) }, `<div class="sh-head"><h2 class="h">${esc(w.no)}</h2><button class="x" data-close aria-label="Close">×</button></div>${L.banner("wos", id)}
@@ -93,7 +94,7 @@ function woDetail(id) {
 /* ---------- issue ---------- */
 async function issueSheet(id) {
   const lk = await L.open("wos", id, (ev.get("wos", id) || {}).no || "this work order"); if (!lk) return;
-  const w = ev.get("wos", id); const { use } = stdUse(w.lines, w.prep || []); const issued = w.issued || {};
+  const w = ev.get("wos", id); const { use } = stdUse(w.lines, w.prep || [], w.date); const issued = w.issued || {};
   const rows = Object.keys(use).filter(x => M.ingMap()[x]).map(x => ({ ingId: x, std: use[x], done: issued[x] || 0, now: r4(Math.max(0, use[x] - (issued[x] || 0))) }));
   const st = { ...lk, kind: "woIssue", id, rows }; st.redraw = () => drawIssue(st); drawIssue(st);
 }
@@ -116,7 +117,7 @@ async function doneSheet(id) {
 }
 function drawDone(st) {
   const w = ev.get("wos", st.id); const ings = M.ingMap(); const issued = w.issued || {};
-  const { use } = stdUse(st.lines.map(l => ({ item: l.item, qty: l.good + l.spoiled })), st.prep);
+  const { use } = stdUse(st.lines.map(l => ({ item: l.item, qty: l.good + l.spoiled })), st.prep, w.date);
   openSheet(st, `<div class="sh-head"><h2 class="h">Complete ${esc(w.no)}</h2><button class="x" data-close aria-label="Close">×</button></div>
   <label class="f" for="wdDate">Made on</label><input class="in" id="wdDate" type="date" value="${st.date}">
   <label class="f">What was made</label><div class="kv">${st.lines.map((l, ix) => `<div style="align-items:center;gap:8px"><span>${esc(l.item)}</span><span style="display:flex;gap:6px;align-items:center"><label class="mini">Good <input class="rate" data-wdg="${ix}" inputmode="numeric" value="${l.good}"></label><label class="mini">Spoiled <input class="rate" data-wds="${ix}" inputmode="numeric" value="${l.spoiled || ""}" placeholder="0"></label></span></div>`).join("")}
@@ -136,7 +137,7 @@ async function complete(st) {
   const lines = st.lines.filter(l => l.good + l.spoiled > 0).map(l => ({ item: l.item, qty: l.good + l.spoiled, spoiled: l.spoiled }));
   const prep = st.prep.filter(p => p.runs > 0 && ings[p.ingId]).map(p => ({ ingId: p.ingId, runs: p.runs, qty: ings[p.ingId].yield * p.runs }));
   if (!lines.length && !prep.length) { toast("Enter what was made"); return; }
-  const { use, surplus } = stdUse(lines, prep); const me = R.me(); const no = M.nextBatchNo((me && me.prefix) || "");
+  const { use, surplus } = stdUse(lines, prep, w.date); const me = R.me(); const no = M.nextBatchNo(R.numPrefix());
   const used = {}; Object.keys(issued).forEach(x => { used[x] = issued[x] - (st.ret[x] || 0); });
   const ids = [...new Set([...Object.keys(use), ...Object.keys(used)])].filter(x => ings[x]);
   const variance = ids.map(x => { const c = M.unitCost(ings[x]); const u = used[x] || 0, s = use[x] || 0; return { ingId: x, std: r4(s), used: r4(u), cost: r2((u - s) * c) }; });
@@ -154,7 +155,7 @@ async function complete(st) {
 
 /* ---------- printing ---------- */
 function printWo(id) {
-  const w = ev.get("wos", id); const ings = M.ingMap(); const { use } = stdUse(w.lines, w.prep || []); const issued = w.issued || {};
+  const w = ev.get("wos", id); const ings = M.ingMap(); const { use } = stdUse(w.lines, w.prep || [], w.date); const issued = w.issued || {};
   printHtml(`Work order ${w.no} · ${dLong(w.date)}`, `<div class="bcard"><div class="bc-step"><h4>Make</h4><table><tbody>${w.lines.filter(l => l.qty > 0).map(l => `<tr><td>${esc(l.item)}</td><td class="num">${l.qty}</td><td class="chk">Made ____</td></tr>`).join("")}
     ${(w.prep || []).filter(p => p.runs > 0).map(p => `<tr><td>${esc((ings[p.ingId] || {}).name || "?")}</td><td class="num">${runsTxt(p.runs)}</td><td class="chk">☐</td></tr>`).join("")}</tbody></table></div>
     <div class="bc-step"><h4>Materials from the store</h4><table><thead><tr><th>Material</th><th class="num">Standard</th><th class="num">Issued</th><th class="num">Returned</th></tr></thead><tbody>${Object.keys(use).filter(x => ings[x]).map(x => `<tr><td>${esc(ings[x].name)}</td><td class="num">${qty(use[x], ings[x].unit)}</td><td class="num">${issued[x] ? qty(issued[x], ings[x].unit) : "______"}</td><td class="num">______</td></tr>`).join("")}</tbody></table></div>

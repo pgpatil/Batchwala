@@ -26,6 +26,13 @@ It is a Progressive Web App: it opens from a link, installs to the home screen, 
 | Work orders | Production issued from the store and completed with actual output and returns; batches costed at what was really used, with variance against the BOM |
 | Costing and lots | Weighted-average material cost (or last price); GRN lots with best-before dates, used oldest first, expiry alerts and discards |
 | Cost & stock reports | Food cost, wastage, variance, stock ageing, buying and price movement, tax summary, and the day book as Tally vouchers (Day Book view, Tally XML for ledgers and vouchers, Excel) |
+| Day close | Each person counts cash, UPI and card at day end against what the app recorded for them, with float, paid-outs and short / over |
+| Invoices and receipts | A4 GST tax invoice with HSN, CGST / SGST, round-off and amount in words, numbered per financial year and device (INV-2627-PA-0007); 58 / 80 mm counter receipts, optionally after every sale |
+| Advances and refunds | Customer advances held as credit and used on unpaid orders; refunds on cancelled or overpaid orders; pre-order details (time slot, cake message, weight, flavour, advance due) |
+| Stock-take | Count a whole location in one sheet with a reason for every difference, saved as one numbered stock-take; printable count sheet |
+| Purchase returns | Debit notes against a GRN or any supplier: stock off at cost, supplier balance reduced, Debit Note voucher for Tally |
+| Payables | Payments against chosen bills, supplier advances, ageing (0–30 / 31–60 / 61–90 / 90+) and bills due this week |
+| Recipe versions | A recipe change can start on a date; past food cost and work-order standards keep the recipe in force at the time |
 | Editing locks | A saved record being edited is locked for others until saved or closed (lapses after 8 quiet minutes; admin can take over); saves check for changes made meanwhile |
 | Menu | Prices, categories, short names for WhatsApp reading, par levels, recipes with cost and margin |
 | Reports | Sales by day and channel, best sellers with margin, wastage value, repeat customers |
@@ -38,7 +45,7 @@ It is a Progressive Web App: it opens from a link, installs to the home screen, 
 | Checks | Before a new customer, item, material or supplier is created, similar existing ones are shown to confirm first |
 | Help | In-app help for every screen and module, searchable, opening on the screen you’re on |
 | Import & export | CSV export by data type; templates; import of menu, materials, BOM, stock and finished-goods counts, suppliers and orders with a check screen first |
-| Data | Saved on the phone first; optional sync through a shared Google Drive folder; daily Excel copy saved to that folder; backup file; Excel export |
+| Data | Saved on the phone first; optional sync through a shared Google Drive folder; daily Excel copy and weekly automatic backups (last four kept, restorable) in that folder; backup file; Excel export. Order and document numbers carry a device letter once a team has two phones, so offline phones never clash |
 
 ## Roles
 

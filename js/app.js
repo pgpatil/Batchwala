@@ -14,6 +14,10 @@ import "./plan.js";
 import "./purchase.js";
 import "./wo.js";
 import "./reports.js";
+import "./close.js";
+import "./invoice.js";
+import "./stocktake.js";
+import "./returns.js";
 import { enhance } from "./table.js";
 import "./erp.js";
 import "./help.js";
@@ -24,11 +28,11 @@ import { APP_NAME } from "./config.js";
 import { $, esc, ICON, today } from "./util.js";
 import { ui, toast, closeSheet, yesNo, focusKey, refocus } from "./ui.js";
 
-const TAB = { help: ["Help", ICON.help], data: ["Import & export", ICON.dl], pos: ["Counter", ICON.cart], bom: ["BOM", ICON.tree], plan: ["Planning", ICON.plan], wo: ["Work orders", ICON.oven], po: ["Purchase orders", ICON.orders], sup: ["Suppliers & payables", ICON.people], insights: ["Cost & stock reports", ICON.chart], prod: ["Production", ICON.oven], grn: ["Purchases (GRN)", ICON.inbox], xfer: ["Transfers", ICON.truck], fg: ["Finished goods", ICON.batch], today: ["Today", ICON.today], orders: ["Orders", ICON.orders], pay: ["Payments", ICON.pay], stock: ["Inventory", ICON.stock], bake: ["Bake board", ICON.oven], batches: ["Batches", ICON.batch], run: ["Delivery run", ICON.run], more: ["More", ICON.more] };
-const SHORT = { plan: "Plan", wo: "Work orders", po: "POs", sup: "Payables", insights: "Reports", bake: "Bake", run: "My run", grn: "GRN", fg: "FG stock", prod: "Make" };   // bottom-bar labels on phones
+const TAB = { help: ["Help", ICON.help], data: ["Import & export", ICON.dl], pos: ["Counter", ICON.cart], bom: ["BOM", ICON.tree], plan: ["Planning", ICON.plan], wo: ["Work orders", ICON.oven], po: ["Purchase orders", ICON.orders], sup: ["Suppliers & payables", ICON.people], insights: ["Cost & stock reports", ICON.chart], close: ["Day close", ICON.pay], take: ["Stock-take", ICON.stock], dn: ["Purchase returns", ICON.inbox], prod: ["Production", ICON.oven], grn: ["Purchases (GRN)", ICON.inbox], xfer: ["Transfers", ICON.truck], fg: ["Finished goods", ICON.batch], today: ["Today", ICON.today], orders: ["Orders", ICON.orders], pay: ["Payments", ICON.pay], stock: ["Inventory", ICON.stock], bake: ["Bake board", ICON.oven], batches: ["Batches", ICON.batch], run: ["Delivery run", ICON.run], more: ["More", ICON.more] };
+const SHORT = { close: "Day close", take: "Stock-take", dn: "Returns", plan: "Plan", wo: "Work orders", po: "POs", sup: "Payables", insights: "Reports", bake: "Bake", run: "My run", grn: "GRN", fg: "FG stock", prod: "Make" };   // bottom-bar labels on phones
 const ORDER = ["pos", "today", "orders", "bake", "prod", "grn", "stock", "xfer", "fg", "batches", "bom", "run", "pay", "more"];
 // Screens grouped into buckets: one bottom-bar button per bucket on phones, a strip of its screens on top of each page, sections in the sidebar.
-const BUCKETS = { orders: ["Orders", ICON.orders, ["today", "orders", "run", "pay"]], make: ["Make", ICON.oven, ["plan", "wo", "prod", "bake", "batches", "bom"]], stores: ["Stores", ICON.store, ["po", "grn", "sup", "stock", "xfer", "fg"]] };
+const BUCKETS = { orders: ["Orders", ICON.orders, ["today", "orders", "run", "pay", "close"]], make: ["Make", ICON.oven, ["plan", "wo", "prod", "bake", "batches", "bom"]], stores: ["Stores", ICON.store, ["po", "grn", "dn", "sup", "stock", "take", "xfer", "fg"]] };
 const bucketOf = v => Object.keys(BUCKETS).find(k => BUCKETS[k][2].includes(v));
 const inBucket = k => BUCKETS[k][2].filter(v => allowedViews().includes(v));
 const onBar = v => R.bar().includes(v) || R.bar().includes("@" + bucketOf(v));
@@ -42,9 +46,10 @@ function allowedViews() {
     if (c("bake.record") || c("orders.edit")) t.push("batches");
     if (c("bake.record") || c("menu.edit") || c("stock.edit") || c("reports")) t.push("bom", "plan");
     if (c("stock.buy") || c("stock.count")) t.push("stock");
-    if (c("stock.buy")) t.push("po", "grn"); if (c("stock.buy") || c("payables")) t.push("sup"); if (c("bake.record")) t.push("wo"); if (c("reports")) t.push("insights");
+    if (c("stock.buy")) t.push("po", "grn", "dn"); if (c("stock.count")) t.push("take"); if (c("stock.buy") || c("payables")) t.push("sup"); if (c("bake.record")) t.push("wo"); if (c("reports")) t.push("insights");
     if (md === "erp") { if (c("bake.record") || c("orders.edit")) t.push("prod"); if (c("transfer")) t.push("xfer"); t.push("fg"); }
   }
+  if (c("sale") || c("collect") || c("pay.record")) t.push("close");
   t.push("help"); if (c("export") || R.isAdmin()) t.push("data");
   return [...new Set(t)];
 }
@@ -88,6 +93,12 @@ function navHtml() {
   <p class="nav-keys dx">Keys: <kbd>N</kbd> new · <kbd>/</kbd> search</p>`;
 }
 let dayOpen = today();
+// Once a day: register this device (for its number letter) after a first sync, and drop old superseded events so the log stays small.
+async function housekeeping() {
+  try { if (sync.current()) await sync.syncNow(); if (R.me()) await R.registerDevice();
+    if (H.autoBackup) await H.autoBackup();
+    const day = today(); if ((await ev.getMeta("prune.day")) !== day) { await ev.setMeta("prune.day", day); if (await ev.prune(120)) { await ev.setMeta("sync.compact", true); if (sync.current()) sync.soon(); } } } catch (_) {}
+}
 export function render() {
   // Left open past midnight: screens still on "today" move to the new day.
   if (today() !== dayOpen) { if (S.date === dayOpen) { S.date = today(); S.center = true; } dayOpen = today(); }
@@ -174,13 +185,14 @@ $("#scrim").addEventListener("click", () => { const x = document.querySelector("
   await R.loadMe(); R.setMode(await ev.getMeta("mode")); M.setHere(await ev.getMeta("here") || (R.me() || {}).loc || null);
   ev.setActor(() => (R.me() || {}).id || "setup");
   if (R.me()) S.view = R.home();
-  ev.onChange(() => { if (ui.sheet && ui.sheet.redraw && !["compose", "waConfirm", "settings", "member", "ingEdit", "item", "move", "bake", "part", "batchSpoil", "grn", "xfer", "fgAdj", "xferRecv", "imp", "invin", "expiry", "poEdit", "woNew", "woIssue", "woDone", "spay", "sup"].includes(ui.sheet.kind)) rerenderSheet(); render(); });
+  ev.onChange(() => { if (ui.sheet && ui.sheet.redraw && !["compose", "waConfirm", "settings", "member", "ingEdit", "item", "move", "bake", "part", "batchSpoil", "grn", "xfer", "fgAdj", "xferRecv", "imp", "invin", "expiry", "poEdit", "woNew", "woIssue", "woDone", "spay", "sup", "dnNew", "recipeVer"].includes(ui.sheet.kind)) rerenderSheet(); render(); });
   sync.onStatus(async st => {
     let joined = false;
     if (st.state === "ok" && !R.me()) { const a = sync.current(); const m = a && R.matchEmail(a.account); if (m) { await R.setMe(m.id); S.view = R.home(); joined = true; toast(`Welcome, ${m.name}`); } }
     if (joined || S.view === "more" || !R.me()) render(); if (ui.sheet && ui.sheet.kind === "sync") ui.sheet.redraw(); if (st.state === "ok") dailyReport(); });
   render();
   await resumeSync();
+  housekeeping();
   const qs = new URLSearchParams(location.search);
   const shared = [qs.get("title"), qs.get("text"), qs.get("url")].filter(Boolean).join("\n");
   if (R.me() && shared) { history.replaceState(null, "", location.pathname); waSheet(shared); }

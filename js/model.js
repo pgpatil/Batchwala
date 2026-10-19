@@ -2,6 +2,14 @@
 import * as ev from "./events.js";
 import { today, addDays, cmpFlat, flatKey } from "./util.js";
 
+// Results are worked out once per change of data (ev.dataVersion) and reused by every screen until something changes.
+// Calls with object arguments (custom lists) aren't cached. Callers get their own array copy; the records inside are shared and read-only.
+function memo(fn) { let v = -1; const cache = new Map();
+  return (...args) => { if (args.some(a => a && typeof a === "object")) return fn(...args);
+    const now = ev.dataVersion() + "|" + today(); if (now !== v) { v = now; cache.clear(); }   // a new day also refreshes (expiry, "today")
+    const k = args.length ? JSON.stringify(args) : "";
+    if (!cache.has(k)) cache.set(k, fn(...args)); const r = cache.get(k); return Array.isArray(r) ? r.slice() : r && typeof r === "object" ? { ...r } : r; }; }
+
 export const CHANNELS = { whatsapp: "WhatsApp", phone: "Phone", instagram: "Instagram", bulk: "Bulk / event", other: "Other", walkin: "Walk-in", swiggy: "Swiggy", zomato: "Zomato" };
 export const PREORDER = ["whatsapp", "phone", "instagram", "bulk", "other"];
 export const SERVICE = { takeaway: "Takeaway", dinein: "Dine-in" };
@@ -10,7 +18,7 @@ export const chanLabel = o => o.channel === "walkin" && SERVICE[o.service] ? SER
 export const STATUSES = ["received", "confirmed", "baking", "ready", "out", "delivered"];
 export const STATUS_LABEL = { received: "Received", confirmed: "Confirmed", baking: "In a bake", ready: "Ready", out: "Out for delivery", delivered: "Delivered", cancelled: "Cancelled" };
 export const DEFAULT_CONFIG = { id: "app", business: "My Bakery", tagline: "Home bakery", logo: "", accent: "#F7B718", upi: "", payee: "", activeTag: "", tags: [], festive: false, businessId: "b1", outletId: "home", folderName: "Batchwala data", clientId: "" };
-export const config = () => ({ ...DEFAULT_CONFIG, ...(ev.get("config", "app") || {}) });
+export const config = memo(() => ({ ...DEFAULT_CONFIG, ...(ev.get("config", "app") || {}) }));
 
 /* ---------- orders and payments ---------- */
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
@@ -23,11 +31,11 @@ export function normOrder(o) {
 }
 let payCache = null, payStamp = null;
 function payIndex() {
-  const p = ev.all("payments"); const stamp = p.length + ":" + (p.at(-1) || {}).id;
-  if (payStamp === stamp && payCache) return payCache;
+  const stamp = ev.dataVersion(); if (payStamp === stamp && payCache) return payCache;
+  const p = ev.all("payments");
   const idx = {}; p.forEach(x => { (idx[x.orderId] = idx[x.orderId] || []).push(x); }); payCache = idx; payStamp = stamp; return idx;
 }
-export const orders = (withCancelled = true) => ev.all("orders").map(normOrder).filter(o => withCancelled || o.status !== "cancelled");
+export const orders = memo((withCancelled = true) => ev.all("orders").map(normOrder).filter(o => withCancelled || o.status !== "cancelled"));
 export const paymentsFor = id => (payIndex()[id] || []).slice().sort((a, b) => a._at < b._at ? -1 : 1);
 export const sub = o => o.items.reduce((s, i) => s + i.qty * i.rate, 0);
 export const disc = o => Math.round(sub(o) * (o.discountPct || 0) / 100);
@@ -73,8 +81,12 @@ export function customers(list = orders(false)) {
     const k = ckey(o); if (!map.has(k)) map.set(k, { key: k, customer: o.customer, flat: o.flat, phone: "", orders: [] });
     const c = map.get(k); c.orders.push(o); if (o.phone) c.phone = o.phone; c.customer = o.customer; c.last = o.date;
   });
-  return [...map.values()].map(c => ({ ...c, spend: c.orders.reduce((s, o) => s + total(o), 0), balance: c.orders.reduce((s, o) => s + bal(o), 0), received: c.orders.reduce((s, o) => s + Math.min(received(o), total(o)), 0) }));
+  return [...map.values()].map(c => ({ ...c, spend: c.orders.reduce((s, o) => s + total(o), 0), balance: c.orders.reduce((s, o) => s + bal(o), 0), received: c.orders.reduce((s, o) => s + Math.min(received(o), total(o)), 0), credit: Math.round(creditOf(c.key) * 100) / 100 }));
 }
+// Customer credit: money held for a customer but not on any order (advances, overpayments moved to credit), less credit used or refunded.
+// These are payments with no orderId; credit applied to an order is a "Credit" payment on the order plus a matching negative here.
+export const creditOf = key => (payIndex()[""] || []).filter(p => p.customerKey === key).reduce((s, p) => s + (+p.amount || 0), 0);
+export const creditEntries = key => (payIndex()[""] || []).filter(p => p.customerKey === key).sort((a, b) => a._at < b._at ? -1 : 1);
 export const sortFlat = list => list.slice().sort(cmpFlat);
 export function runOrder(a, b) { // delivery order: wing, then floor, then flat
   const x = flatKey(a.flat), y = flatKey(b.flat);
@@ -83,17 +95,17 @@ export function runOrder(a, b) { // delivery order: wing, then floor, then flat
 }
 
 /* ---------- menu ---------- */
-export const menu = () => ev.all("menu").map(m => ({ category: "", active: true, recipe: [], aliases: "", par: 0, ...m, price: +m.price || 0, par: +m.par || 0 }))
-  .sort((a, b) => (a.sort ?? 999) - (b.sort ?? 999) || a.name.localeCompare(b.name));
+export const menu = memo(() => ev.all("menu").map(m => ({ category: "", active: true, recipe: [], aliases: "", par: 0, ...m, price: +m.price || 0, par: +m.par || 0 }))
+  .sort((a, b) => (a.sort ?? 999) - (b.sort ?? 999) || a.name.localeCompare(b.name)));
 export const menuActive = () => menu().filter(m => m.active !== false);
 export const menuByName = name => menu().find(m => m.name.toLowerCase() === String(name).toLowerCase());
 
 /* ---------- inventory ---------- */
 // Materials: rm = raw material (bought), pm = packing material (bought), sf = semi-finished (made from a recipe that yields `yield` base units).
 export const ING_TYPES = { rm: "Raw material", pm: "Packing material", sf: "Semi-finished" };
-export const ingredients = () => ev.all("ingredients").map(i => ({ unit: "g", reorder: 0, cost: 0, barcode: "", type: "rm", supplier: "", recipe: [], yield: 0, ...i })).sort((a, b) => a.name.localeCompare(b.name));
-export const ingMap = () => Object.fromEntries(ingredients().map(i => [i.id, i]));
-export const moves = () => ev.all("moves").sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : a._at < b._at ? 1 : -1));
+export const ingredients = memo(() => ev.all("ingredients").map(i => ({ unit: "g", reorder: 0, cost: 0, barcode: "", type: "rm", supplier: "", recipe: [], yield: 0, ...i })).sort((a, b) => a.name.localeCompare(b.name)));
+export const ingMap = memo(() => Object.fromEntries(ingredients().map(i => [i.id, i])));
+export const moves = memo(() => ev.all("moves").sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : a._at < b._at ? 1 : -1)));
 // Stock by material; with a location, only that location's moves (records from before locations count at the first one).
 export function stockMap(loc = null) { const m = {}; const home = locations()[0].id; ev.all("moves").forEach(v => { if (loc && (v.outletId || home) !== loc) return; m[v.ingId] = (m[v.ingId] || 0) + (+v.qty || 0); }); return m; }
 // Semi-finished made fresh (no "make when below" level) aren't flagged when they run out.
@@ -110,8 +122,8 @@ function costIndex() {
     if (m.type === "purchase" && q > 0 && +m.amount > 0) { const rate = +m.amount / q;
       if (x.q < 0) x.v = x.q * rate;   // stock that went below zero is valued at this price, so the average still matches what's on hand
       x.rates.push(rate); x.q += q; x.v += +m.amount; return; }
-    if (m.type === "purchase" && q < 0 && +m.amount < 0) {   // an undone purchase takes its money back out and drops its price
-      const rate = +m.amount / q; const k = x.rates.map(r => Math.abs(r - rate) < 1e-9).lastIndexOf(true); if (k >= 0) x.rates.splice(k, 1);
+    if (m.type === "purchase" && q < 0 && +m.amount < 0) {   // an undone purchase takes its money back out and drops its price; goods returned (ret) keep it
+      const rate = +m.amount / q; const k = m.ret ? -1 : x.rates.map(r => Math.abs(r - rate) < 1e-9).lastIndexOf(true); if (k >= 0) x.rates.splice(k, 1);
       x.q += q; x.v += +m.amount; if (x.q <= 0) x.v = x.q * last(); return; }
     const avg = x.q > 0 ? x.v / x.q : last(); x.q += q; x.v += avg * q; if (x.q <= 0) x.v = x.q * last(); });
   costCache = Object.fromEntries(Object.entries(by).map(([id, x]) => [id, { avg: x.q > 0 && x.v > 0 ? x.v / x.q : (x.rates.at(-1) || own[id] || 0), last: x.rates.at(-1) || 0 }])); costStamp = stamp; return costCache;
@@ -144,16 +156,23 @@ export function recipeCost(m) {
   (m.recipe || []).forEach(r => { const i = ings[r.ingId]; if (!i) { missing++; return; } const c = unitCost(i); if (!c) missing++; cost += c * (+r.qty || 0); });
   return { cost, missing, lines: (m.recipe || []).length };
 }
-export function requirement(lines) {
+// Recipe versions: a recipe change can be dated, keeping the earlier recipe in versions[] as { until, recipe, yield, at } (until = the
+// first day the newer recipe applies). recipeAt gives the recipe that applied on a date, so past food cost and work orders keep their standard.
+export function recipeAt(rec, date) {
+  if (!rec || !date || !(rec.versions || []).length) return rec;
+  const v = rec.versions.filter(x => x.until > date).sort((a, b) => a.until < b.until ? -1 : 1)[0];
+  return v ? { ...rec, recipe: v.recipe || [], ...(v.yield != null ? { yield: +v.yield } : {}) } : rec;
+}
+export function requirement(lines, at) {
   const need = {}; const unknown = [];
-  lines.forEach(l => { const m = menuByName(l.item); if (!m || !(m.recipe || []).length) { if (l.qty) unknown.push(l.item); return; } m.recipe.forEach(r => { need[r.ingId] = (need[r.ingId] || 0) + (+r.qty || 0) * l.qty; }); });
+  lines.forEach(l => { const m = recipeAt(menuByName(l.item), at); if (!m || !(m.recipe || []).length) { if (l.qty) unknown.push(l.item); return; } m.recipe.forEach(r => { need[r.ingId] = (need[r.ingId] || 0) + (+r.qty || 0) * l.qty; }); });
   return { need, unknown: [...new Set(unknown)] };
 }
 
 /* ---------- batches ---------- */
 // A batch is one recorded bake (kind "bakes"): numbered, with pieces and spoiled pieces per item and the stock it used.
-export const batches = () => ev.all("bakes").map(b => ({ no: "", notes: "", void: false, ...b, date: ISO.test(b.date) ? b.date : today(), lines: (b.lines || []).map(l => ({ item: l.item, qty: +l.qty || 0, spoiled: +l.spoiled || 0, discarded: +l.discarded || 0, cleared: +l.cleared || 0 })), prep: (b.prep || []).map(p => ({ ingId: p.ingId, runs: +p.runs || 0, qty: +p.qty || 0 })) }))
-  .sort((a, b) => (a.date + (a.at || a._at || "")) < (b.date + (b.at || b._at || "")) ? 1 : -1);
+export const batches = memo(() => ev.all("bakes").map(b => ({ no: "", notes: "", void: false, ...b, date: ISO.test(b.date) ? b.date : today(), lines: (b.lines || []).map(l => ({ item: l.item, qty: +l.qty || 0, spoiled: +l.spoiled || 0, discarded: +l.discarded || 0, cleared: +l.cleared || 0 })), prep: (b.prep || []).map(p => ({ ingId: p.ingId, runs: +p.runs || 0, qty: +p.qty || 0 })) }))
+  .sort((a, b) => (a.date + (a.at || a._at || "")) < (b.date + (b.at || b._at || "")) ? 1 : -1));
 export const bakesOn = date => batches().filter(b => b.date === date && !b.void);
 export const batchPcs = b => b.lines.reduce((s, l) => s + l.qty, 0);
 export const batchSpoiled = b => b.lines.reduce((s, l) => s + l.spoiled, 0);
@@ -169,9 +188,9 @@ export const batchMadeValue = b => (b.made || []).reduce((s, x) => s + (+x.cost 
 // Net cost of the finished pieces: everything taken off stock, less the value of semi-finished stock this batch made.
 export const batchCost = b => Math.max(0, batchStock(b).reduce((s, x) => s + (+x.cost || 0), 0) - batchMadeValue(b));
 // What a batch takes off stock: finished pieces use their recipe one level down (semi-finished from stock); prep runs use the semi-finished recipe.
-export function batchNeed(lines, prep = []) {
-  const { need, unknown } = requirement(lines); const ings = ingMap(); const made = {};
-  prep.filter(p => p.runs > 0).forEach(p => { const i = ings[p.ingId]; if (!i) return; made[i.id] = (made[i.id] || 0) + i.yield * p.runs;
+export function batchNeed(lines, prep = [], at) {
+  const { need, unknown } = requirement(lines, at); const ings = ingMap(); const made = {};
+  prep.filter(p => p.runs > 0).forEach(p => { const i = recipeAt(ings[p.ingId], at); if (!i) return; made[i.id] = (made[i.id] || 0) + i.yield * p.runs;
     (i.recipe || []).forEach(r => { need[r.ingId] = (need[r.ingId] || 0) + (+r.qty || 0) * p.runs; }); });
   return { need, made, unknown };
 }
@@ -275,13 +294,13 @@ export function production(date, kitchen = (kitchens()[0] || locations()[0]).id)
   return [...rows.values()].map(x => ({ ...x, atKitchen: Math.max(0, k[x.item] || 0), baked: baked[x.item] || 0, toBake: Math.max(0, x.need - Math.max(0, k[x.item] || 0)) }))
     .filter(x => x.need).sort((a, b) => b.toBake - a.toBake || a.item.localeCompare(b.item));
 }
-export const suppliers = () => ev.all("suppliers").sort((a, b) => a.name.localeCompare(b.name));
+export const suppliers = memo(() => ev.all("suppliers").sort((a, b) => a.name.localeCompare(b.name)));
 export const supplierByName = n => { const k = String(n || "").trim().toLowerCase(); return suppliers().find(s => s.name.trim().toLowerCase() === k || (s.aka || []).some(a => a.trim().toLowerCase() === k)) || null; };
 
 /* ---------- purchase orders ---------- */
 // A PO: { no, date, supplier, loc, expected, lines: [{ ingId, qty, rate (per base unit), taxPct }], status: draft | approved | closed | cancelled }.
 // Receiving is a GRN with poId; what's been received is read from those GRNs.
-export const porders = () => ev.all("porders").sort((a, b) => (b.date + b._at).localeCompare(a.date + a._at));
+export const porders = memo(() => ev.all("porders").sort((a, b) => (b.date + b._at).localeCompare(a.date + a._at)));
 // Received per material; with lines for the same material, allocated to them in order (see poLineReceived).
 export function poReceived(po) { const r = {}; grns().filter(g => !g.void && g.poId === po.id).forEach(g => g.lines.forEach(l => { r[l.ingId] = (r[l.ingId] || 0) + (+l.qty || 0); })); return r; }
 // Ordered per material (older POs may list a material twice), leaving out materials since deleted.
@@ -302,26 +321,43 @@ export function lastRate(supplier, ingId) { const s = nameKey(supplier); for (co
 export function usualSupplier(i) { if (i.supplier) { const s = supplierByName(i.supplier); return s ? s.name : i.supplier.trim(); } const g = grns().find(g => !g.void && g.lines.some(l => l.ingId === i.id)); return g ? g.supplier : ""; }
 
 /* ---------- payables ---------- */
-// Bills are GRNs; payments to suppliers are their own records (kind "spays"). Payments settle the oldest bills first.
-export const spays = () => ev.all("spays").sort((a, b) => (b.date + b._at).localeCompare(a.date + a._at));
+// Bills are GRNs; payments to suppliers are their own records (kind "spays"); debit notes (kind "preturns") are goods sent back.
+// A debit note against a GRN reduces that bill; a payment marked against bills settles those first; whatever is left settles the oldest bills.
+// Money paid beyond every bill is an advance held by the supplier (a negative balance).
+export const spays = memo(() => ev.all("spays").sort((a, b) => (b.date + b._at).localeCompare(a.date + a._at)));
+export const preturns = memo(() => ev.all("preturns").sort((a, b) => (b.date + b._at).localeCompare(a.date + a._at)));
+export const AGE = [["0–30", 0], ["31–60", 31], ["61–90", 61], ["90+", 91]];
 export function supplierLedger(name) {
-  const n = String(name || "").toLowerCase(); const sup = supplierByName(name) || { name, days: 0 }; const days = +sup.days || 0; const t = today();
-  const bills = grns().filter(g => !g.void && g.supplier.toLowerCase() === n).map(g => ({ date: g.date, doc: g.no, id: g.id, bill: +g.total || 0, due: addDays(g.date, days) })).sort((a, b) => a.date < b.date ? -1 : 1);
-  const pays = spays().filter(p => p.supplier.toLowerCase() === n);
-  let paid = pays.reduce((s, p) => s + (+p.amount || 0), 0); bills.forEach(b => { const u = Math.min(b.bill, Math.max(0, paid)); b.open = Math.round((b.bill - u) * 100) / 100; paid -= u; });
-  const entries = [...bills.map(b => ({ date: b.date, doc: b.doc, bill: b.bill, paid: 0, ref: b.id })), ...pays.map(p => ({ date: p.date, doc: p.mode ? `Paid · ${p.mode}${p.ref ? " " + p.ref : ""}` : "Paid", bill: 0, paid: +p.amount || 0, pay: p }))].sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : a.bill ? -1 : 1);
+  const n = nameKey(name); const sup = supplierByName(name) || { name, days: 0 }; const days = +sup.days || 0; const t = today();
+  const bills = grns().filter(g => !g.void && nameKey(g.supplier) === n).map(g => ({ date: g.date, doc: g.no, id: g.id, inv: g.invoiceNo || "", bill: +g.total || 0, open: +g.total || 0, due: addDays(g.date, days) })).sort((a, b) => a.date < b.date ? -1 : 1);
+  const byId = Object.fromEntries(bills.map(b => [b.id, b]));
+  const pays = spays().filter(p => nameKey(p.supplier) === n); const dns = preturns().filter(d => !d.void && nameKey(d.supplier) === n);
+  const settle = (b, amt) => { const u = Math.min(b.open, Math.max(0, amt)); b.open = Math.round((b.open - u) * 100) / 100; return amt - u; };
+  // A payment and its reversal cancel out, so neither settles anything.
+  const reversed = new Set(pays.filter(p => p.revOf).map(p => p.revOf)); let pool = 0;
+  dns.slice().reverse().forEach(d => { let left = +d.total || 0; if (d.grnId && byId[d.grnId]) left = settle(byId[d.grnId], left); pool += left; });
+  pays.slice().reverse().filter(p => !p.revOf && !reversed.has(p.id)).forEach(p => { let left = +p.amount || 0; (p.bills || []).forEach(id => { if (byId[id]) left = settle(byId[id], left); }); pool += left; });
+  bills.forEach(b => { pool = settle(b, pool); });
+  const entries = [...bills.map(b => ({ date: b.date, doc: b.doc, bill: b.bill, paid: 0, ref: b.id })),
+    ...dns.map(d => ({ date: d.date, doc: `Debit note ${d.no}`, bill: 0, paid: +d.total || 0, dn: d })),
+    ...pays.map(p => ({ date: p.date, doc: (p.mode ? `Paid · ${p.mode}${p.ref ? " " + p.ref : ""}` : "Paid") + (p.bills && p.bills.length ? ` · for ${p.bills.map(id => (byId[id] || {}).doc).filter(Boolean).join(", ")}` : ""), bill: 0, paid: +p.amount || 0, pay: p }))]
+    .sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : a.bill ? -1 : 1);
   let run = 0; entries.forEach(e => { run += e.bill - e.paid; e.bal = Math.round(run * 100) / 100; });
   const open = bills.filter(b => b.open > 0.005); const overdue = open.filter(b => b.due < t);
-  return { sup, days, bills, pays, entries, balance: Math.round(run * 100) / 100, open, overdue: overdue.reduce((s, b) => s + b.open, 0), oldest: open[0] ? open[0].due : "" };
+  // Ageing by the bill date; "due soon" is what falls due within the next week.
+  const age = AGE.map(() => 0); open.forEach(b => { const d = Math.round((new Date(t) - new Date(b.date)) / 864e5); let k = 0; AGE.forEach(([, from], i) => { if (d >= from) k = i; }); age[k] += b.open; });
+  const soon = open.filter(b => b.due >= t && b.due <= addDays(t, 7));
+  const balance = Math.round(run * 100) / 100;
+  return { sup, days, bills, pays, dns, entries, balance, advance: balance < 0 ? -balance : 0, open, age, soon, dueSoon: soon.reduce((s, b) => s + b.open, 0), overdue: overdue.reduce((s, b) => s + b.open, 0), oldest: open[0] ? open[0].due : "" };
 }
-export function payables() { const names = new Set([...suppliers().map(s => s.name), ...grns().filter(g => !g.void).map(g => g.supplier), ...spays().map(p => p.supplier)].filter(Boolean).map(x => x.trim()));
+export function payables() { const names = new Set([...suppliers().map(s => s.name), ...grns().filter(g => !g.void).map(g => g.supplier), ...spays().map(p => p.supplier), ...preturns().filter(d => !d.void).map(d => d.supplier)].filter(Boolean).map(x => x.trim()));
   const seen = new Set(); return [...names].filter(n => { const k = n.toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; }).map(n => ({ name: n, ...supplierLedger(n) })); }
-export const grns = () => ev.all("grns").sort((a, b) => (b.date + b._at).localeCompare(a.date + a._at));
+export const grns = memo(() => ev.all("grns").sort((a, b) => (b.date + b._at).localeCompare(a.date + a._at)));
 // Transfers saved before the receive step existed have no status and count as received.
 export const xferReceived = t => !t.status || t.status === "received";
 export const xferShort = t => xferReceived(t) && (t.lines || []).some(l => l.recv != null && +l.recv < +l.qty);
 export function inTransit(loc) { const m = {}; ev.all("transfers").filter(t => !t.void && t.to === loc && !xferReceived(t)).forEach(t => (t.lines || []).filter(l => l.item).forEach(l => { m[l.item] = (m[l.item] || 0) + (+l.qty || 0); })); return m; }
-export const transfers = () => ev.all("transfers").sort((a, b) => (b.date + b._at).localeCompare(a.date + a._at));
+export const transfers = memo(() => ev.all("transfers").sort((a, b) => (b.date + b._at).localeCompare(a.date + a._at)));
 // GRN-P12, T-P4: the document type, then the person's prefix so two phones never clash offline.
 // Numbers run per document type; a prefix ending in a digit (older "R5" style) is separated with "-" so its digit isn't read as part of the number.
 export function nextDocNo(kind, prefix, tag) { const p = prefix || ""; const sep = /\d$/.test(p) ? "-" : "";
@@ -342,3 +378,6 @@ export function batchLots() {
   return Object.values(lots).flat().map(l => { const life = shelfLife(menuByName(l.item)); const exp = addDays(l.date, life); return { ...l, life, expires: exp, expired: l.left > 0 && exp <= t }; });
 }
 export const expiredLots = () => batchLots().filter(l => l.expired).sort((a, b) => a.expires < b.expires ? -1 : 1);
+
+// Heavier views over the data, cached the same way.
+customers = memo(customers); stockMap = memo(stockMap); fgStock = memo(fgStock); batchLots = memo(batchLots); materialLots = memo(materialLots); payables = memo(payables); supplierLedger = memo(supplierLedger); board = memo(board); production = memo(production);

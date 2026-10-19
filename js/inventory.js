@@ -57,7 +57,7 @@ function drawBake(st) {
   const have = id => (sm[id] || 0) + (made[id] || 0); const short = ids.filter(id => have(id) < need[id]);
   const me = R.me();
   openSheet(st, `<div class="sh-head"><h2 class="h">New batch</h2><button class="x" data-close aria-label="Close">×</button></div>
-  <p class="hint" style="margin-top:-4px">Batch #${esc(M.nextBatchNo((me && me.prefix) || ""))} · ${esc(dLong(st.date))}${M.locations().length > 1 ? " · at " + esc(M.locName(st.loc)) : ""} · pieces you are baking now</p>
+  <p class="hint" style="margin-top:-4px">Batch #${esc(M.nextBatchNo(R.numPrefix()))} · ${esc(dLong(st.date))}${M.locations().length > 1 ? " · at " + esc(M.locName(st.loc)) : ""} · pieces you are baking now</p>
   <label class="f">Finished pieces</label><div class="kv">${st.lines.map((l, ix) => `<div style="align-items:center"><span>${esc(l.item)}</span><div class="stepper"><button data-bstep="${ix}:-1" aria-label="One less">−</button><input class="stepin" data-bqty="${ix}" inputmode="numeric" value="${l.qty}" aria-label="Pieces of ${esc(l.item)}"><button data-bstep="${ix}:1" aria-label="One more">+</button></div></div>`).join("")}</div>
   ${st.prep.length ? `<label class="f" style="margin-top:14px">Semi-finished to prepare <small class="mut">(recipe runs · suggested from what’s short)</small></label><div class="kv">${st.prep.map((p, ix) => { const i = ings[p.ingId];
     return `<div style="align-items:center"><span>${esc(i.name)}<small class="mut" style="display:block">${qty(i.yield, i.unit)} per run · have ${qty(Math.max(0, sm[i.id] || 0), i.unit)}</small></span><div class="stepper"><button data-pstep="${ix}:-1" aria-label="One run less">−</button><input class="stepin" data-prun="${ix}" inputmode="decimal" value="${+(+p.runs).toFixed(2)}" aria-label="Runs of ${esc(i.name)}"><button data-pstep="${ix}:1" aria-label="One run more">+</button></div></div>`; }).join("")}</div>` : ""}
@@ -160,6 +160,21 @@ async function ingEdit(i) {
   const st = { ...lk, kind: "ingEdit", x, isNew, orig: x.name, rf: big(x.unit) ? big(x.unit).f : 1 }; st.redraw = () => drawIngEdit(st); drawIngEdit(st);
 }
 const sfUnitCost = x => x.yield > 0 ? M.recipeCost(x).cost / x.yield : 0;
+// Recipe versions: when a saved recipe changes, ask whether the old one was simply wrong (a correction) or the new one starts on a date.
+// A dated change keeps the old recipe in versions[], so past sales and work orders keep the standard they were made to.
+const recipeKey = (r, y) => JSON.stringify([(r || []).filter(l => l.ingId && +l.qty > 0).map(l => [l.ingId, +l.qty]).sort(), +y || 0]);
+async function datedRecipe(kind, x) {
+  const old = ev.get(kind, x.id); if (!old || !(old.recipe || []).length || recipeKey(old.recipe, old.yield) === recipeKey(x.recipe, x.yield)) return true;
+  const last = (x.versions || []).reduce((m, v) => v.until > m ? v.until : m, "");
+  const r = await ask(`<p class="cq">The recipe changed. From when?</p><div class="cdetail">Give the day the new recipe starts, and sales and work orders before it keep the old recipe’s cost. Choose “Correction” if the old recipe was just wrong.</div><input class="in" id="rvFrom" type="date" value="${today()}" style="margin-top:10px">`,
+    [{ label: "Cancel", cls: "btn-ghost", value: null }, { label: "Correction", cls: "btn-ghost", value: "fix" }, { label: "New from this date", cls: "btn-primary", value: "ver" }]);
+  if (!r) return false; if (r === "fix") return true;
+  const from = (document.getElementById("rvFrom") || {}).value || today();
+  if (last && from <= last) { toast(`The last recipe change started ${dLong(last)}. Pick a later day.`); return false; }
+  x.versions = [...(x.versions || []), { until: from, recipe: old.recipe, ...(kind === "ingredients" ? { yield: +old.yield || 0 } : {}), at: new Date().toISOString() }]; return true;
+}
+const versionsBlock = x => { const v = (x.versions || []).slice().sort((a, b) => a.until < b.until ? 1 : -1); if (!v.length) return ""; const ings = M.ingMap();
+  return `<details class="predet" style="margin-top:10px"><summary>Earlier recipes · ${v.length}</summary>${v.map((r, i) => `<div class="kv" style="margin:6px 0"><div><span><b>Until ${esc(dLong(addDays(r.until, -1)))}</b>${v[i + 1] ? ` <small class="mut">from ${esc(dLong(v[i + 1].until))}</small>` : ""}</span><span>${r.yield ? "makes " + qty(r.yield, x.unit) : ""}</span></div>${(r.recipe || []).map(l => `<div><span>${esc((ings[l.ingId] || {}).name || "Removed material")}</span><span>${ings[l.ingId] ? qty(l.qty, ings[l.ingId].unit) : l.qty}</span></div>`).join("")}</div>`).join("")}</details>`; };
 function drawIngEdit(st) {
   const x = st.x; const b = big(x.unit); const sf = x.type === "sf"; const money = R.can("money") && R.role() !== "kitchen";
   openSheet(st, `<div class="sh-head"><h2 class="h">${st.isNew ? "New material" : "Edit material"}</h2><button class="x" data-close aria-label="Close">×</button></div>
@@ -170,7 +185,7 @@ function drawIngEdit(st) {
   ${(x.aka || []).length ? `<p class="hint">Also known as: ${(x.aka || []).map(esc).join(", ")} <button class="linkbtn" data-inv="clearAka">Forget these</button></p>` : ""}
   <label class="f">Measured in</label><div class="chips">${[["g", "Weight (g, kg)"], ["ml", "Volume (ml, L)"], ["pcs", "Pieces"]].map(([u, l]) => `<button class="chip" data-gunit="${u}" aria-pressed="${x.unit === u}">${l}</button>`).join("")}</div>
   ${sf ? `<label class="f" for="gYield">One run of the recipe makes</label><div class="two"><input class="in" id="gYield" inputmode="decimal" value="${x.yield ? +(x.yield / st.rf).toFixed(3) : ""}" placeholder="e.g. 1.2">${unitChips(x.unit, st.rf, "grf")}</div>
-    <label class="f">Recipe for one run</label>${recipeRows(st)}
+    <label class="f">Recipe for one run</label>${recipeRows(st)}${versionsBlock(x)}
     ${money ? `<div class="kv" style="margin-top:10px"><div><span>Cost per ${b ? b.big : x.unit}</span><b id="sfCost">${x.yield ? rs2(sfUnitCost(x) * (b ? b.f : 1)) : "–"}</b></div></div>` : ""}` : ""}
   <label class="f" for="gReorder">${sf ? "Make more when below" : "Reorder when below"}</label><div class="two"><input class="in" id="gReorder" inputmode="decimal" value="${x.reorder ? +(x.reorder / st.rf).toFixed(3) : ""}" placeholder="0">${unitChips(x.unit, st.rf, "grf")}</div>
   ${sf ? "" : `<div class="two"><div><label class="f" for="gCost">Price per ${b ? b.big : x.unit} ₹ <small class="mut">(until a purchase)</small></label><input class="in" id="gCost" inputmode="decimal" value="${x.cost ? +(x.cost * (b ? b.f : 1)).toFixed(2) : ""}" placeholder="Optional"></div>
@@ -252,14 +267,15 @@ function drawItem(st) {
   <label class="f" for="iLife">Shelf life in days <small class="mut">(blank = ${M.shelfLife({ name: x.name, category: x.category })} for this item: cookies 30, others 3)</small></label><input class="in" id="iLife" inputmode="numeric" value="${x.shelfLife ?? ""}" placeholder="${M.shelfLife({ name: x.name, category: x.category })}">
   <div class="two"><div><label class="f" for="iPar">Keep ready each day${M.sellingLocs().length > 1 ? " (per outlet)" : ""}</label><input class="in" id="iPar" inputmode="numeric" value="${x.par || ""}" placeholder="0"></div>
   ${M.taxCfg().on ? `<div><label class="f" for="iTax">${esc(M.taxCfg().name)} % <small class="mut">(blank = ${M.taxCfg().rate}%)</small></label><input class="in" id="iTax" inputmode="decimal" value="${x.taxPct ?? ""}" placeholder="${M.taxCfg().rate}"></div>` : "<div></div>"}</div>
+  <label class="f" for="iHsn">HSN / SAC <small class="mut">(for tax invoices · blank = ${esc(M.config().hsn || "business default")})</small></label><input class="in" id="iHsn" value="${esc(x.hsn || "")}" placeholder="${esc(M.config().hsn || "e.g. 1905")}">
   <label class="f">BOM · per piece <small class="mut">(raw, packing and semi-finished materials)</small></label>
-  ${recipeRows(st)}
+  ${recipeRows(st)}${versionsBlock(x)}
   ${ings.length ? `<div class="kv" style="margin-top:10px"><div><span>Cost per piece</span><b id="rcCost">${rs2(rc.cost)}</b></div><div><span>Margin at ${rs(x.price)}</span><b id="rcMargin">${x.price ? Math.round((1 - rc.cost / x.price) * 100) + "%" : "–"}</b></div></div>
   ${rc.missing ? `<p class="hint">Some materials have no price yet.</p>` : ""}` : ""}
   <button class="btn btn-primary" data-inv="saveItem">${st.isNew ? "Add item" : "Save item"}</button>
   ${!st.isNew && R.isAdmin() ? `<button class="btn btn-danger" data-inv="deleteItem">Remove from menu</button>` : ""}`);
 }
-function syncItem() { const x = ui.sheet.x; x.name = $("#iName").value.trim(); if (R.can("prices")) x.price = num($("#iPrice").value); x.category = $("#iCat").value.trim(); x.aliases = $("#iAlias").value.trim(); x.par = num($("#iPar").value); x.shelfLife = $("#iLife").value.trim() === "" ? null : Math.max(1, Math.round(num($("#iLife").value))); if ($("#iTax")) x.taxPct = $("#iTax").value.trim() === "" ? null : num($("#iTax").value); }
+function syncItem() { const x = ui.sheet.x; if ($("#iHsn")) x.hsn = $("#iHsn").value.trim(); x.name = $("#iName").value.trim(); if (R.can("prices")) x.price = num($("#iPrice").value); x.category = $("#iCat").value.trim(); x.aliases = $("#iAlias").value.trim(); x.par = num($("#iPar").value); x.shelfLife = $("#iLife").value.trim() === "" ? null : Math.max(1, Math.round(num($("#iLife").value))); if ($("#iTax")) x.taxPct = $("#iTax").value.trim() === "" ? null : num($("#iTax").value); }
 
 // Undoing keeps the batch in the register, marked undone; it leaves the bake board and its stock moves are reversed.
 // A move can be reversed once, by hand, only when it isn't part of a document (batch, GRN, transfer, work order) that has its own undo.
@@ -294,7 +310,8 @@ const I = {
     if (!await L.saveOk(st)) return;
     if (x.type === "sf") { x.recipe = x.recipe.filter(r => r.ingId && +r.qty > 0); x.cost = 0; x.barcode = ""; x.supplier = "";
       if (x.recipe.length && !(x.yield > 0)) { toast("Enter how much one run makes"); return; }
-      if (M.makesCycle(x.id, x.recipe)) { toast("That recipe would use itself through another semi-finished item"); return; } }
+      if (M.makesCycle(x.id, x.recipe)) { toast("That recipe would use itself through another semi-finished item"); return; }
+      if (!st.isNew && !await datedRecipe("ingredients", x)) return; }
     else { x.recipe = []; x.yield = 0; }
     const { _at, _by, ...rec } = x; await ev.put("ingredients", rec); if (st.isNew && st.open) await putMove({ ingId: x.id, type: "count", qty: st.open, note: "Opening stock" });
     sync.soon(); toast(st.isNew ? "Material added" : "Changes saved"); ingSheet(x.id); },
@@ -316,7 +333,7 @@ const I = {
   bake: el => bakeSheet(el.dataset.date),
   saveBake: async () => { const st = ui.sheet; const lines = st.lines.filter(l => l.qty > 0).map(l => ({ item: l.item, qty: l.qty })); const ings = M.ingMap();
     const prep = st.prep.filter(p => p.runs > 0 && ings[p.ingId]).map(p => ({ ingId: p.ingId, runs: p.runs, qty: ings[p.ingId].yield * p.runs }));
-    const { need, made } = M.batchNeed(lines, prep); const ids = Object.keys(need).filter(id => ings[id]); const me = R.me(); const no = M.nextBatchNo((me && me.prefix) || "");
+    const { need, made } = M.batchNeed(lines, prep); const ids = Object.keys(need).filter(id => ings[id]); const me = R.me(); const no = M.nextBatchNo(R.numPrefix());
     const what = [...lines.map(l => esc(l.item) + " × " + l.qty), ...prep.map(p => esc(ings[p.ingId].name) + " × " + p.runs + " run" + (p.runs > 1 ? "s" : "") + " (" + qty(p.qty, ings[p.ingId].unit) + ")")];
     if (!await yesNo(`<p class="cq">Save batch #${esc(no)}?</p><div class="cdetail">${what.join("<br>")}${ids.length ? "<br><br>Stock used: " + ids.map(id => esc(ings[id].name) + " " + qty(need[id], ings[id].unit)).join(", ") : ""}</div>`, "Save batch", "btn-ok")) return;
     const bakeId = uid("b"); const r2 = v => Math.round(v * 100) / 100;
@@ -347,7 +364,7 @@ const I = {
     if (twin) { if (await yesNo(`<p class="cq">${esc(twin.name)} is already on the menu</p><div class="cdetail">Use a different name, or open the existing item.</div>`, "Open it", "btn-primary", "Keep editing")) itemSheet(twin); return; }
     if (st.isNew) { const r = await confirmNew("menu item", x.name, M.menu()); if (!r) return; if (r !== "new") { itemSheet(r); toast(`Opened ${r.name}`); return; } }
     if (!await L.saveOk(st)) return;
-    x.recipe = x.recipe.filter(r => r.ingId && +r.qty > 0); const { _at, _by, ...rec } = x; await ev.put("menu", rec); sync.soon(); toast(st.isNew ? "Item added" : "Changes saved"); if (st.back === "menu") menuSheet(); else closeSheet(); },
+    x.recipe = x.recipe.filter(r => r.ingId && +r.qty > 0); if (!st.isNew && !await datedRecipe("menu", x)) return; const { _at, _by, ...rec } = x; await ev.put("menu", rec); sync.soon(); toast(st.isNew ? "Item added" : "Changes saved"); if (st.back === "menu") menuSheet(); else closeSheet(); },
   deleteItem: async () => { const x = ui.sheet.x; if (!await yesNo(`<p class="cq">Remove ${esc(x.name)}?</p><div class="cdetail">Past orders keep it. To pause it, switch it off on the menu instead.</div>`, "Remove", "btn-danger-solid")) return;
     await ev.del("menu", x.id); sync.soon(); toast("Item removed"); menuSheet(); }
 };

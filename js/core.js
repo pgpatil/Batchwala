@@ -33,6 +33,16 @@ export async function payOrders(list, mode, amount) {
   let left = amount == null ? Infinity : amount;
   for (const o of list.slice().sort((a, b) => a.date < b.date ? -1 : 1)) { if (left <= 0) break; const b = M.bal(o); if (b <= 0) continue; const p = Math.min(b, left); left -= p; await addPayment(o, p, mode); }
 }
+// Money held for a customer without an order (an advance, or an overpayment kept as credit). Negative amounts use or refund it.
+export async function addCredit(c, amount, mode, note = "") {
+  await ev.put("payments", { id: uid("p"), orderId: "", customerKey: c.key, customer: c.customer, flat: c.flat || "", amount: Math.round(amount * 100) / 100, mode: mode || "", date: today(), note, businessId: M.config().businessId }); sync.soon();
+}
+// Pays unpaid orders from the customer's credit, oldest first. Returns what was used.
+export async function useCredit(c) {
+  let left = Math.round(M.creditOf(c.key) * 100) / 100; let used = 0;
+  for (const o of c.orders.filter(o => M.bal(o) > 0).sort((a, b) => a.date < b.date ? -1 : 1)) { if (left <= 0) break; const p = Math.min(M.bal(o), left); await addPayment(o, p, "Credit", "From customer credit"); left -= p; used += p; }
+  if (used) await addCredit(c, -used, "Credit", "Used on orders"); return used;
+}
 export async function reversePayments(o) { for (const p of M.paymentsFor(o.id)) { if (p.amount > 0 && !M.paymentsFor(o.id).some(x => x.reverses === p.id)) await addPayment(o, -p.amount, p.mode, "Reversed", p.id); } }
 
 export function logoHtml(c = M.config()) { return `<div class="logo">${c.logo ? `<img src="${esc(c.logo)}" alt="${esc(c.business)} logo">` : `<span class="mark">${esc((c.business || "B")[0])}</span>`}</div>`; }

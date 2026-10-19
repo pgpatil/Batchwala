@@ -18,7 +18,7 @@ export const unitOpts = i => { const b = big(i.unit); const p = M.packOf(i); ret
 const unitPick = (i, f, attr) => { const o = unitOpts(i); return o.length > 1 ? `<div class="chips unitchips">${o.map(([n, v]) => `<button class="chip" data-${attr}:${v}" aria-pressed="${f === v}">${esc(n)}</button>`).join("")}</div>` : `<span class="unitlbl">${esc(i.unit)}</span>`; };
 const rateDiff = (got, po, i) => { const d = (got - po) / po * 100; const b = big(i.unit); return Math.abs(d) < 2 ? ` · at PO rate` : ` · <b class="${d > 0 ? "due" : ""}">${d > 0 ? "+" : ""}${Math.round(d)}% vs PO ${rs2(po * (b ? b.f : 1))}/${b ? b.big : i.unit}</b>`; };
 const who = x => { const m = ev.get("members", x.by || x._by); return m ? m.name : ""; };
-const prefix = () => (R.me() || {}).prefix || "";
+const prefix = () => R.numPrefix();
 const r2 = v => Math.round(v * 100) / 100;
 const dateChips = (attr, d) => { const t = today(); return `<div class="chips">${[t, addDays(t, 1), addDays(t, 2)].map((x, i) => `<button class="chip" data-${attr}="${x}" aria-pressed="${d === x}">${["Today", "Tomorrow", esc(dLong(x))][i]}</button>`).join("")}</div>`; };
 const locOpts = (sel, list = M.locations()) => list.map(l => `<option value="${esc(l.id)}" ${l.id === sel ? "selected" : ""}>${esc(l.name)}${l.kind === "kitchen" ? " (kitchen)" : ""}</option>`).join("");
@@ -158,7 +158,8 @@ function grnDetail(id) {
   <div class="kv">${g.lines.map(l => { const i = ings[l.ingId]; return `<div><span>${esc(i ? i.name : "Removed material")} <small class="mut">${i ? qty(l.qty, i.unit) : l.qty}${l.taxPct ? ` · ${l.taxPct}%` : ""}${l.exp ? ` · best before ${esc(dLong(l.exp))}` : ""}${l.lot ? ` · lot ${esc(l.lot)}` : ""}</small></span><span>${rs2(l.amount)}</span></div>`; }).join("")}
   ${tr.map(([n, v]) => `<div><span>${esc(n)}</span><span>${rs2(v)}</span></div>`).join("")}<div class="tot"><span>Total</span><span>${rs2(g.total)}</span></div></div>
   ${g.notes ? `<p class="hint">Note: ${esc(g.notes)}</p>` : ""}
-  ${!g.void && R.can("stock.buy") ? `<button class="btn btn-danger" data-grnundo="${esc(g.id)}">Undo this GRN</button>` : ""}`);
+  ${(() => { const dns = M.preturns().filter(d => !d.void && d.grnId === g.id); return dns.length ? `<label class="f">Returned</label><div class="kv">${dns.map(d => `<div><span><button class="linkbtn" data-dn="${esc(d.id)}">${esc(d.no)}</button> · ${esc(dLong(d.date))} · ${esc(d.reason || "")}</span><span>−${rs2(d.total)}</span></div>`).join("")}</div>` : ""; })()}
+  ${!g.void && R.can("stock.buy") ? `<div class="btnrow"><button class="btn btn-ghost" data-grnreturn="${esc(g.id)}">Return goods (debit note)</button><button class="btn btn-danger" data-grnundo="${esc(g.id)}">Undo this GRN</button></div>` : ""}`);
 }
 
 /* ---------- Transfers ---------- */
@@ -289,6 +290,7 @@ async function voidDoc(kind, id, what) {
   if (!await yesNo(`<p class="cq">Undo this ${what}?</p><div class="cdetail">Its stock moves are reversed. It stays in the list, marked undone.</div>`, "Undo", "btn-danger-solid")) return false;
   // Re-read after the question: another device may have undone it meanwhile, and its reversal may already be here.
   const cur = ev.get(kind, id); if (!cur || cur.void || ev.all("moves").some(m => m.ref === id + ":undo")) { toast(`This ${what} was already undone`); return true; }
+  if (kind === "grns" && M.preturns().some(d => !d.void && d.grnId === id)) { toast("Undo its debit notes first"); return false; }
   // A GRN undo takes the money back out too, so the average cost and last price drop the cancelled purchase.
   for (const m of ev.all("moves").filter(m => m.ref === id)) await putMove({ ingId: m.ingId, type: m.type === "purchase" ? "purchase" : "adjust", qty: -m.qty, ...(m.type === "purchase" && m.amount ? { amount: -m.amount } : {}), note: `${what} undone`, ref: id + ":undo", outletId: m.outletId });
   await ev.put(kind, clean({ ...ev.get(kind, id), void: true, voidAt: new Date().toISOString() })); sync.soon(); toast(`${what[0].toUpperCase() + what.slice(1)} undone`); return true;
