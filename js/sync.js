@@ -71,6 +71,8 @@ async function round() {
     }
     await ev.setMeta("sync.seen", seen);
     status.last = new Date().toISOString(); await ev.setMeta("sync.last", status.last);
+    // Other devices see when this one last synced (the sync health list); refreshed at most every half hour so it adds little to the files.
+    const me = ev.get("devices", dev); if (me && (!me.synced || Date.now() - new Date(me.synced) > 30 * 60000)) { const { _at, _by, ...r } = me; await ev.put("devices", { ...r, synced: status.last }); }
     set("ok");
     return changed;
   } catch (e) { set("error", e && e.message ? e.message : String(e)); }

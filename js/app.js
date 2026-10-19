@@ -18,6 +18,7 @@ import "./close.js";
 import "./invoice.js";
 import "./stocktake.js";
 import "./returns.js";
+import "./labels.js";
 import { enhance } from "./table.js";
 import "./erp.js";
 import "./help.js";
@@ -96,7 +97,7 @@ let dayOpen = today();
 // Once a day: register this device (for its number letter) after a first sync, and drop old superseded events so the log stays small.
 async function housekeeping() {
   try { if (sync.current()) await sync.syncNow(); if (R.me()) await R.registerDevice();
-    if (H.autoBackup) await H.autoBackup();
+    if (H.autoBackup) await H.autoBackup(); if (H.migratePins) await H.migratePins();
     const day = today(); if ((await ev.getMeta("prune.day")) !== day) { await ev.setMeta("prune.day", day); if (await ev.prune(120)) { await ev.setMeta("sync.compact", true); if (sync.current()) sync.soon(); } } } catch (_) {}
 }
 export function render() {

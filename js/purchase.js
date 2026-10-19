@@ -108,6 +108,20 @@ async function savePo(approve) {
 const poText = p => { const ings = M.ingMap(); return `🧾 Purchase order ${p.no} from ${M.config().business}\nDate ${dLong(p.date)}${p.expected ? ` · deliver by ${dLong(p.expected)}` : ""}${M.locations().length > 1 ? ` · to ${M.locName(p.loc)}` : ""}\n\n`
   + p.lines.map(l => { const i = ings[l.ingId]; if (!i) return ""; const pk = M.packOf(i); return `• ${i.name}: ${qty(l.qty, i.unit)}${pk && l.qty % pk.size === 0 ? ` (${l.qty / pk.size} ${pk.name})` : ""}${l.rate ? ` @ ${perBig(i, l.rate)}` : ""}`; }).filter(Boolean).join("\n")
   + (p.notes ? `\n\n${p.notes}` : "") + (M.taxCfg().gstin ? `\n\n${M.taxCfg().name}IN ${M.taxCfg().gstin}` : ""); };
+// The PO as a document for the supplier: both parties with GSTIN, lines with rate, tax and amount, delivery details and a signature line.
+function poHtml(p) {
+  const c = M.config(); const t = M.taxCfg(); const ings = M.ingMap(); const sup = M.supplierByName(p.supplier) || {}; const loc = M.locations().find(l => l.id === p.loc);
+  const L = p.lines.map(l => { const i = ings[l.ingId] || { name: "Removed material", unit: "" }; const b = big(i.unit); const f = b ? b.f : 1; const amt = r2(l.qty * (+l.rate || 0)); const tax = r2(amt * (+l.taxPct || 0) / 100);
+    return { name: i.name, q: +(l.qty / f).toFixed(3), u: b ? b.big : i.unit, rate: (+l.rate || 0) * f, amt, pct: +l.taxPct || 0, tax }; });
+  const amt = r2(L.reduce((s2, l) => s2 + l.amt, 0)), tax = r2(L.reduce((s2, l) => s2 + l.tax, 0)), total = Math.round(amt + tax);
+  return `<div class="inv"><div class="inv-head"><div><h2>${esc(c.business)}</h2>${c.address ? `<div>${esc(c.address).replace(/\n/g, "<br>")}</div>` : ""}${c.phone ? `<div>Phone ${esc(c.phone)}</div>` : ""}${t.gstin ? `<div>${esc(t.name)}IN <b>${esc(t.gstin)}</b>${c.state ? ` · State ${esc(c.state)}` : ""}</div>` : ""}</div>
+    <div class="inv-meta"><h3>PURCHASE ORDER</h3><div>No. <b>${esc(p.no)}</b></div><div>Date ${esc(dLong(p.date))}</div>${p.expected ? `<div>Deliver by <b>${esc(dLong(p.expected))}</b></div>` : ""}</div></div>
+    <div class="inv-to"><small>To</small><b>${esc(p.supplier || "Supplier")}</b>${sup.phone ? ` · ${esc(sup.phone)}` : ""}${sup.gstin ? `<div>${esc(t.name || "GST")}IN ${esc(sup.gstin)}</div>` : ""}${loc && M.locations().length > 1 ? `<div>Deliver to: ${esc(loc.name)}</div>` : ""}</div>
+    <table class="inv-t"><thead><tr><th>#</th><th>Material</th><th class="num">Qty</th><th class="num">Rate</th><th class="num">Amount</th>${tax ? `<th class="num">Tax</th>` : ""}</tr></thead>
+    <tbody>${L.map((l, ix) => `<tr><td>${ix + 1}</td><td>${esc(l.name)}</td><td class="num">${l.q} ${esc(l.u)}</td><td class="num">${l.rate ? rs2(l.rate) + "/" + esc(l.u) : "–"}</td><td class="num">${l.amt ? rs2(l.amt) : "–"}</td>${tax ? `<td class="num">${l.tax ? rs2(l.tax) + `<small> @${l.pct}%</small>` : "–"}</td>` : ""}</tr>`).join("")}</tbody></table>
+    ${amt ? `<div class="inv-tot"><div><span>Amount</span><b>${rs2(amt)}</b></div>${tax ? `<div><span>Tax</span><b>${rs2(tax)}</b></div>` : ""}<div class="grand"><span>Total</span><b>${rs2(total)}</b></div><div class="inv-words">Rupees ${H.words ? H.words(total) : total} only</div></div>` : ""}
+    <div class="inv-foot">${p.notes ? esc(p.notes) + "<br>" : ""}Please quote this PO number on your invoice. Rates as agreed; goods are checked on delivery.<br><br>For ${esc(c.business)} · Authorised signatory</div></div>`;
+}
 function poDetail(id) {
   const p = ev.get("porders", id); if (!p) { closeSheet(); return; } const ings = M.ingMap(); const st = M.poState(p); const got = M.poReceived(p); const sup = M.supplierByName(p.supplier) || {};
   const grnsFor = M.grns().filter(g => g.poId === id && !g.void); const appr = p.approvedBy && ev.get("members", p.approvedBy);
@@ -120,7 +134,7 @@ function poDetail(id) {
   ${p.notes ? `<p class="hint">Note: ${esc(p.notes)}</p>` : ""}
   ${st === "draft" ? `<div class="btnrow">${R.can("stock.buy") ? `<button class="btn btn-ghost" data-poedit="${esc(id)}">Edit</button>` : ""}${canApprove() ? `<button class="btn btn-ok" data-poapprove="${esc(id)}">${ICON.check}Approve</button>` : ""}</div>` : ""}
   ${["approved", "part"].includes(st) ? `${R.can("stock.buy") ? `<button class="btn btn-ok" data-poreceive="${esc(id)}">${ICON.inbox}Receive goods (GRN)</button>` : ""}
-    <div class="btnrow"><a class="btn btn-wa" href="${esc(waHref(sup.phone || "", poText(p)))}" target="_blank" rel="noopener">${ICON.wa}Send to supplier</a><button class="btn btn-ghost" data-pocopy="${esc(id)}">Copy</button></div>` : ""}
+    <div class="btnrow"><a class="btn btn-wa" href="${esc(waHref(sup.phone || "", poText(p)))}" target="_blank" rel="noopener">${ICON.wa}Send to supplier</a><button class="btn btn-ghost" data-pocopy="${esc(id)}">Copy</button><button class="btn btn-ghost" data-poprint="${esc(id)}">${ICON.print}Print / PDF</button></div>` : ""}
   ${st === "part" && R.can("stock.buy") ? `<button class="btn btn-ghost" data-poclose="${esc(id)}">Close short · nothing more is coming</button>` : ""}
   ${["draft", "approved"].includes(st) && R.can("stock.buy") ? `<button class="btn btn-danger" data-pocancel="${esc(id)}">Cancel PO</button>` : ""}`);
 }
@@ -155,6 +169,7 @@ function supSheet(name) {
   ${L.open.length ? `<div class="kv" style="margin-bottom:10px">${M.AGE.map(([n], i) => `<div><span>${n} days old</span><b class="${i > 1 && L.age[i] > 0.005 ? "due" : ""}">${L.age[i] > 0.005 ? rs2(L.age[i]) : "–"}</b></div>`).join("")}</div>` : ""}
   ${R.can("payables") ? `<button class="btn ${L.balance > 0 ? "btn-ok" : "btn-ghost"}" data-suppay="${esc(s.name)}">${L.balance > 0 ? "Record a payment" : "Pay an advance"}</button>` : ""}
   <label class="f" style="margin-top:12px">Details</label><div class="two"><div><label class="f" for="spPhone">Phone</label><input class="in" id="spPhone" value="${esc(s.phone || "")}" inputmode="tel"></div><div><label class="f" for="spDays">Credit days</label><input class="in" id="spDays" inputmode="numeric" value="${s.days || ""}" placeholder="0"></div></div>
+  <label class="f" for="spLead">Lead time <small class="mut">(days from order to delivery · sets reorder levels)</small></label><input class="in" id="spLead" inputmode="numeric" value="${s.lead ?? ""}" placeholder="${+(M.config().leadDays ?? 2)}">
   <label class="f" for="spGst">${esc(M.taxCfg().name)}IN</label><input class="in" id="spGst" value="${esc(s.gstin || "")}" autocapitalize="characters" placeholder="Optional">
   ${R.can("stock.buy") ? `<button class="btn btn-ghost" data-supsave="${esc(s.name)}">Save details</button>` : ""}
   ${L.open.length ? `<label class="f" style="margin-top:12px">Unpaid bills</label><div class="kv">${L.open.map(b => `<div><span>${esc(b.doc)}${b.inv ? " · inv " + esc(b.inv) : ""} · ${esc(dLong(b.date))}${b.open < b.bill - 0.005 ? ` <small class="mut">of ${rs2(b.bill)}</small>` : ""}<small class="mut" style="display:block">due ${esc(dLong(b.due))}${b.due < today() ? ` <span class="tag t-due">overdue</span>` : ""}</small></span><b>${rs2(b.open)}</b></div>`).join("")}</div>
@@ -187,6 +202,7 @@ H.click.push(async T => {
   const pa = T.closest("[data-poapprove]"); if (pa) { if (!guard("po.approve")) return true; const p = ev.get("porders", pa.dataset.poapprove); if (!p.supplier) { toast("Give the PO a supplier first"); poSheet(p); return true; }
     await ev.put("porders", { ...clean(p), status: "approved", approvedBy: (R.me() || {}).id || "", approvedAt: new Date().toISOString() }); sync.soon(); toast(`${p.no} approved`); poDetail(p.id); return true; }
   const pr = T.closest("[data-poreceive]"); if (pr) { receivePo(pr.dataset.poreceive); return true; }
+  const pp = T.closest("[data-poprint]"); if (pp) { const p = ev.get("porders", pp.dataset.poprint); if (p) H.printHtml(`PO ${p.no}`, poHtml(p), true); return true; }
   const pc = T.closest("[data-pocopy]"); if (pc) { toast(await copyText(poText(ev.get("porders", pc.dataset.pocopy))) ? "PO copied" : "Couldn’t copy here"); return true; }
   const pcl = T.closest("[data-poclose]"); if (pcl) { const p = ev.get("porders", pcl.dataset.poclose); if (await yesNo(`<p class="cq">Close ${esc(p.no)} short?</p><div class="cdetail">What hasn’t arrived is no longer expected and stops counting as on order.</div>`, "Close PO")) { await ev.put("porders", { ...clean(p), status: "closed" }); sync.soon(); poDetail(p.id); } return true; }
   const pcn = T.closest("[data-pocancel]"); if (pcn) { const p = ev.get("porders", pcn.dataset.pocancel); if (await yesNo(`<p class="cq">Cancel ${esc(p.no)}?</p><div class="cdetail">It stays in the list marked cancelled.</div>`, "Cancel PO", "btn-danger-solid", "Keep it")) { await ev.put("porders", { ...clean(p), status: "cancelled" }); sync.soon(); poDetail(p.id); } return true; }
@@ -201,7 +217,7 @@ H.click.push(async T => {
     const name = ok ? (document.getElementById("supNewName") || {}).value?.trim() : ""; if (!name) return true; const r = await confirmNew("supplier", name, M.suppliers()); if (!r) return true;
     if (r === "new") { await ev.put("suppliers", { id: uid("s"), name }); sync.soon(); } supSheet(r === "new" ? name : r.name); return true; }
   const ss = T.closest("[data-supsave]"); if (ss) { if (!guard("stock.buy")) return true; const s = M.supplierByName(ss.dataset.supsave) || { id: uid("s"), name: ss.dataset.supsave };
-    await ev.put("suppliers", { ...clean(s), phone: $("#spPhone").value.trim(), gstin: $("#spGst").value.trim().toUpperCase(), days: Math.max(0, Math.round(num($("#spDays").value))) }); sync.soon(); toast("Supplier saved"); supSheet(s.name); return true; }
+    await ev.put("suppliers", { ...clean(s), phone: $("#spPhone").value.trim(), gstin: $("#spGst").value.trim().toUpperCase(), days: Math.max(0, Math.round(num($("#spDays").value))), ...($("#spLead").value.trim() !== "" ? { lead: Math.max(0, Math.round(num($("#spLead").value))) } : {}) }); sync.soon(); toast("Supplier saved"); supSheet(s.name); return true; }
   const pay = T.closest("[data-suppay]"); if (pay) { if (!guard("payables")) return true; const s2 = { kind: "spay", name: pay.dataset.suppay, mode: "Bank" }; s2.redraw = () => payDraw(s2); payDraw(s2); return true; }
   if (st && st.kind === "spay") { const m = T.closest("[data-spmode]"); if (m) { keepPay(st); st.mode = m.dataset.spmode; payDraw(st); return true; }
     if (T.closest("[data-spsave]")) { const amt = r2(num($("#spAmt").value)); if (!(amt > 0)) { toast("Enter the amount paid"); return true; }

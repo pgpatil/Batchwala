@@ -48,3 +48,19 @@ export async function registerDevice() {
   else if (cur.seen !== day || cur.by !== who) { const { _at, _by, ...rec } = cur; await ev.put("devices", { ...rec, seen: day, by: who }); }
 }
 export function matchEmail(email) { const e = String(email || "").toLowerCase(); return members().find(m => (m.email || "").toLowerCase() === e) || null; }
+// PINs are stored as a salted PBKDF2 hash, never as the digits. Four digits can't resist someone who has the files and time,
+// but the PIN can't simply be read off a backup, the Drive folder or another phone. Older plain PINs still work and are rehashed when used.
+export const hasPin = m => !!(m && (m.pinHash || m.pin));
+async function pinKey(pin, salt) {
+  const k = await crypto.subtle.importKey("raw", new TextEncoder().encode(String(pin)), "PBKDF2", false, ["deriveBits"]);
+  const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", salt: new TextEncoder().encode(salt), iterations: 100000, hash: "SHA-256" }, k, 256);
+  return [...new Uint8Array(bits)].map(b => b.toString(16).padStart(2, "0")).join("");
+}
+export async function hashPin(pin) { const salt = [...crypto.getRandomValues(new Uint8Array(12))].map(b => b.toString(16).padStart(2, "0")).join(""); return { pin: "", pinSalt: salt, pinHash: await pinKey(pin, salt) }; }
+export async function checkPin(m, pin) {
+  if (m.pinHash) return (await pinKey(pin, m.pinSalt || "")) === m.pinHash;
+  if (!m.pin || m.pin !== String(pin)) return false;
+  const { _at, _by, ...rec } = m; await ev.put("members", { ...rec, ...(await hashPin(pin)) }); return true;
+}
+// Rewrites any PIN still stored in plain digits (run on an admin's device).
+export async function migratePins() { for (const m of members().filter(x => x.pin && !x.pinHash)) { const { _at, _by, ...rec } = m; await ev.put("members", { ...rec, ...(await hashPin(m.pin)) }); } }

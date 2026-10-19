@@ -25,7 +25,8 @@ const ISO = /^\d{4}-\d{2}-\d{2}$/;
 export function normOrder(o) {
   const x = { no: "", customer: "", flat: "", phone: "", channel: "whatsapp", date: today(), items: [], discountPct: 0, status: "received", notes: "", tag: "", ...o };
   x.items = (x.items || []).map(i => ({ item: i.item || "", qty: +i.qty || 0, rate: +i.rate || 0, ...(i.menuId ? { menuId: i.menuId } : {}), ...(i.taxPct != null ? { taxPct: +i.taxPct || 0 } : {}), ...(i.list != null ? { list: +i.list } : {}) }));
-  x.discountPct = +x.discountPct || 0;
+  x.discountPct = +x.discountPct || 0; x.discountAmt = +x.discountAmt || 0;
+  x.charges = (x.charges || []).filter(c => c && +c.amount).map(c => ({ name: String(c.name || "Charge"), amount: +c.amount || 0, taxPct: +c.taxPct || 0 }));
   if (!ISO.test(x.date)) x.date = today();   // dates also go into HTML attributes; anything that isn't YYYY-MM-DD (bad sync or old import) becomes today
   return x;
 }
@@ -38,8 +39,13 @@ function payIndex() {
 export const orders = memo((withCancelled = true) => ev.all("orders").map(normOrder).filter(o => withCancelled || o.status !== "cancelled"));
 export const paymentsFor = id => (payIndex()[id] || []).slice().sort((a, b) => a._at < b._at ? -1 : 1);
 export const sub = o => o.items.reduce((s, i) => s + i.qty * i.rate, 0);
-export const disc = o => Math.round(sub(o) * (o.discountPct || 0) / 100);
-export const total = o => o.status === "cancelled" ? 0 : Math.round(sub(o) - disc(o) + (o.taxIncl ? 0 : taxOf(o).tax));
+// Discount: a % offer (discountPct), or a flat ₹ amount (discountAmt, from a coupon or typed in). discF is the share of the item value taken off.
+export const disc = o => +o.discountAmt > 0 ? Math.min(sub(o), Math.round(+o.discountAmt)) : Math.round(sub(o) * (o.discountPct || 0) / 100);
+export const discF = o => { const s = sub(o); return s > 0 ? disc(o) / s : 0; };
+export const offerText = o => o.coupon ? `Coupon ${o.coupon}` : +o.discountAmt > 0 ? "Discount" : `Offer ${o.discountPct}% off`;
+// Charges on top of the items (delivery, packing): [{ name, amount, taxPct }], taxed like items (amount includes tax when the order's prices do).
+export const charges = o => (o.charges || []).reduce((s, c) => s + (+c.amount || 0), 0);
+export const total = o => o.status === "cancelled" ? 0 : Math.round(sub(o) - disc(o) + charges(o) + (o.taxIncl ? 0 : taxOf(o).tax));
 
 /* ---------- tax ---------- */
 // Business setting; each order line keeps the rate it was sold at (taxPct), and the order keeps whether prices included tax (taxIncl),
@@ -51,8 +57,9 @@ export function withTax(o) { const t = taxCfg(); return { ...o, items: (o.items 
 const r2 = v => Math.round(v * 100) / 100;
 // Tax per rate on the discounted line amounts; inclusive prices have the tax taken out of them.
 export function taxOf(o) {
-  const f = 1 - (o.discountPct || 0) / 100; const by = {}; let tax = 0;
-  (o.items || []).forEach(i => { const r = +i.taxPct || 0; if (!r) return; const amt = i.qty * i.rate * f; const t = o.taxIncl ? amt - amt / (1 + r / 100) : amt * r / 100; by[r] = (by[r] || 0) + t; tax += t; });
+  const f = 1 - discF(o); const by = {}; let tax = 0;
+  const add = (r, amt) => { if (!r) return; const t = o.taxIncl ? amt - amt / (1 + r / 100) : amt * r / 100; by[r] = (by[r] || 0) + t; tax += t; };
+  (o.items || []).forEach(i => add(+i.taxPct || 0, i.qty * i.rate * f)); (o.charges || []).forEach(c => add(+c.taxPct || 0, +c.amount || 0));
   Object.keys(by).forEach(k => by[k] = r2(by[k])); return { tax: r2(tax), by };
 }
 // Lines for a bill: "CGST 2.5%" + "SGST 2.5%" when split, else "GST 5%".
@@ -119,6 +126,11 @@ let costCache = null, costStamp = "";
 export const costing = () => config().costing === "last" ? "last" : "avg";
 function costIndex() {
   const mv = ev.all("moves"); const stamp = mv.length + ":" + ((mv.at(-1) || {}).id || "") + ":" + costing() + ":" + ev.all("ingredients").length; if (stamp === costStamp) return costCache;
+  costCache = costFrom(mv); costStamp = stamp; return costCache;
+}
+// The same costing worked out from moves up to a date, for valuing stock as it stood then (month-end valuation).
+export const costAsOf = date => costFrom(ev.all("moves").filter(m => m.date <= date));
+function costFrom(mv) {
   const own = Object.fromEntries(ev.all("ingredients").map(i => [i.id, +i.cost || 0])); const by = {};
   mv.sort((a, b) => (a.date + a._at) < (b.date + b._at) ? -1 : 1).forEach(m => { const x = by[m.ingId] = by[m.ingId] || { q: 0, v: 0, rates: [] }; const q = +m.qty || 0; if (!q) return;
     const last = () => x.rates.at(-1) || own[m.ingId] || 0;
@@ -129,17 +141,18 @@ function costIndex() {
       const rate = +m.amount / q; const k = m.ret ? -1 : x.rates.map(r => Math.abs(r - rate) < 1e-9).lastIndexOf(true); if (k >= 0) x.rates.splice(k, 1);
       x.q += q; x.v += +m.amount; if (x.q <= 0) x.v = x.q * last(); return; }
     const avg = x.q > 0 ? x.v / x.q : last(); x.q += q; x.v += avg * q; if (x.q <= 0) x.v = x.q * last(); });
-  costCache = Object.fromEntries(Object.entries(by).map(([id, x]) => [id, { avg: x.q > 0 && x.v > 0 ? x.v / x.q : (x.rates.at(-1) || own[id] || 0), last: x.rates.at(-1) || 0 }])); costStamp = stamp; return costCache;
+  return Object.fromEntries(Object.entries(by).map(([id, x]) => [id, { avg: x.q > 0 && x.v > 0 ? x.v / x.q : (x.rates.at(-1) || own[id] || 0), last: x.rates.at(-1) || 0 }]));
 }
 export const lastPrice = ing => (costIndex()[ing.id] || {}).last || +ing.cost || 0;
 // Semi-finished cost rolls up through their recipe, level by level.
-export function unitCost(ing, seen = new Set()) {
+// idx: a cost index as of a date (costAsOf); by default today's.
+export function unitCost(ing, seen = new Set(), idx = null) {
   if (ing.type === "sf") {
     if (seen.has(ing.id) || !(+ing.yield > 0)) return +ing.cost || 0;
     const next = new Set(seen).add(ing.id); const ings = ingMap();
-    return (ing.recipe || []).reduce((c, r) => c + (ings[r.ingId] ? unitCost(ings[r.ingId], next) * (+r.qty || 0) : 0), 0) / ing.yield;
+    return (ing.recipe || []).reduce((c, r) => c + (ings[r.ingId] ? unitCost(ings[r.ingId], next, idx) * (+r.qty || 0) : 0), 0) / ing.yield;
   }
-  const c = costIndex()[ing.id]; if (!c || !c.last) return +ing.cost || 0;
+  const c = (idx || costIndex())[ing.id]; if (!c || !c.last) return +ing.cost || 0;
   return (costing() === "last" ? c.last : c.avg) || c.last;
 }
 // Buying units: a material can be bought in packs (a 50 kg bag, a box of 100); size is in its base unit (g, ml, pcs).
@@ -154,6 +167,20 @@ export function materialLots(ingId = null) {
   return out.sort((a, b) => (a.exp || "9999") < (b.exp || "9999") ? -1 : 1);
 }
 export const expiringMaterials = () => materialLots().filter(l => l.expired || l.soon);
+/* ---------- allergens and label ingredients ---------- */
+export const ALLERGENS = ["Gluten", "Milk", "Egg", "Tree nuts", "Peanut", "Soy", "Sesame", "Mustard", "Sulphites", "Fish", "Crustaceans"];
+// What a material or item contains: its own tags plus everything in its recipe, through every semi-finished level.
+export function allergensOf(rec, seen = new Set()) {
+  if (!rec) return []; const ings = ingMap(); const out = new Set(rec.allergens || []);
+  (rec.recipe || []).forEach(r => { const i = ings[r.ingId]; if (!i || seen.has(i.id)) return; allergensOf(i, new Set(seen).add(i.id)).forEach(a => out.add(a)); });
+  return ALLERGENS.filter(a => out.has(a));
+}
+// The ingredient list for a label, largest quantity first; a semi-finished item lists its own ingredients in brackets. Packing isn't an ingredient.
+export function labelIngredients(rec, seen = new Set()) {
+  const ings = ingMap();
+  return (rec.recipe || []).map(r => ({ i: ings[r.ingId], q: +r.qty || 0 })).filter(x => x.i && x.i.type !== "pm").sort((a, b) => b.q - a.q)
+    .map(({ i }) => i.type === "sf" && (i.recipe || []).length && !seen.has(i.id) ? `${i.name} (${labelIngredients(i, new Set(seen).add(i.id))})` : i.name).join(", ");
+}
 export function recipeCost(m) {
   const ings = ingMap(); let cost = 0, missing = 0;
   (m.recipe || []).forEach(r => { const i = ings[r.ingId]; if (!i) { missing++; return; } const c = unitCost(i); if (!c) missing++; cost += c * (+r.qty || 0); });
@@ -322,6 +349,36 @@ export const nameKey = s => String(s || "").trim().toLowerCase();
 export function lastRate(supplier, ingId) { const s = nameKey(supplier); for (const g of grns()) { if (g.void || nameKey(g.supplier) !== s) continue; const l = g.lines.find(x => x.ingId === ingId && x.qty > 0 && x.amount > 0); if (l) return l.amount / l.qty; } return 0; }
 // The usual supplier for a material: set on the material, else whoever it was last bought from.
 export function usualSupplier(i) { if (i.supplier) { const s = supplierByName(i.supplier); return s ? s.name : i.supplier.trim(); } const g = grns().find(g => !g.void && g.lines.some(l => l.ingId === i.id)); return g ? g.supplier : ""; }
+
+/* ---------- stock value at a date, use rates and price rises ---------- */
+// Material stock as it stood at the end of a day, per location (null = all), valued with the costing as of that day.
+export function stockValueAt(date, loc = null) {
+  const home = locations()[0].id; const q = {}; ev.all("moves").forEach(v => { if (v.date > date || (loc && (v.outletId || home) !== loc)) return; q[v.ingId] = (q[v.ingId] || 0) + (+v.qty || 0); });
+  const idx = costAsOf(date); const ings = ingMap();
+  return Object.entries(q).filter(([id, n]) => ings[id] && Math.abs(n) > 1e-9).map(([id, n]) => { const c = unitCost(ings[id], new Set(), idx); return { ing: ings[id], qty: n, cost: c, value: Math.max(0, n) * c }; });
+}
+const USE = ["bake", "issue", "return", "waste"];
+// Average use per day over the last `days` days (base units): what went into production or was wasted.
+export function dailyUse(days = 30) {
+  const t = today(), from = addDays(t, -days + 1); const use = {};
+  ev.all("moves").forEach(m => { if (m.date >= from && m.date <= t && USE.includes(m.type)) use[m.ingId] = (use[m.ingId] || 0) - (+m.qty || 0); });
+  Object.keys(use).forEach(k => { use[k] = Math.max(0, use[k]) / days; }); return use;
+}
+// Reorder level = daily use × (supplier lead time + safety days); order size = daily use × days of cover.
+export function reorderPlan() {
+  const c = config(); const safety = +(c.safetyDays ?? 2), cover = +(c.coverDays ?? 7), window = +(c.useDays || 30); const use = dailyUse(window);
+  return ingredients().filter(i => i.type !== "sf").map(i => { const d = use[i.id] || 0; const s = supplierByName(usualSupplier(i)); const lead = s && s.lead != null && s.lead !== "" ? +s.lead : +(c.leadDays ?? 2);
+    return { i, daily: d, lead, level: d * (lead + safety), order: d * cover, now: +i.reorder || 0 }; });
+}
+// GRN lines in the last `days` days that cost more per unit than the material's previous GRN, by at least `pct` %.
+export function priceRises(days = 30, pct = +(config().priceAlertPct ?? 5)) {
+  const from = addDays(today(), -days + 1); const last = {}; const out = [];
+  grns().filter(g => !g.void).slice().reverse().forEach(g => g.lines.forEach(l => { if (!(l.qty > 0 && l.amount > 0)) return; const r = l.amount / l.qty; const p = last[l.ingId];
+    if (p && g.date >= from && (r - p.r) / p.r * 100 >= pct) out.push({ ingId: l.ingId, date: g.date, grn: g.no, supplier: g.supplier, rate: r, prev: p.r, prevSup: p.s, ch: (r - p.r) / p.r * 100 });
+    last[l.ingId] = { r, s: g.supplier }; }));
+  return out.reverse();
+}
+export const prevGrnRate = ingId => { for (const g of grns()) { if (g.void) continue; const l = g.lines.find(x => x.ingId === ingId && x.qty > 0 && x.amount > 0); if (l) return l.amount / l.qty; } return 0; };
 
 /* ---------- payables ---------- */
 // Bills are GRNs; payments to suppliers are their own records (kind "spays"); debit notes (kind "preturns") are goods sent back.

@@ -6,6 +6,6 @@ export function createHttpAdapter(base) {
     listFiles: async () => (await fetch(base + "/fs/list")).json(),
     readFile: async id => (await fetch(base + "/fs/file/" + encodeURIComponent(id))).text(),
     writeFile: async (name, text) => { await fetch(base + "/fs/file/" + encodeURIComponent(name), { method: "PUT", body: text }); return name; },
-    writeBinary: async () => "x", shareWith: async () => {}, folderLink: () => ""
+    writeBinary: async () => "x", shareWith: async () => {}, unshareWith: async () => true, folderLink: () => ""
   };
 }

@@ -115,7 +115,7 @@ function reportsSheet() {
   const sales = list.reduce((s, o) => s + M.total(o), 0), coll = list.reduce((s, o) => s + Math.min(M.received(o), M.total(o)), 0);
   const byDay = {}; list.forEach(o => byDay[o.date] = (byDay[o.date] || 0) + M.total(o)); const days = Object.keys(byDay).sort().slice(-31); const mx = Math.max(1, ...days.map(d => byDay[d]));
   const byChan = {}; list.forEach(o => byChan[o.channel] = (byChan[o.channel] || 0) + M.total(o));
-  const items = {}; list.forEach(o => o.items.forEach(i => { const k = i.item; items[k] = items[k] || { q: 0, v: 0 }; items[k].q += i.qty; items[k].v += i.qty * i.rate * (1 - (o.discountPct || 0) / 100); }));
+  const items = {}; list.forEach(o => o.items.forEach(i => { const k = i.item; items[k] = items[k] || { q: 0, v: 0 }; items[k].q += i.qty; items[k].v += i.qty * i.rate * (1 - M.discF(o)); }));
   let cogs = 0, costed = 0;
   Object.entries(items).forEach(([n, x]) => { const m = M.menuByName(n); if (m && (m.recipe || []).length) { x.cost = M.recipeCost(m).cost * x.q; cogs += x.cost; costed += x.v; } });
   const mv = M.moves().filter(m => m.date >= start && m.date <= end);

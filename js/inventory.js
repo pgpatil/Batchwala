@@ -196,6 +196,8 @@ function drawIngEdit(st) {
   <label class="f">Bought in packs of <small class="mut">(optional · e.g. bag of 50 kg, box of 100)</small></label><div class="two"><input class="in" id="gPackName" value="${esc((x.pack || {}).name || "")}" placeholder="bag, box, tin"><div class="two" style="gap:6px"><input class="in" id="gPackSize" inputmode="decimal" value="${x.pack && x.pack.size ? +(x.pack.size / st.rf).toFixed(3) : ""}" placeholder="size">${unitChips(x.unit, st.rf, "grf")}</div></div>
   <label class="f" for="gShelf">Usable for <small class="mut">(days after delivery · fills the best-before date on GRNs)</small></label><input class="in" id="gShelf" inputmode="numeric" value="${x.shelfDays || ""}" placeholder="No expiry tracking">
   <label class="f" for="gCode">Barcode <small class="mut">(optional · scan or type)</small></label><input class="in" id="gCode" value="${esc(x.barcode || "")}" autocapitalize="off">`}
+  ${x.type !== "pm" ? `<label class="f">Allergens it contains</label><div class="chips">${M.ALLERGENS.map(a => `<button class="chip" data-galg="${esc(a)}" aria-pressed="${(x.allergens || []).includes(a)}">${esc(a)}</button>`).join("")}</div>
+    ${sf && M.allergensOf({ recipe: x.recipe }).length ? `<p class="hint">From its recipe: ${esc(M.allergensOf({ recipe: x.recipe }).join(", "))}</p>` : ""}` : ""}
   ${st.isNew ? `<label class="f" for="gOpen">Stock on hand now</label><div class="two"><input class="in" id="gOpen" inputmode="decimal" placeholder="0">${unitChips(x.unit, st.rf, "grf")}</div>` : ""}
   <button class="btn btn-primary" data-inv="saveIng">${st.isNew ? "Add material" : "Save"}</button>
   ${!st.isNew && R.isAdmin() ? `<button class="btn btn-danger" data-inv="deleteIng">Delete material</button>` : ""}`);
@@ -268,14 +270,18 @@ function drawItem(st) {
   <div class="two"><div><label class="f" for="iPar">Keep ready each day${M.sellingLocs().length > 1 ? " (per outlet)" : ""}</label><input class="in" id="iPar" inputmode="numeric" value="${x.par || ""}" placeholder="0"></div>
   ${M.taxCfg().on ? `<div><label class="f" for="iTax">${esc(M.taxCfg().name)} % <small class="mut">(blank = ${M.taxCfg().rate}%)</small></label><input class="in" id="iTax" inputmode="decimal" value="${x.taxPct ?? ""}" placeholder="${M.taxCfg().rate}"></div>` : "<div></div>"}</div>
   <label class="f" for="iHsn">HSN / SAC <small class="mut">(for tax invoices · blank = ${esc(M.config().hsn || "business default")})</small></label><input class="in" id="iHsn" value="${esc(x.hsn || "")}" placeholder="${esc(M.config().hsn || "e.g. 1905")}">
+  <label class="f">Food type <small class="mut">(for labels)</small></label><div class="chips">${[["veg", "🟢 Veg"], ["egg", "🟡 Contains egg"], ["nonveg", "🔴 Non-veg"]].map(([k, l]) => `<button class="chip" data-idiet="${k}" aria-pressed="${(x.diet || "veg") === k}">${l}</button>`).join("")}</div>
+  <label class="f">Allergens <small class="mut">(from the BOM, plus any you tick)</small></label><div class="chips">${M.ALLERGENS.map(a => { const fromBom = M.allergensOf({ recipe: x.recipe }).includes(a); return `<button class="chip" data-ialg="${esc(a)}" aria-pressed="${fromBom || (x.allergens || []).includes(a)}" ${fromBom ? "disabled title=\"From the BOM\"" : ""}>${esc(a)}</button>`; }).join("")}</div>
+  <div class="two"><div><label class="f" for="iMay">May contain <small class="mut">(traces)</small></label><input class="in" id="iMay" value="${esc(x.mayContain || "")}" placeholder="e.g. nuts, sesame"></div><div><label class="f" for="iNet">Net quantity <small class="mut">(per pack)</small></label><input class="in" id="iNet" value="${esc(x.netQty || "")}" placeholder="e.g. 250 g, 6 pcs"></div></div>
   <label class="f">BOM · per piece <small class="mut">(raw, packing and semi-finished materials)</small></label>
   ${recipeRows(st)}${versionsBlock(x)}
   ${ings.length ? `<div class="kv" style="margin-top:10px"><div><span>Cost per piece</span><b id="rcCost">${rs2(rc.cost)}</b></div><div><span>Margin at ${rs(x.price)}</span><b id="rcMargin">${x.price ? Math.round((1 - rc.cost / x.price) * 100) + "%" : "–"}</b></div></div>
   ${rc.missing ? `<p class="hint">Some materials have no price yet.</p>` : ""}` : ""}
   <button class="btn btn-primary" data-inv="saveItem">${st.isNew ? "Add item" : "Save item"}</button>
+  ${!st.isNew ? `<button class="btn btn-ghost" data-labels="item:${esc(x.id)}">${ICON.print}Print labels</button>` : ""}
   ${!st.isNew && R.isAdmin() ? `<button class="btn btn-danger" data-inv="deleteItem">Remove from menu</button>` : ""}`);
 }
-function syncItem() { const x = ui.sheet.x; if ($("#iHsn")) x.hsn = $("#iHsn").value.trim(); x.name = $("#iName").value.trim(); if (R.can("prices")) x.price = num($("#iPrice").value); x.category = $("#iCat").value.trim(); x.aliases = $("#iAlias").value.trim(); x.par = num($("#iPar").value); x.shelfLife = $("#iLife").value.trim() === "" ? null : Math.max(1, Math.round(num($("#iLife").value))); if ($("#iTax")) x.taxPct = $("#iTax").value.trim() === "" ? null : num($("#iTax").value); }
+function syncItem() { const x = ui.sheet.x; if ($("#iHsn")) x.hsn = $("#iHsn").value.trim(); if ($("#iMay")) { x.mayContain = $("#iMay").value.trim(); x.netQty = $("#iNet").value.trim(); } x.name = $("#iName").value.trim(); if (R.can("prices")) x.price = num($("#iPrice").value); x.category = $("#iCat").value.trim(); x.aliases = $("#iAlias").value.trim(); x.par = num($("#iPar").value); x.shelfLife = $("#iLife").value.trim() === "" ? null : Math.max(1, Math.round(num($("#iLife").value))); if ($("#iTax")) x.taxPct = $("#iTax").value.trim() === "" ? null : num($("#iTax").value); }
 
 // Undoing keeps the batch in the register, marked undone; it leaves the bake board and its stock moves are reversed.
 // A move can be reversed once, by hand, only when it isn't part of a document (batch, GRN, transfer, work order) that has its own undo.
@@ -383,12 +389,15 @@ H.click.push(async T => {
       await putMove({ ingId: m.ingId, type: m.type === "purchase" ? "purchase" : "adjust", qty: -m.qty, ...(m.type === "purchase" && m.amount ? { amount: -m.amount } : {}), note: "Reversal", ref: m.id, outletId: m.outletId }); ingSheet(st.id); } return true; }
   if (!st) return false;
   if (st.kind === "ingEdit") { const u = T.closest("[data-gunit]"); if (u) { syncIng(); st.x.unit = u.dataset.gunit; st.rf = 1; drawIngEdit(st); return true; } const r = T.closest("[data-grf]"); if (r) { syncIng(); st.rf = +r.dataset.grf; drawIngEdit(st); return true; }
+    const ga = T.closest("[data-galg]"); if (ga) { syncIng(); const a = ga.dataset.galg; const l = st.x.allergens || []; st.x.allergens = l.includes(a) ? l.filter(y => y !== a) : [...l, a]; drawIngEdit(st); return true; }
     const tc = T.closest("[data-gtic]"); if (tc) { if (!R.isAdmin()) return true; syncIng(); st.x.taxInCost = tc.dataset.gtic === "1"; drawIngEdit(st); return true; }
     const ty = T.closest("[data-gtype]"); if (ty) { syncIng(); st.x.type = ty.dataset.gtype; drawIngEdit(st); return true; } }
   if (st.kind === "move") { const f = T.closest("[data-mf]"); if (f) { const v = $("#mQty").value, a2 = $("#mAmt") && $("#mAmt").value, n = $("#mNote").value, d = $("#mDate").value; st.f = +f.dataset.mf; drawMove(st); $("#mQty").value = v; if (a2 && $("#mAmt")) $("#mAmt").value = a2; $("#mNote").value = n; $("#mDate").value = d; return true; } }
   if (st.kind === "bake") { const b = T.closest("[data-bstep]"); if (b) { const [ix, d] = b.dataset.bstep.split(":").map(Number); st.lines[ix].qty = Math.max(0, st.lines[ix].qty + d); drawBake(st); return true; }
     const pb = T.closest("[data-pstep]"); if (pb) { const [ix, d] = pb.dataset.pstep.split(":").map(Number); st.prep[ix].runs = Math.max(0, st.prep[ix].runs + d); drawBake(st); return true; } }
   if ((st.kind === "item" || st.kind === "ingEdit") && st.nm) { const nt = T.closest("[data-nmtype],[data-nmunit]"); if (nt) { syncHost(); st.nm.name = $("#nmName").value; if (nt.dataset.nmtype) { st.nm.type = nt.dataset.nmtype; if (st.nm.type === "pm") st.nm.unit = "pcs"; } else st.nm.unit = nt.dataset.nmunit; drawHost(st); return true; } }
+  if (st.kind === "item") { const ia = T.closest("[data-ialg]"); if (ia) { syncItem(); const a = ia.dataset.ialg; const l = st.x.allergens || []; st.x.allergens = l.includes(a) ? l.filter(y => y !== a) : [...l, a]; drawItem(st); return true; }
+    const dt = T.closest("[data-idiet]"); if (dt) { syncItem(); st.x.diet = dt.dataset.idiet; drawItem(st); return true; } }
   if (st.kind === "item" || st.kind === "ingEdit") { const rm = T.closest("[data-rprm]"); if (rm) { syncHost(); st.x.recipe.splice(+rm.dataset.rprm, 1); drawHost(st); return true; } }
   return false;
 });
