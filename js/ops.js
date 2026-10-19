@@ -4,6 +4,7 @@ import * as M from "./model.js";
 import * as R from "./roles.js";
 import { parseOrderMessage } from "./waparse.js";
 import { asLines, layoutSwitch } from "./table.js";
+import { SLOTS } from "./orders.js";
 import { S, A, V, H, guard, saveOrder, payOrders, addPayment, reversePayments, band, toran, payTag, noLabel } from "./core.js";
 import { confirmDeliver, compose, openOrder } from "./orders.js";
 import { $, esc, rs, uid, today, addDays, dObj, dLabel, dLong, plate, flatKey, ICON } from "./util.js";
@@ -13,7 +14,9 @@ import { checkCustomer } from "./match.js";
 /* ---------- Delivery run ---------- */
 V.run = () => {
   const d = S.runDate || today(); const t = today();
-  const all = M.orders(false).filter(o => o.date === d && M.PREORDER.includes(o.channel)).sort(M.runOrder);
+  // Earlier delivery windows first, then the walking route.
+  const slotRank = o => { const i = SLOTS.indexOf(o.slot); return o.slot ? (i >= 0 ? i : 1.5) : 9; };
+  const all = M.orders(false).filter(o => o.date === d && M.PREORDER.includes(o.channel)).sort((a, b) => slotRank(a) - slotRank(b) || M.runOrder(a, b));
   const todo = all.filter(o => !M.isDelivered(o)), done = all.filter(M.isDelivered);
   const due = todo.reduce((s, o) => s + M.bal(o), 0);
   let h = band("Delivery run", "", `<div class="stats"><div class="st"><b>${todo.length}</b><span>to deliver</span></div><div class="st"><b>${done.length}</b><span>delivered</span></div>${R.can("money") ? `<div class="st"><b>${rs(due)}</b><span>to collect</span></div>` : ""}</div>`);
@@ -96,7 +99,7 @@ A.waConfirm = async el => {
   if (!o.customer.trim()) { toast("Add the customer’s name"); return; }
   const chk = await checkCustomer({ customer: o.customer.trim(), flat: o.flat.trim().toUpperCase().replace(/^([A-Z])\s*-?\s*(\d+)$/, "$1-$2"), phone: o.phone.trim() }); if (!chk) return;
   if (chk !== "new") Object.assign(o, chk);
-  const order = { id: uid("o"), no: M.nextNo((me && me.prefix) || ""), customer: o.customer.trim(), flat: o.flat.trim().toUpperCase().replace(/^([A-Z])\s*-?\s*(\d+)$/, "$1-$2"), phone: o.phone.trim(), channel: "whatsapp", date: o.date, items: o.items, discountPct: 0, status: "received", notes: o.notes, tag: M.config().activeTag || "", source: "whatsapp-import", createdAt: new Date().toISOString() };
+  const order = { id: uid("o"), no: M.nextNo(R.numPrefix()), customer: o.customer.trim(), flat: o.flat.trim().toUpperCase().replace(/^([A-Z])\s*-?\s*(\d+)$/, "$1-$2"), phone: o.phone.trim(), channel: "whatsapp", date: o.date, items: o.items, discountPct: 0, status: "received", notes: o.notes, tag: M.config().activeTag || "", source: "whatsapp-import", createdAt: new Date().toISOString() };
   el.disabled = true; await saveOrder(order); closeSheet(); toast(`Order #${order.no} saved for ${dLabel(order.date)}`); openOrder(order.id);
 };
 A.waFull = () => { syncWa(); const o = ui.sheet.o; compose(null, { customer: o.customer, flat: o.flat, phone: o.phone, date: o.date, items: o.items, notes: o.notes }); };

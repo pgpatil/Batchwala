@@ -2,12 +2,14 @@
 // Event: { id, dev, seq, at, by, kind, rid, op: "put"|"del", data }
 // For a record, the event with the latest (at, id) wins. Ledger kinds (payments, moves) are only ever added.
 const DB = "batchwala", VER = 1;
-export const KINDS = ["orders", "payments", "menu", "ingredients", "moves", "bakes", "config", "members", "grns", "transfers", "fg", "suppliers", "plans", "porders", "spays", "wos", "locks"];
+export const KINDS = ["orders", "payments", "menu", "ingredients", "moves", "bakes", "config", "members", "grns", "transfers", "fg", "suppliers", "plans", "porders", "spays", "wos", "locks", "devices", "closes", "stocktakes", "preturns"];
 const state = Object.fromEntries(KINDS.map(k => [k, new Map()]));   // kind -> rid -> { ev, data|null }
 const byRecord = new Map();                                            // kind:rid -> [events]
 const listeners = new Set();
 const known = new Set();                                               // event ids already stored
-let idb, dev = null, seq = 0, actor = () => "unknown";
+let idb, dev = null, seq = 0, actor = () => "unknown", version = 0;
+// Bumped whenever the folded state changes, so the model can reuse what it worked out until then.
+export const dataVersion = () => version;
 
 const req = r => new Promise((res, rej) => { r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
 function open() {
@@ -26,7 +28,7 @@ function apply(ev) {
   const key = ev.kind + ":" + ev.rid; const list = byRecord.get(key) || []; list.push(ev); byRecord.set(key, list);
   const cur = state[ev.kind].get(ev.rid);
   if (cur && !newer(ev, cur.ev)) return false;
-  state[ev.kind].set(ev.rid, { ev, data: ev.op === "del" ? null : ev.data });
+  state[ev.kind].set(ev.rid, { ev, data: ev.op === "del" ? null : ev.data }); version++;
   return true;
 }
 let queued = false;
@@ -72,4 +74,14 @@ export async function ingest(events) {
   if (changed) notify("remote");
   return changed;
 }
-export async function wipe() { await req(store("events", "readwrite").clear()); KINDS.forEach(k => state[k].clear()); byRecord.clear(); known.clear(); seq = 0; notify("local"); }
+export async function wipe() { await req(store("events", "readwrite").clear()); KINDS.forEach(k => state[k].clear()); byRecord.clear(); known.clear(); seq = 0; version++; notify("local"); }
+// Keeps the event log small: an event that a later change to the same record has replaced, and that is older than `days`,
+// is dropped from this device. Current records, deletions and ledger entries (one event each) always stay. Returns how many went.
+export async function prune(days = 120) {
+  const cut = new Date(Date.now() - days * 864e5).toISOString(); const drop = [];
+  byRecord.forEach((list, key) => { const k = key.split(":")[0]; if (!state[k]) return; const cur = state[k].get(key.slice(k.length + 1)); if (!cur) return;
+    const keep = list.filter(e => e === cur.ev || e.at >= cut); if (keep.length < list.length) { list.filter(e => !keep.includes(e)).forEach(e => drop.push(e.id)); byRecord.set(key, keep); } });
+  if (!drop.length) return 0;
+  const tx = idb.transaction("events", "readwrite"); const os = tx.objectStore("events"); drop.forEach(id => os.delete(id));
+  await new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = () => rej(tx.error); }); return drop.length;
+}

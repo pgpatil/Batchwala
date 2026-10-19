@@ -62,7 +62,7 @@ V.pos = () => {
 async function savePos(status) {
   const p = P(); const me = R.me(); const now = new Date().toISOString();
   const ex = p.openId ? M.orders().find(o => o.id === p.openId) : null; const w = walkin(p.svc);
-  const o = { ...(ex || { id: uid("o"), no: M.nextNo((me && me.prefix) || ""), date: today(), createdAt: now, tag: M.config().activeTag || "", flat: "" }),
+  const o = { ...(ex || { id: uid("o"), no: M.nextNo(R.numPrefix()), date: today(), createdAt: now, tag: M.config().activeTag || "", flat: "" }),
     customer: p.customer.trim() || (p.svc === "dinein" ? `Table ${p.table}` : w ? "Walk-in" : M.CHANNELS[p.svc]), phone: p.phone.trim(),
     channel: w ? "walkin" : p.svc, service: w ? p.svc : "", table: p.svc === "dinein" ? p.table : "",
     items: p.items.map(i => ({ ...i })), discountPct: p.disc, notes: p.note.trim(), status, deliveredAt: status === "delivered" ? now : "" };
@@ -73,7 +73,8 @@ A.posCharge = async el => { if (!guard("sale")) return; const p = P(); if (!p.it
   if (p.customer.trim()) { const r = await checkCustomer({ customer: p.customer.trim(), flat: "", phone: p.phone }); if (!r) return; if (r !== "new") { p.customer = r.customer; p.phone = r.phone || p.phone; } }
   el.disabled = true;
   const o = await savePos("delivered"); await payOrders([o], p.mode); reset();
-  toast(`${rs(M.total(o))} by ${p.mode} · order ${o.no}`, `<button data-undosale="${esc(o.id)}">Undo</button>`); };
+  toast(`${rs(M.total(o))} by ${p.mode} · order ${o.no}`, `<button data-receipt="${esc(o.id)}">Receipt</button><button data-undosale="${esc(o.id)}">Undo</button>`);
+  if (M.config().autoReceipt && H.printReceipt) H.printReceipt(o.id); };
 A.posAggregator = async el => { if (!guard("sale")) return; el.disabled = true; const o = await savePos("delivered"); reset();
   toast(`${M.CHANNELS[o.channel]} order ${o.no} saved`, `<button data-undosale="${esc(o.id)}">Undo</button>`); };
 // One save at a time: a double tap would otherwise open two tabs on one table with the same number.

@@ -35,9 +35,9 @@ V.more = () => {
     ["switchUser", "people", "Switch user", "Hand this phone to someone else", true]
   ].filter(x => x[4]);
   return `<div class="band"><div class="top">${logoHtml(c)}<div class="biz"><div class="name">${esc(c.business)}</div><div class="sub">${esc(me ? me.name + " · " + R.ROLES[me.role].label : "")}</div></div></div>${toran()}</div>
-  ${H.switchers ? `<div class="moresw">${H.switchers()}</div>` : ""}
+  ${H.switchers ? `<div class="moresw">${H.switchers()}</div>` : ""}${H.backupBanner && H.backupBanner() ? `<div class="boardfoot" style="padding-bottom:0">${H.backupBanner()}</div>` : ""}
   <div class="menu-list" style="margin-top:14px">${items.map(([a, ic, t, s]) => `<button class="mi" ${a[0] === "@" ? `data-go="${a.slice(1)}"` : `data-act="${a}"`}><span class="ic">${ICON[ic]}</span><span class="grow">${t}<small>${esc(s)}</small></span><span class="chev">${ICON.chev}</span></button>`).join("")}</div>
-  <p class="hint" style="padding:4px 18px">${APP_NAME} 2.11${R.mode() !== "classic" ? " · " + esc(M.MODES[R.mode()]) + " mode" : ""} · ${st.state === "off" ? "data saved on this phone only" : "synced through Google Drive"}${st.last ? " · last sync " + new Date(st.last).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" }) : ""}</p>`;
+  <p class="hint" style="padding:4px 18px">${APP_NAME} 2.12${R.mode() !== "classic" ? " · " + esc(M.MODES[R.mode()]) + " mode" : ""} · ${st.state === "off" ? "data saved on this phone only" : "synced through Google Drive"}${st.last ? " · last sync " + new Date(st.last).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" }) : ""}</p>`;
 };
 
 /* ---------- first run ---------- */
@@ -61,7 +61,7 @@ A.setupStart = async () => {
   if (!name) { toast("Add your name"); $("#suName").focus(); return; }
   // A device that already holds a team's data (synced or restored) must not start a new business over it.
   if (R.members().length) { toast("This app already belongs to a team. Ask an admin to add you, then join with Google."); return; }
-  const m = await createMember(name, "admin"); await R.setMe(m.id);
+  const m = await createMember(name, "admin"); await R.setMe(m.id); await R.registerDevice();
   if (!ev.get("config", "app")) await ev.put("config", { ...M.DEFAULT_CONFIG, business: biz || "My Bakery", businessId: uid("b") });
   S.view = R.home(); H.render(); toast("You’re the admin. Add your menu and materials first.");
 };
@@ -73,7 +73,7 @@ A.setupJoin = async el => {
     await ev.setMeta("drive", { clientId: GOOGLE_CLIENT_ID, folderName: DATA_FOLDER, folderId: a.folderId });
     await sync.use(a); await sync.syncNow();
     const m = R.matchEmail(email);
-    if (m) { await R.setMe(m.id); S.view = R.home(); H.render(); toast(`Welcome, ${m.name}`); }
+    if (m) { await R.setMe(m.id); await R.registerDevice(); S.view = R.home(); H.render(); toast(`Welcome, ${m.name}`); }
     else { toast(`${email} isn’t on the team yet. Ask the admin to add you in Users & roles.`); el.disabled = false; el.textContent = "Sign in with Google"; }
   } catch (e) { toast(e.message || "Couldn’t connect"); el.disabled = false; el.textContent = "Sign in with Google"; }
 };
@@ -174,6 +174,12 @@ function drawSettings(st) {
     <div class="chips" style="margin-top:10px"><button class="chip" data-taxincl="0" aria-pressed="${!c.tax.incl}">Prices exclude tax</button><button class="chip" data-taxincl="1" aria-pressed="${!!c.tax.incl}">Prices include tax</button></div>
     <div class="chips" style="margin-top:6px"><button class="chip" data-taxsplit="1" aria-pressed="${!!c.tax.split}">Split into C${esc(c.tax.name)} + S${esc(c.tax.name)}</button><button class="chip" data-taxsplit="0" aria-pressed="${!c.tax.split}">One line</button></div>
     <p class="hint">Each menu item and material can have its own rate (Menu & recipes, Stock); otherwise the default applies. New orders and GRNs use the rates at the time; old bills don’t change.</p>` : ""}
+  <label class="f" style="margin-top:18px">For invoices and receipts</label>
+  <label class="f" for="sAddr">Business address</label><textarea class="in" id="sAddr" rows="2" placeholder="Shop no, street, area, city, PIN">${esc(c.address || "")}</textarea>
+  <div class="two"><div><label class="f" for="sPhone">Business phone</label><input class="in" id="sPhone" value="${esc(c.phone || "")}" inputmode="tel"></div><div><label class="f" for="sState">State</label><input class="in" id="sState" value="${esc(c.state || "")}" placeholder="e.g. Maharashtra (27)"></div></div>
+  <div class="two"><div><label class="f" for="sInvPre">Invoice number prefix</label><input class="in" id="sInvPre" value="${esc(c.invoicePrefix || "INV")}" autocapitalize="characters"></div><div><label class="f" for="sHsn">Default HSN / SAC</label><input class="in" id="sHsn" value="${esc(c.hsn || "")}" placeholder="e.g. 1905"></div></div>
+  <label class="f" style="display:flex;align-items:center;gap:12px">Print a receipt after every counter sale <button class="swt" role="switch" aria-checked="${!!c.autoReceipt}" data-act="toggleAutoReceipt" aria-label="Print receipt after counter sale"></button></label>
+  <p class="hint">Invoices are numbered per financial year and per device (${esc((c.invoicePrefix || "INV").toUpperCase())}-${"2627"}-P-0001). Each menu item can have its own HSN in Menu & recipes.</p>
   <label class="f" style="margin-top:18px">Material cost</label><div class="chips">${[["avg", "Weighted average of stock"], ["last", "Last purchase price"]].map(([k, l]) => `<button class="chip" data-costing="${k}" aria-pressed="${(c.costing === "last" ? "last" : "avg") === k}">${l}</button>`).join("")}</div>
   <p class="hint">Used for recipe, batch and stock values. Average smooths price changes; old batches keep the cost they were saved with.</p>
   <label class="f" style="margin-top:18px">Locations</label><div class="kv">${c.locations.map((l, ix) => `<div style="align-items:center;gap:8px"><input class="in" data-locname="${ix}" value="${esc(l.name)}" style="flex:1;min-width:0"><div class="chips">${[["kitchen", "Kitchen"], ["outlet", "Outlet"]].map(([k, n]) => `<button class="chip" data-lockind="${ix}:${k}" aria-pressed="${l.kind === k}">${n}</button>`).join("")}</div>${ix ? `<button class="rm" data-locrm="${ix}" aria-label="Remove location">×</button>` : ""}</div>`).join("")}</div>
@@ -185,7 +191,7 @@ function drawSettings(st) {
   <label class="f" for="sActive">Tag new orders with</label><select class="in" id="sActive"><option value="">Nothing (regular orders)</option>${(c.tags || []).map(g => `<option ${g === c.activeTag ? "selected" : ""}>${esc(g)}</option>`).join("")}</select>
   <button class="btn btn-primary" data-act="saveSettings">Save settings</button>`);
 }
-function syncSettings() { const c = ui.sheet.c; const g = id => document.getElementById(id); c.business = g("sBiz").value.trim() || "My Bakery"; c.tagline = g("sTag").value.trim(); c.upi = g("sUpi").value.trim(); c.payee = g("sPayee").value.trim(); c.activeTag = g("sActive").value; c.accent = g("sAccent").value; c.tables = Math.min(60, Math.max(0, Math.round(num(g("sTables").value)))) || 10;
+function syncSettings() { const c = ui.sheet.c; const g = id => document.getElementById(id); if (g("sAddr")) { c.address = g("sAddr").value.trim(); c.phone = g("sPhone").value.trim(); c.state = g("sState").value.trim(); c.invoicePrefix = g("sInvPre").value.trim().toUpperCase().replace(/[^A-Z0-9]/g, "") || "INV"; c.hsn = g("sHsn").value.trim(); } c.business = g("sBiz").value.trim() || "My Bakery"; c.tagline = g("sTag").value.trim(); c.upi = g("sUpi").value.trim(); c.payee = g("sPayee").value.trim(); c.activeTag = g("sActive").value; c.accent = g("sAccent").value; c.tables = Math.min(60, Math.max(0, Math.round(num(g("sTables").value)))) || 10;
   if (g("sTaxName")) { c.tax.name = g("sTaxName").value.trim() || "GST"; c.tax.rate = num(g("sTaxRate").value); c.tax.gstin = g("sGstin").value.trim().toUpperCase(); }
   c.locations.forEach((l, ix) => { const el = document.querySelector(`[data-locname="${ix}"]`); if (el) l.name = el.value.trim() || l.name; }); }
 async function shrinkImage(file, size = 256) {
@@ -199,6 +205,7 @@ A.toggleTax = () => { syncSettings(); ui.sheet.c.tax.on = !ui.sheet.c.tax.on; dr
 A.addLocation = () => { syncSettings(); const c = ui.sheet.c; c.locations.push({ id: uid("l"), name: `Outlet ${c.locations.filter(l => l.kind === "outlet").length + 1}`, kind: "outlet" }); drawSettings(ui.sheet); };
 A.toggleFestive = () => { syncSettings(); ui.sheet.c.festive = !ui.sheet.c.festive; drawSettings(ui.sheet); };
 A.addTag = () => { syncSettings(); const v = $("#sNewTag").value.trim(); if (!v) { toast("Type the occasion name"); return; } ui.sheet.c.tags = [...new Set([...(ui.sheet.c.tags || []), v])]; drawSettings(ui.sheet); };
+A.toggleAutoReceipt = () => { syncSettings(); ui.sheet.c.autoReceipt = !ui.sheet.c.autoReceipt; ui.sheet.redraw(); };
 A.saveSettings = async () => { syncSettings(); const h = hue(ui.sheet.c.accent); if (!await L.saveOk(ui.sheet)) return;
   if ((h >= 0 && (h < 15 || h > 340)) || (h > 100 && h < 170)) { toast("That colour is too close to the red or green used for status. Pick another."); return; }
   await ev.put("config", clean({ ...ui.sheet.c, id: "app" })); sync.soon(); closeSheet(); toast("Settings saved"); };
@@ -250,17 +257,42 @@ export async function resumeSync() {
 }
 
 /* ---------- backup and legacy import ---------- */
+/* ---------- backups ---------- */
+// Four rotating weekly backups live in the shared Drive folder (backup_1…4.json), made automatically by an admin's device
+// when the last one is a week old. Every device records when it last backed up, so everyone sees the same "last backup".
+const backupText = async () => JSON.stringify({ app: "batchwala", version: 2, exportedAt: new Date().toISOString(), business: M.config().business, events: await ev.allEvents() });
+export const lastBackup = () => ev.all("devices").map(d => d.backupAt).filter(Boolean).sort().at(-1) || "";
+const backupAge = () => { const l = lastBackup(); return l ? Math.floor((Date.now() - new Date(l)) / 864e5) : null; };
+async function markBackup(where) { const cur = ev.get("devices", ev.device()); if (!cur) return; const { _at, _by, ...r } = cur; await ev.put("devices", { ...r, backupAt: new Date().toISOString(), backupWhere: where }); sync.soon(); }
+export async function driveBackup() {
+  const a = sync.current(); if (!a) throw new Error("Cloud sync is off, so there's no Drive folder to back up to"); await a.ready();
+  const name = `backup_${Math.floor(Date.now() / (7 * 864e5)) % 4 + 1}.json`; const files = await a.listFiles(); const ex = files.find(f => f.name === name);
+  await a.writeFile(name, await backupText(), ex && ex.id); await markBackup("drive"); return name;
+}
+H.autoBackup = async () => { if (!R.isAdmin() || !sync.current()) return; const age = backupAge(); if (age != null && age < 7) return; try { await driveBackup(); } catch (_) {} };
+// A reminder for the admin when nothing has been backed up for a week.
+H.backupBanner = () => { if (!R.isAdmin()) return ""; const age = backupAge(); if (age != null && age < 7) return "";
+  return `<button class="banner warn expbanner" data-act="backup">${age == null ? "No backup yet" : `Last backup ${age} days ago`} · tap to back up</button>`; };
 function backupSheet() {
-  if (!R.isAdmin()) return;
-  openSheet({ kind: "backup" }, `<div class="sh-head"><h2 class="h">Backup & restore</h2><button class="x" data-close aria-label="Close">×</button></div>
-  <p class="hint" style="margin-top:0">A backup file holds every change ever made. Keep one even with cloud sync on.</p>
-  <button class="btn btn-primary" data-act="saveBackup">${ICON.dl}Save backup file</button>
+  if (!R.isAdmin()) return; const a = sync.current(); const l = lastBackup(); const d = ev.all("devices").find(x => x.backupAt === l);
+  openSheet({ kind: "backup", redraw: backupSheet }, `<div class="sh-head"><h2 class="h">Backup & restore</h2><button class="x" data-close aria-label="Close">×</button></div>
+  <div class="kv"><div><span>Last backup</span><b>${l ? esc(new Date(l).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })) + (d && d.backupWhere ? ` · ${d.backupWhere === "drive" ? "Drive" : "file"}` : "") : "Never"}</b></div></div>
+  <p class="hint">${a ? "With cloud sync on, an admin's phone saves a backup to the Drive folder every week by itself, keeping the last four." : "Turn on cloud sync for automatic weekly backups to Drive. Until then, save a file now and then."}</p>
+  ${a ? `<button class="btn btn-primary" data-act="driveBackupNow">${ICON.cloud}Back up to Drive now</button>` : ""}
+  <button class="btn ${a ? "btn-ghost" : "btn-primary"}" data-act="saveBackup">${ICON.dl}Save backup file</button>
   <label class="btn btn-ghost" style="position:relative">Load a backup file<input type="file" accept="application/json,.json" id="bFile" style="position:absolute;inset:0;opacity:0"></label>
-  <p class="hint">Loading adds the file’s data to what is here; nothing is deleted. Backups from the earlier Bakery POS and the Claude tracker are converted automatically.</p>`);
+  ${a ? `<label class="f" style="margin-top:14px">Backups in Drive</label><div class="kv" id="driveBackups"><div class="mut">Looking…</div></div>` : ""}
+  <p class="hint">Loading or restoring adds the backup's data to what is here; nothing is deleted.</p>`);
+  if (a) a.ready().then(() => a.listFiles()).then(fs => { const el = document.getElementById("driveBackups"); if (!el) return; const bs = fs.filter(f => /^backup_\d\.json$/.test(f.name)).sort((x, y) => String(y.modified).localeCompare(String(x.modified)));
+    el.innerHTML = bs.map(f => { const t = isNaN(+f.modified) ? new Date(f.modified) : new Date(+f.modified * 1000); return `<div style="align-items:center"><span>${esc(t.toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" }))}<small class="mut" style="display:block">${esc(f.name)}${f.size ? " · " + Math.round(f.size / 1024) + " KB" : ""}</small></span><button class="linkbtn" data-restore="${esc(f.id)}">Restore</button></div>`; }).join("") || `<div class="mut">None yet</div>`; })
+    .catch(() => { const el = document.getElementById("driveBackups"); if (el) el.innerHTML = `<div class="mut">Couldn’t reach Drive</div>`; });
 }
 A.backup = backupSheet;
-A.saveBackup = async () => { const data = { app: "batchwala", version: 2, exportedAt: new Date().toISOString(), events: await ev.allEvents() };
-  const blob = new Blob([JSON.stringify(data)], { type: "application/json" }); const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `${APP_NAME.toLowerCase()}-backup-${today()}.json`; document.body.appendChild(a); a.click(); a.remove(); toast("Backup saved"); };
+A.driveBackupNow = async el => { el.disabled = true; try { await driveBackup(); toast("Backed up to Drive"); backupSheet(); } catch (e) { toast(e.message || "Backup failed"); el.disabled = false; } };
+A.saveBackup = async () => { const blob = new Blob([await backupText()], { type: "application/json" }); const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `${APP_NAME.toLowerCase()}-backup-${today()}.json`; document.body.appendChild(a); a.click(); a.remove(); await markBackup("file"); toast("Backup saved"); };
+H.click.push(async T => { const r = T.closest("[data-restore]"); if (!r) return false; if (!R.isAdmin()) return true;
+  if (!await yesNo(`<p class="cq">Restore this backup?</p><div class="cdetail">Its data is added to what is here; nothing is deleted. Records changed since then keep their latest version.</div>`, "Restore")) return true;
+  try { const a = sync.current(); const data = JSON.parse(await a.readFile(r.dataset.restore)); const n = await importFile(data); toast(`Restored · ${n} change${n === 1 ? "" : "s"} added`); } catch (e) { toast(e.message || "Couldn’t restore"); } return true; });
 function aliasesFor(name) { const w = name.replace(/^[A-Z]\.\s*/, "").toLowerCase().replace(/[^a-z\s]/g, " ").replace(/\s+/g, " ").trim(); const parts = w.split(" "); const out = new Set([w]);
   if (parts[0] && parts[0].length >= 4) out.add(parts[0]); const last = parts.at(-1); if (last && last.length >= 4) out.add(last.endsWith("s") ? last.slice(0, -1) : last); if (parts.length >= 2) out.add(parts[0] + parts[1]); return [...out].join(", "); }
 export async function importFile(data) {

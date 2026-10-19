@@ -39,9 +39,10 @@ async function round() {
     // push: rewrite each of my month files that has events newer than what was pushed
     const pushed = await ev.getMeta("sync.pushedSeq") || 0;
     const mine = await ev.ownEvents(0);
-    const newer = mine.filter(e => e.seq > pushed);
-    if (newer.length) {
-      const months = [...new Set(newer.map(monthOf))];
+    const newer = mine.filter(e => e.seq > pushed); const compact = await ev.getMeta("sync.compact");
+    if (newer.length || compact) {
+      // After pruning, every month file of this device is rewritten without the dropped events.
+      const months = [...new Set((compact ? mine : newer).map(monthOf))];
       const ids = await ev.getMeta("sync.fileIds") || {};
       for (const m of months) {
         const name = fileName(dev, m);
@@ -51,7 +52,7 @@ async function round() {
         ids[name] = await adapter.writeFile(name, text, existing);
       }
       await ev.setMeta("sync.fileIds", ids);
-      await ev.setMeta("sync.pushedSeq", newer.at(-1).seq);
+      if (newer.length) await ev.setMeta("sync.pushedSeq", newer.at(-1).seq); if (compact) await ev.setMeta("sync.compact", false);
     }
     // After a restore: other devices' events from the backup go up as one file of this device's, once.
     if (await ev.getMeta("sync.publishForeign")) { const all = await ev.allEvents(); const foreign = all.filter(e => e.dev !== dev);

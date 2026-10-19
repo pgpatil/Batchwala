@@ -3,7 +3,7 @@ import * as ev from "./events.js";
 import * as M from "./model.js";
 import * as R from "./roles.js";
 import { asLines, layoutSwitch } from "./table.js";
-import { S, A, V, H, render, guard, saveOrder, payOrders, reversePayments, addPayment, logoHtml, toran, chipBar, searchBox, matchQ, band, payTag, chanTag, noLabel } from "./core.js";
+import { S, A, V, H, render, guard, saveOrder, payOrders, reversePayments, addPayment, addCredit, logoHtml, toran, chipBar, searchBox, matchQ, band, payTag, chanTag, noLabel } from "./core.js";
 import { $, esc, rs, rs2, num, uid, today, addDays, dObj, dLabel, dLong, plate, cmpFlat, ICON, copyText, waHref } from "./util.js";
 import { ui, toast, openSheet, closeSheet, ask, yesNo } from "./ui.js";
 import * as L from "./lock.js";
@@ -12,11 +12,12 @@ import { checkCustomer } from "./match.js";
 /* ---------- WhatsApp text ---------- */
 export function orderText(o) {
   const c = M.config(); const first = (o.customer || "").split(" ")[0];
-  let t = `Hi ${first}! 🧁 Your ${c.business} order for ${dLong(o.date)}:\n`;
+  let t = `Hi ${first}! 🧁 Your ${c.business} order for ${dLong(o.date)}${o.slot ? ", " + o.slot : ""}:\n`;
   o.items.forEach(i => t += `• ${i.item} × ${i.qty} — ${rs(i.qty * i.rate)}\n`);
   if (o.discountPct) t += `Offer ${o.discountPct}% off — −${rs(M.disc(o))}\n`;
   t += taxBlock(o, " — ").map(x => x + "\n").join("");
-  t += `*Total ${rs(M.total(o))}*`; if (M.bal(o) > 0 && c.upi) t += `\n\nPay by UPI: ${c.upi}`;
+  if (o.cakeMsg || o.weight || o.flavour) t += [o.weight && `Size: ${o.weight}`, o.flavour && `Flavour: ${o.flavour}`, o.cakeMsg && `Message: “${o.cakeMsg}”`].filter(Boolean).join("\n") + "\n";
+  t += `*Total ${rs(M.total(o))}*`; if (advanceDue(o)) t += `\nAdvance to confirm: ${rs(advanceDue(o))}`; if (M.bal(o) > 0 && c.upi) t += `\n\nPay by UPI: ${c.upi}`;
   return t + `\n\nThank you! 💛`;
 }
 export function reminderText(cu) {
@@ -80,7 +81,7 @@ V.today = () => {
   <div class="st"><b>${pieces}</b><span>pieces${toBake ? ` · ${toBake} to bake` : ""}</span></div>${money ? `<div class="st"><b>${rs(value)}</b><span>${rs(coll)} collected</span></div>` : ""}</div></header>
   <div class="strip"><div class="days" id="days">${[...set].sort().map(d => { const x = dObj(d); return `<button class="day" data-day="${d}" aria-pressed="${d === S.date}"><small>${d === t ? "Today" : x.toLocaleDateString("en-IN", { weekday: "short" })}</small><b>${x.getDate()}</b><i>${counts[d] ? counts[d] + " ord" : x.toLocaleDateString("en-IN", { month: "short" })}</i></button>`; }).join("")}
   <label class="day pick">Pick date<input type="date" data-pickday value="${S.date}" aria-label="Pick a date"></label></div>${toran()}</div>
-  <div class="quick"><button class="qbtn" data-go="bake">${ICON.oven}<span>Bake board<small>${toBake ? toBake + " pcs to bake" : "Up to date"}</small></span></button><button class="qbtn" data-go="run">${ICON.run}<span>Delivery run<small>${day.filter(o => M.PREORDER.includes(o.channel) && !M.isDelivered(o)).length} to deliver</small></span></button></div>`;
+  ${H.backupBanner && H.backupBanner() ? `<div class="boardfoot" style="padding-bottom:0">${H.backupBanner()}</div>` : ""}<div class="quick"><button class="qbtn" data-go="bake">${ICON.oven}<span>Bake board<small>${toBake ? toBake + " pcs to bake" : "Up to date"}</small></span></button><button class="qbtn" data-go="run">${ICON.run}<span>Delivery run<small>${day.filter(o => M.PREORDER.includes(o.channel) && !M.isDelivered(o)).length} to deliver</small></span></button></div>`;
   const rows = day.filter(o => matchQ("today", o)).filter(o => S.filter.today === "all" || (S.filter.today === "done" ? M.isDelivered(o) : !M.isDelivered(o)));
   h += `<div class="tools">${searchBox("today", "Search name, flat or phone")}${layoutSwitch("today")}${chipBar("today", [["todo", "To deliver", day.length - done], ["done", "Delivered", done], ["all", "All", day.length]])}</div>`;
   if (!day.length) h += `<div class="empty"><strong>No orders for ${esc(dLong(S.date))}</strong>Tap New order to take one for this day.</div>`;
@@ -95,7 +96,7 @@ export function orderRow(o, withTick) {
   const d = M.isDelivered(o); const money = R.can("money");
   return `<li class="row${d ? " done" : ""}">${plate(o.flat)}
     <button class="who" data-open="${esc(o.id)}"><div class="nm">${esc(o.customer || M.CHANNELS[o.channel])}</div><div class="pills">${o.items.map(i => `<span class="pill">${esc(i.item)}<b>×${i.qty}</b></span>`).join("")}</div>
-    <div class="subl">${money ? rs(M.total(o)) + " " + payTag(o) : ""} ${billTag(o)} ${chanTag(o)} ${!d && o.status !== "received" ? `<span class="tag t-camp">${esc(M.STATUS_LABEL[o.status])}</span>` : ""}</div></button>
+    <div class="subl">${money ? rs(M.total(o)) + " " + payTag(o) : ""} ${billTag(o)} ${chanTag(o)} ${preTags(o)} ${!d && o.status !== "received" ? `<span class="tag t-camp">${esc(M.STATUS_LABEL[o.status])}</span>` : ""}</div></button>
     ${withTick ? `<button class="tick" data-deliver="${esc(o.id)}" aria-pressed="${d}" aria-label="${d ? "Delivered" : "Mark delivered"}: ${esc(o.customer)}">${ICON.check}</button>` : (money ? `<div class="amt">${rs(M.total(o))}</div>` : "")}</li>`;
 }
 
@@ -158,12 +159,14 @@ export function openOrder(id) {
   ${cancelled ? `<div class="banner bad">Cancelled${o.cancelReason ? ": " + esc(o.cancelReason) : ""}</div>` : `<div class="steps" role="group" aria-label="Order status">${steps}</div>`}
   <div class="kv">${o.items.map(i => `<div><span>${esc(i.item)} × ${i.qty}${money ? ` <small class="mut">@ ${rs(i.rate)}</small>` : ""}</span>${money ? `<span>${rs(i.qty * i.rate)}</span>` : ""}</div>`).join("")}
   ${money && o.discountPct ? `<div><span>Offer ${o.discountPct}% off</span><span>−${rs(M.disc(o))}</span></div>` : ""}${money ? taxBlock(o, "|").map(x => { const [a, b] = x.split("|"); return `<div><span class="mut">${esc(a)}</span><span class="mut">${esc(b)}</span></div>`; }).join("") : ""}${money ? `<div class="tot"><span>Total</span><span>${rs(M.total(o))}</span></div>` : ""}</div>
+  ${o.slot || o.cakeMsg || o.weight || o.flavour || o.advance ? `<div class="kv" style="margin-top:8px">${o.slot ? `<div><span>Delivery time</span><b>${esc(o.slot)}</b></div>` : ""}${o.cakeMsg ? `<div><span>Message on the cake</span><b>“${esc(o.cakeMsg)}”</b></div>` : ""}${o.weight ? `<div><span>Weight / size</span><b>${esc(o.weight)}</b></div>` : ""}${o.flavour ? `<div><span>Flavour / theme</span><b>${esc(o.flavour)}</b></div>` : ""}${o.advance ? `<div><span>Advance</span><b>${rs(o.advance)}${advanceDue(o) ? ` · <span class="due">${rs(advanceDue(o))} still due</span>` : " · received"}</b></div>` : ""}</div>` : ""}
   ${o.notes ? `<p class="hint">Note: ${esc(o.notes)}</p>` : ""}
   ${cancelled ? "" : `<div class="statusrow"><button class="sbox ${M.isDelivered(o) ? "on" : "off"}" data-act="toggleDeliver" ${R.can("deliver") ? "" : "disabled"}><small>Delivery</small><b>${M.isDelivered(o) ? "Delivered ✓" : "Not delivered"}</b><em>${R.can("deliver") ? "Tap to " + (M.isDelivered(o) ? "undo" : "mark delivered") : ""}</em></button>
   ${money ? `<button class="sbox ${s === "paid" ? "on" : "off"}" data-act="${s === "paid" ? "unpay" : "payOrder"}" ${R.can("pay.record") || R.can("collect") ? "" : "disabled"}><small>Payment</small><b>${s === "paid" ? "Paid ✓" : s === "part" ? rs(M.bal(o)) + " due" : "Unpaid"}</b><em>${s === "paid" ? (M.lastPayMode(o) ? M.lastPayMode(o) + " · " : "") + "tap to undo" : "Tap to record payment"}</em></button>` : ""}</div>`}
+  ${money ? `<div class="btnrow"><button class="btn btn-ghost" data-invoice="${esc(o.id)}">${ICON.print}${o.invoiceNo ? "Invoice " + esc(o.invoiceNo) : M.taxCfg().on && M.taxCfg().gstin ? "Tax invoice" : "Invoice"}</button><button class="btn btn-ghost" data-receipt="${esc(o.id)}">${ICON.print}Receipt</button></div>` : ""}
   ${money && !cancelled ? `<button class="btn btn-primary" data-act="billSummary">Bill summary${o.billSentAt ? " · " + (billChanged(o) ? "order changed since sent" : "sent " + esc(billWhen(o))) : ""}</button>` : ""}
   ${money && cancelled && M.received(o) > 0.005 ? `<div class="banner warn">${rs(M.received(o))} was paid on this cancelled order. ${R.can("pay.reverse") ? `<button class="linkbtn" data-act="refundOrder">Refund / reverse it</button>` : "Ask an admin to refund it."}</div>` : ""}
-  ${money && !cancelled && M.received(o) - M.total(o) > 0.5 ? `<div class="banner warn">${rs(M.received(o) - M.total(o))} paid above the total. ${R.can("pay.reverse") ? `<button class="linkbtn" data-act="refundExtra">Refund the extra</button>` : ""}</div>` : ""}
+  ${money && !cancelled && M.received(o) - M.total(o) > 0.5 ? `<div class="banner warn">${rs(M.received(o) - M.total(o))} paid above the total. ${R.can("pay.reverse") ? `<button class="linkbtn" data-act="refundExtra">Refund the extra</button>` : ""}${R.can("pay.record") && o.channel !== "walkin" ? ` · <button class="linkbtn" data-act="extraToCredit">Keep as credit</button>` : ""}</div>` : ""}
   ${R.can("phone") && !cancelled ? `<div class="btnrow"><a class="btn btn-wa" data-wa href="${esc(waHref(o.phone, orderText(o)))}" target="_blank" rel="noopener">${ICON.wa}Send order</a><button class="btn btn-ghost" data-act="copyOrder">Copy message</button></div>` : ""}
   ${edit ? `<div class="btnrow"><button class="btn btn-ghost" data-act="editOrder" ${cancelled ? "disabled" : ""}>Edit</button><button class="btn btn-ghost" data-act="repeatOrder">Repeat order</button></div>` : ""}
   ${R.can("history") ? `<button class="btn btn-ghost" data-act="orderHistory">History of changes</button>` : ""}
@@ -187,6 +190,8 @@ A.refundOrder = async () => { const o = sheetOrder(); if (!o || !guard("pay.reve
   if (await yesNo(`<p class="cq">Refund ${rs(M.received(o))}?</p><div class="cdetail">Reversal entries are added for the payments on this order (same mode). Hand the money back to ${esc(o.customer || "the customer")}.</div>`, "Refund", "btn-danger-solid")) { await reversePayments(o); openOrder(o.id); toast("Refund recorded"); } };
 A.refundExtra = async () => { const o = sheetOrder(); if (!o || !guard("pay.reverse")) return; const extra = Math.round((M.received(o) - M.total(o)) * 100) / 100;
   if (extra > 0 && await yesNo(`<p class="cq">Refund ${rs(extra)}?</p><div class="cdetail">The order total is ${rs(M.total(o))}; ${rs(M.received(o))} was received.</div>`, "Refund", "btn-danger-solid")) { await addPayment(o, -extra, M.lastPayMode(o), "Refund of extra"); openOrder(o.id); toast("Refund recorded"); } };
+A.extraToCredit = async () => { const o = sheetOrder(); if (!o || !guard("pay.record")) return; const extra = Math.round((M.received(o) - M.total(o)) * 100) / 100; if (!(extra > 0)) return;
+  await addPayment(o, -extra, "Credit", "Moved to customer credit"); await addCredit({ key: M.ckey(o), customer: o.customer, flat: o.flat }, extra, "Credit", `Extra paid on #${o.no}`); openOrder(o.id); toast(`${rs(extra)} kept as credit for ${o.customer}`); };
 A.deleteOrder = async () => { const o = sheetOrder(); if (!R.isAdmin()) return;
   if (M.received(o) > 0.005) { toast(`${rs(M.received(o))} was received on this order. Refund it first, or cancel the order instead.`); return; }
   if (await yesNo(`<p class="cq">Delete permanently?</p><div class="cname">${esc(o.customer)} · ${esc(dLong(o.date))}</div><div class="cdetail">Use Cancel for normal cases. Deleting removes it from every list and report; only its history remains.</div>`, "Delete", "btn-danger-solid", "Keep")) { await ev.del("orders", o.id); closeSheet(); toast("Order deleted"); } };
@@ -239,9 +244,13 @@ export async function compose(o, opts = {}) {
   if (o && opts.repeat) { Object.assign(base, { id: uid("o"), no: "", date: today(), status: "received", deliveredAt: "", cancelReason: "", createdAt: new Date().toISOString(), tag: c.activeTag || "" });
     // A repeat is a new order: no bill sent yet, today's tax rates and prices-include-tax setting, this device's location.
     ["billSentAt", "billTotal", "taxIncl", "outletId"].forEach(k => delete base[k]); base.items = base.items.map(({ taxPct, list, ...i }) => i); }
-  const st = { ...lk, kind: "compose", o: base, isNew: !o || !!opts.repeat, dirty: !!opts.repeat || !!(opts.items && opts.items.length), cat: "", sugg: false, prefix: (me && me.prefix) || "" };
+  const st = { ...lk, kind: "compose", o: base, isNew: !o || !!opts.repeat, dirty: !!opts.repeat || !!(opts.items && opts.items.length), cat: "", sugg: false, prefix: R.numPrefix() };
   st.redraw = () => drawCompose(st); drawCompose(st);
 }
+// Pre-orders carry a delivery window (or exact time), a cake message, weight and flavour, and an advance to collect.
+export const SLOTS = ["Morning 8–11", "Afternoon 12–4", "Evening 5–9"];
+export const advanceDue = o => o.advance > 0 && o.status !== "cancelled" ? Math.max(0, o.advance - M.received(o)) : 0;
+export const preTags = o => `${o.slot ? `<span class="tag t-camp">🕒 ${esc(o.slot)}</span>` : ""}${o.cakeMsg || o.weight || o.flavour ? ` <span class="tag t-part">🎂 ${esc([o.weight, o.flavour].filter(Boolean).join(" · ") || "custom")}</span>` : ""}${advanceDue(o) ? ` <span class="tag t-due">advance ${rs(advanceDue(o))} due</span>` : ""}`;
 function drawCompose(st) {
   const o = st.o; const sc = $(".comp-scroll") ? $(".comp-scroll").scrollTop : 0;
   const a = document.activeElement; const fid = a && a.id; const fpos = fid && a.selectionStart;
@@ -268,6 +277,13 @@ function drawCompose(st) {
     ${o.items.length ? `<div class="cart"><label class="f" style="margin-top:14px">In this order${prices ? " · tap price to change" : ""}</label>${o.items.map((i, ix) => `<div class="cl"><div class="cn">${esc(i.item)}<small>${rs(i.qty * i.rate)}</small></div>
       ${prices ? `<input class="rate" data-rate="${ix}" inputmode="numeric" value="${i.rate}" aria-label="Price for ${esc(i.item)}">` : ""}
       <div class="stepper"><button data-step="${ix}:-1" aria-label="One less">−</button><span>${i.qty}</span><button data-step="${ix}:1" aria-label="One more">+</button></div></div>`).join("")}</div>` : ""}
+    <details class="predet"${o.slot || o.cakeMsg || o.weight || o.flavour || o.advance ? " open" : ""}><summary>Pre-order details <small class="mut">time, cake message, weight, advance</small></summary>
+      <label class="f">Delivery time</label><div class="chips">${SLOTS.map(x => `<button class="chip" data-slot="${esc(x)}" aria-pressed="${o.slot === x}">${esc(x)}</button>`).join("")}<input class="in" id="cSlot" value="${esc(SLOTS.includes(o.slot) ? "" : o.slot || "")}" placeholder="or a time, e.g. 6:30 pm" style="max-width:170px"></div>
+      <div class="two"><div><label class="f" for="cMsg">Message on the cake</label><input class="in" id="cMsg" value="${esc(o.cakeMsg || "")}" placeholder="e.g. Happy 5th Birthday Aarav"></div>
+      <div><label class="f" for="cWeight">Weight / size</label><input class="in" id="cWeight" value="${esc(o.weight || "")}" placeholder="e.g. 1 kg, 8 inch"></div></div>
+      <div class="two"><div><label class="f" for="cFlavour">Flavour / theme</label><input class="in" id="cFlavour" value="${esc(o.flavour || "")}" placeholder="e.g. Belgian chocolate, unicorn"></div>
+      <div><label class="f" for="cAdv">Advance to collect ₹</label><input class="in" id="cAdv" inputmode="numeric" value="${o.advance || ""}" placeholder="0"></div></div>
+    </details>
     <div class="two"><div><label class="f" for="cTag">Occasion</label><select class="in" id="cTag"><option value="">Regular order</option>${[...new Set([...(c.tags || []), o.tag].filter(Boolean))].map(g => `<option ${g === o.tag ? "selected" : ""}>${esc(g)}</option>`).join("")}</select></div>
     <div><label class="f" for="cNotes">Notes</label><input class="in" id="cNotes" value="${esc(o.notes)}" placeholder="Optional"></div></div>
   </div>
@@ -277,7 +293,8 @@ function drawCompose(st) {
   const cs = $(".comp-scroll"); if (cs) cs.scrollTop = sc;
   if (fid) { const el = document.getElementById(fid); if (el) { el.focus(); try { el.setSelectionRange(fpos, fpos); } catch (_) {} } }
 }
-function syncCompose() { const o = ui.sheet.o; const g = id => document.getElementById(id); if (g("cName")) o.customer = g("cName").value; if (g("cFlat")) o.flat = g("cFlat").value; if (g("cPhone")) o.phone = g("cPhone").value; if (g("cNotes")) o.notes = g("cNotes").value; if (g("cTag")) o.tag = g("cTag").value; }
+function syncCompose() { const o = ui.sheet.o; const g = id => document.getElementById(id);
+  if (g("cSlot") && g("cSlot").value.trim()) o.slot = g("cSlot").value.trim(); if (g("cMsg")) o.cakeMsg = g("cMsg").value.trim(); if (g("cWeight")) o.weight = g("cWeight").value.trim(); if (g("cFlavour")) o.flavour = g("cFlavour").value.trim(); if (g("cAdv")) o.advance = Math.max(0, Math.round(num(g("cAdv").value))); if (g("cName")) o.customer = g("cName").value; if (g("cFlat")) o.flat = g("cFlat").value; if (g("cPhone")) o.phone = g("cPhone").value; if (g("cNotes")) o.notes = g("cNotes").value; if (g("cTag")) o.tag = g("cTag").value; }
 A.customItem = async () => { syncCompose(); const st = ui.sheet;
   const v = await ask(`<p class="cq">Other item</p><input class="in" id="ciName" placeholder="Item name" style="margin-top:12px"><input class="in" id="ciPrice" placeholder="Price ₹" inputmode="numeric" style="margin-top:8px">`, [{ label: "Cancel", cls: "btn-ghost", value: false }, { label: "Add", cls: "btn-primary", value: "add" }], true);
   if (v === "add") { const n = ($("#ciName").value || "").trim(); if (n) { st.o.items.push({ item: n, qty: 1, rate: num($("#ciPrice").value) }); st.dirty = true; } }
@@ -297,6 +314,7 @@ A.saveCompose = async el => { syncCompose(); const st = ui.sheet; const o = st.o
 
 H.click.push(async T => {
   const st = ui.sheet; if (!st || st.kind !== "compose") return false; const o = st.o;
+  const sl = T.closest("[data-slot]"); if (sl) { syncCompose(); o.slot = o.slot === sl.dataset.slot ? "" : sl.dataset.slot; if ($("#cSlot")) $("#cSlot").value = ""; st.dirty = true; drawCompose(st); return true; }
   const pc = T.closest("[data-pickcust]"); if (pc) { const c = M.customers().find(x => x.key === pc.dataset.pickcust); if (c) Object.assign(o, { customer: c.customer, flat: c.flat, phone: c.phone || o.phone }); st.sugg = false; drawCompose(st); return true; }
   const cd = T.closest("[data-cdate]"); if (cd) { syncCompose(); o.date = cd.dataset.cdate; st.dirty = true; drawCompose(st); return true; }
   const ch = T.closest("[data-chan]"); if (ch) { syncCompose(); o.channel = ch.dataset.chan; st.dirty = true; drawCompose(st); return true; }

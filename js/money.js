@@ -2,7 +2,7 @@
 import * as M from "./model.js";
 import * as R from "./roles.js";
 import { asLines, layoutSwitch } from "./table.js";
-import { S, A, V, H, guard, saveOrder, payOrders, chipBar, searchBox, matchQ, band, payTag } from "./core.js";
+import { S, A, V, H, guard, saveOrder, payOrders, addCredit, useCredit, chipBar, searchBox, matchQ, band, payTag } from "./core.js";
 import { orderText, reminderText, compose, openOrder } from "./orders.js";
 import { $, esc, rs, num, today, addDays, dObj, dLabel, dLong, plate, cmpFlat, ICON, copyText, waHref } from "./util.js";
 import { ui, toast, openSheet, closeSheet, ask, yesNo } from "./ui.js";
@@ -21,7 +21,7 @@ V.pay = () => {
   if (asLines("pay")) return h + `<div class="card tablecard"><table class="reg"><thead><tr><th>Flat</th><th>Customer</th><th>Phone</th><th class="r">Orders</th><th>Unpaid since</th><th class="r">Owed</th><th class="r">Collected</th><th></th></tr></thead><tbody>${rows.map(c => { const due = c.orders.filter(o => M.bal(o) > 0); const oldest = due.map(o => o.date).sort()[0];
     return `<tr${c.balance <= 0 ? ' class="done"' : ""}><td>${esc(c.flat || "")}</td><td><button class="linkbtn" data-cust="${esc(c.key)}"><b>${esc(c.customer)}</b></button></td><td>${R.can("phone") ? esc(c.phone || "") : ""}</td><td class="r">${c.orders.length}</td><td data-v="${esc(oldest || "")}">${oldest ? esc(dLabel(oldest)) : "–"}</td><td class="r" data-v="${c.balance}">${c.balance > 0 ? `<b class="due">${rs(c.balance)}</b>` : "–"}</td><td class="r" data-v="${c.received}">${rs(c.received)}</td><td>${c.balance > 0 && R.can("pay.record") ? `<button class="paybtn" data-quickpay="${esc(c.key)}">Mark paid</button>` : c.balance <= 0 ? `<span class="tag t-paid">${ICON.check}Paid up</span>` : ""}</td></tr>`; }).join("")}</tbody></table></div>`;
   return h + `<ul class="list">${rows.map(c => { const due = c.orders.filter(o => M.bal(o) > 0); const paid = c.balance <= 0; const oldest = due.map(o => o.date).sort()[0];
-    return `<li class="row${paid ? " done" : ""}">${plate(c.flat)}<button class="who" data-cust="${esc(c.key)}"><div class="nm">${esc(c.customer)}</div><div class="subl">${paid ? `${rs(c.spend)} paid · ${c.orders.length} order${c.orders.length > 1 ? "s" : ""}` : `${due.length} unpaid · since ${esc(dLabel(oldest))}${c.received ? ` · ${rs(c.received)} received` : ""}`}</div></button>
+    return `<li class="row${paid ? " done" : ""}">${plate(c.flat)}<button class="who" data-cust="${esc(c.key)}"><div class="nm">${esc(c.customer)}</div><div class="subl">${paid ? `${rs(c.spend)} paid · ${c.orders.length} order${c.orders.length > 1 ? "s" : ""}` : `${c.credit ? `credit ${rs(c.credit)} · ` : ""}${due.length} unpaid · since ${esc(dLabel(oldest))}${c.received ? ` · ${rs(c.received)} received` : ""}`}</div></button>
     <div class="side"><div class="amt">${rs(paid ? c.spend : c.balance)}</div>${paid ? `<span class="tag t-paid">${ICON.check}Paid up</span>` : (R.can("pay.record") ? `<button class="paybtn" data-quickpay="${esc(c.key)}">Mark paid</button>` : "")}</div></li>`; }).join("")}</ul>`;
 };
 
@@ -74,7 +74,9 @@ function custSheet(key) {
   const c = M.customers().find(x => x.key === key); if (!c) { closeSheet(); return; }
   const phone = R.can("phone");
   openSheet({ kind: "cust", key, redraw: () => custSheet(key) }, `<div class="sh-head">${plate(c.flat)}<h2 class="h">${esc(c.customer)}</h2><button class="x" data-close aria-label="Close">×</button></div>
-  <div class="kpis" style="padding:0;margin-bottom:10px"><div class="kpi"><b>${rs(c.spend)}</b><span>${c.orders.length} orders</span></div><div class="kpi"><b style="color:${c.balance > 0 ? "var(--due)" : "var(--ok)"}">${rs(c.balance)}</b><span>balance</span></div></div>
+  <div class="kpis" style="padding:0;margin-bottom:10px"><div class="kpi"><b>${rs(c.spend)}</b><span>${c.orders.length} orders</span></div><div class="kpi"><b style="color:${c.balance > 0 ? "var(--due)" : "var(--ok)"}">${rs(c.balance)}</b><span>balance</span></div>${c.credit ? `<div class="kpi"><b style="color:var(--ok)">${rs(c.credit)}</b><span>credit held</span></div>` : ""}</div>
+  ${R.can("pay.record") ? `<div class="btnrow">${c.credit > 0 && c.balance > 0 ? `<button class="btn btn-ok" data-act="useCredit">Use credit on unpaid orders</button>` : ""}<button class="btn btn-ghost" data-act="takeAdvance">Take an advance</button>${c.credit > 0 && R.can("pay.reverse") ? `<button class="btn btn-ghost" data-act="refundCredit">Refund credit</button>` : ""}</div>` : ""}
+  ${M.creditEntries(c.key).length ? `<label class="f" style="margin-top:12px">Credit</label><div class="kv">${M.creditEntries(c.key).map(p => `<div><span>${esc(dLong(p.date))} · ${esc(p.note || (p.amount > 0 ? "Advance" : "Used"))}${p.mode ? ` <small class="mut">${esc(p.mode)}</small>` : ""}</span><b style="color:${p.amount > 0 ? "var(--ok)" : "var(--due)"}">${p.amount > 0 ? "+" : "−"}${rs(Math.abs(p.amount))}</b></div>`).join("")}</div>` : ""}
   ${phone ? `<label class="f" for="cuPhone">Phone</label><div class="two"><input class="in" id="cuPhone" value="${esc(c.phone)}" placeholder="10-digit mobile" inputmode="tel"><button class="btn btn-ghost" style="margin:0;height:48px" data-act="savePhone">Save phone</button></div>` : ""}
   ${c.balance > 0 && R.can("pay.record") ? `<button class="btn btn-ok" data-quickpay="${esc(c.key)}">Mark paid · ${rs(c.balance)}</button>` : ""}
   ${c.balance > 0 && phone ? `<div class="btnrow"><a class="btn btn-wa" href="${esc(waHref(c.phone, reminderText(c)))}" target="_blank" rel="noopener">${ICON.wa}Send reminder</a><button class="btn btn-ghost" data-act="copyReminder">Copy reminder</button></div>` : ""}
@@ -83,6 +85,18 @@ function custSheet(key) {
   <div class="kv">${c.orders.slice().reverse().map(o => `<div><button class="who" data-open="${esc(o.id)}"><div class="nm" style="font-size:15px">${esc(dLong(o.date))}</div><div class="subl">${o.items.map(i => esc(i.item) + " ×" + i.qty).join(", ")}</div></button><div class="side"><span class="amt">${rs(M.total(o))}</span>${payTag(o)}</div></div>`).join("")}</div>`);
 }
 const sheetCust = () => M.customers().find(x => x.key === (ui.sheet && ui.sheet.key));
+// An advance (or a refund of credit): amount, mode, note.
+async function creditPrompt(title, max) {
+  const v = await ask(`<p class="cq">${esc(title)}</p><input class="in" id="crAmt" inputmode="decimal" placeholder="Amount ₹${max ? " (up to " + rs(max) + ")" : ""}" style="margin-top:12px"><input class="in" id="crNote" placeholder="Note (e.g. cake for 25 Oct)" style="margin-top:8px">`,
+    [{ label: "UPI", cls: "btn-ok", value: "UPI" }, { label: "Cash", cls: "btn-ok", value: "Cash" }, { label: "Bank", cls: "btn-ghost", value: "Bank transfer" }, { label: "Cancel", cls: "btn-danger", value: null }]);
+  if (!v) return null; const amt = Math.round(num(($("#crAmt") || {}).value) * 100) / 100; if (!(amt > 0)) { toast("Enter the amount"); return null; }
+  if (max && amt > max + 0.005) { toast(`Only ${rs(max)} is held`); return null; } return { amt, mode: v, note: (($("#crNote") || {}).value || "").trim() };
+}
+A.takeAdvance = async () => { const c = sheetCust(); if (!c || !guard("pay.record")) return; const r = await creditPrompt(`Advance from ${c.customer}`); if (!r) return;
+  await addCredit(c, r.amt, r.mode, r.note || "Advance"); toast(`${rs(r.amt)} held as credit for ${c.customer}`); custSheet(c.key); };
+A.useCredit = async () => { const c = sheetCust(); if (!c || !guard("pay.record")) return; const used = await useCredit(c); toast(used ? `${rs(used)} of credit used` : "Nothing to pay"); custSheet(c.key); };
+A.refundCredit = async () => { const c = sheetCust(); if (!c || !guard("pay.reverse")) return; const r = await creditPrompt(`Refund credit to ${c.customer}`, c.credit); if (!r) return;
+  await addCredit(c, -r.amt, r.mode, r.note || "Refunded"); toast(`${rs(r.amt)} refunded`); custSheet(c.key); };
 A.customers = customersSheet;
 A.orderForCust = () => { const c = sheetCust(); compose(null, { customer: c.customer, flat: c.flat, phone: c.phone, date: today() }); };
 A.copyReminder = async () => toast(await copyText(reminderText(sheetCust())) ? "Reminder copied. Paste it in WhatsApp." : "Couldn’t copy here");

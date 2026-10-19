@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.12.0 — 19 Oct 2026
+- Backups: with cloud sync on, an admin's phone saves a full backup to the Drive folder every week, keeping the last four; admins are reminded when a week passes without one; restore from any of them in More → Backup
+- Customer advances and credit: take an advance, use credit on unpaid orders, refund credit; refunds on cancelled or overpaid orders
+- Day close (Orders): each person counts cash, UPI and card against what the app recorded for them, with opening float, paid-outs and short / over; past closes listed, printable
+- Tax invoice (A4) and counter receipt (58 / 80 mm) from any order; invoice numbers per financial year and device; address, state, invoice prefix and HSN in Business settings, HSN per item; optional receipt after every counter sale
+- Stock-take (Stores): count a location in one sheet, a reason per difference, saved as one ST-numbered stock-take with the value by reason; printable blank count sheet
+- Pre-order details: delivery time slot, cake message, weight / size, flavour / theme and the advance to confirm; delivery run sorted by slot
+- Purchase returns (Stores): debit notes against a GRN (up to what it brought in) or any supplier, with reason; stock off at cost, supplier balance reduced; Debit Note vouchers in the Tally day book and tax summary; undo
+- Recipe versions: changing a recipe asks from when it applies (or marks it a correction); food cost and work-order standards use the recipe in force on the date; earlier recipes listed in the editor
+- Supplier payments: tick the bills a payment is for; overpayment held as an advance; ageing buckets per supplier and in the table; bills due this week
+- Numbering: with two or more phones each gets a letter (PA-58, PB-12), so offline phones never issue the same order, batch or document number
+- Speed: screens reuse computed data until something changes; history is tidied daily (superseded changes older than 120 days dropped) and the device's Drive files are rewritten compactly
+
 ## 2.11.1 — 18 Oct 2026 · audit fixes
 - Money: cancelling a paid order offers to refund it; a cancelled order with money on it, or one paid above its total, shows a refund button; deleting an order with money received is refused; a part payment above what's owed is refused instead of being cut down silently; Undo sale can't reverse twice
 - Tax: orders saved before tax was switched on stay untaxed when ticked delivered or edited; repeat orders start fresh (no "bill sent", today's tax); bill summaries no longer invent a discount when the menu price rises later

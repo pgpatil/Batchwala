@@ -553,3 +553,17 @@ table.reg td:not(.items){white-space:nowrap}
 }
 @media print{ html,body.printing{background:#fff !important} #printArea{background:#fff} #printArea .bc-step td.chk{width:22px;text-align:center} }
 @media print{ #printArea tr.tfilter,#printArea .tshown,#printArea .layoutsw{display:none !important} #printArea th[data-tsort]::after{content:none} #printArea .card{border:0;box-shadow:none;margin:0 0 8px;padding:0} #printArea .card h3{font-size:13px;margin:6px 0 2px;padding:0} #printArea .card td,#printArea .card th{padding:1.5px 4px;font-size:11.5px} }
+.predet{margin-top:12px;border:1px solid var(--line);border-radius:14px;padding:8px 12px;background:var(--card)}
+.predet summary{font-weight:700;cursor:pointer}
+/* invoices and receipts */
+.inv{font-size:12px;color:#000}
+.inv-head{display:flex;justify-content:space-between;gap:16px;border-bottom:2px solid #000;padding-bottom:8px}
+.inv-head h2{margin:0 0 4px;font-size:18px}.inv-meta{text-align:right}.inv-meta h3{margin:0 0 4px;font-size:15px;letter-spacing:.08em}
+.inv-void{color:#b00;font-weight:800;border:2px solid #b00;display:inline-block;padding:2px 8px;margin-top:4px}
+.inv-to{margin:8px 0}.inv-to small{display:block;color:#555}
+.inv-t{width:100%;border-collapse:collapse;margin-top:6px}.inv-t th,.inv-t td{border-bottom:.5px solid #999;padding:3px 4px;text-align:left}.inv-t .num{text-align:right;white-space:nowrap}.inv-t small{color:#555}
+.inv-tot{margin:8px 0 0 auto;max-width:300px}.inv-tot>div{display:flex;justify-content:space-between;padding:1px 0}.inv-tot .grand{border-top:1.5px solid #000;font-size:14px;margin-top:3px;padding-top:3px}
+.inv-words{font-style:italic;font-size:11px;justify-content:flex-end}.inv-foot{margin-top:14px;font-size:11px;color:#333;text-align:center}
+.rcpt{width:72mm;font:12px/1.35 ui-monospace,Menlo,monospace;color:#000;margin:0 auto}.rcpt .rc-biz{display:block;font-size:14px;text-align:center}.rcpt>div{text-align:center}
+.rcpt .rc-line{border-bottom:1px dashed #000;padding:4px 0;margin-bottom:4px}.rcpt .rc-row{display:flex;justify-content:space-between;text-align:left}.rcpt .rc-tot{border-top:1px dashed #000;margin-top:4px;padding-top:4px;font-weight:800}.rcpt .rc-thanks{margin-top:8px}
+@media screen{#printArea .inv,#printArea .rcpt{display:block}}

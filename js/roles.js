@@ -37,4 +37,14 @@ const BAR = { boss: { classic: ["pos", "@orders", "@make", "@stores", "more"], r
 export const bar = () => { const r = role(); const b = BAR[["admin", "management", "manager"].includes(r) ? "boss" : r]; return b ? b[mode()] : tabs(); };
 export const tabs = () => (ROLES[role()] || ROLES.counter).tabs[mode()];
 export const home = () => (ROLES[role()] || ROLES.counter).home[mode()];
+// Each device gets a letter once a team uses more than one device, so two phones of the same person never issue the same number:
+// P-58 on a single device; PA-59 and PB-60 once there are two. The letter is chosen from those not yet taken and synced to everyone.
+export function deviceTag() { const devs = ev.all("devices"); if (devs.length < 2) return ""; const mine = devs.find(d => d.id === ev.device()); return mine ? mine.letter : ""; }
+export const numPrefix = () => ((me() || {}).prefix || "") + deviceTag();
+export async function registerDevice() {
+  const id = ev.device(); const cur = ev.get("devices", id); const day = new Date().toISOString().slice(0, 10); const who = (me() || {}).id || "";
+  if (!cur) { const used = new Set(ev.all("devices").map(d => d.letter)); const letter = [..."ABCDEFGHJKLMNPQRSTUVWXYZ"].find(l => !used.has(l)) || "Z";
+    await ev.put("devices", { id, letter, first: day, seen: day, by: who, agent: (navigator.userAgent.match(/\(([^;)]+)/) || [])[1] || "" }); }
+  else if (cur.seen !== day || cur.by !== who) { const { _at, _by, ...rec } = cur; await ev.put("devices", { ...rec, seen: day, by: who }); }
+}
 export function matchEmail(email) { const e = String(email || "").toLowerCase(); return members().find(m => (m.email || "").toLowerCase() === e) || null; }
