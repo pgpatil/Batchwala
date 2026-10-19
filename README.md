@@ -44,7 +44,7 @@ It is a Progressive Web App: it opens from a link, installs to the home screen, 
 | Shelf life | Per item (cookies 30 days, others 3 by default); a prompt on opening the app to discard or recount anything unsold past its shelf life |
 | Checks | Before a new customer, item, material or supplier is created, similar existing ones are shown to confirm first |
 | Help | In-app help for every screen and module, searchable, opening on the screen you’re on |
-| Import & export | CSV export by data type; templates; import of menu, materials, BOM, stock and finished-goods counts, suppliers and orders with a check screen first |
+| Import & export | CSV export of every data type; templates and import (with a check screen first) for menu, materials, BOM, customers, suppliers with opening balances, users & roles, locations, stock and finished-goods counts, orders, payments, purchase orders, GRNs and supplier payments; work orders, stock-takes, returns, day closes and stock movements export only |
 | Data | Saved on the phone first; optional sync through a shared Google Drive folder; daily Excel copy and weekly automatic backups (last four kept, restorable) in that folder; backup file; Excel export. Order and document numbers carry a device letter once a team has two phones, so offline phones never clash |
 
 ## Roles
