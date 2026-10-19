@@ -81,6 +81,9 @@ export function customers(list = orders(false)) {
     const k = ckey(o); if (!map.has(k)) map.set(k, { key: k, customer: o.customer, flat: o.flat, phone: "", orders: [] });
     const c = map.get(k); c.orders.push(o); if (o.phone) c.phone = o.phone; c.customer = o.customer; c.last = o.date;
   });
+  // Customers kept as their own record (added or imported, perhaps before any order): their phone and notes win over what orders say.
+  ev.all("custs").forEach(m => { const c = map.get(m.id); if (c) { if (m.phone) c.phone = m.phone; c.notes = m.notes || ""; }
+    else map.set(m.id, { key: m.id, customer: m.customer, flat: m.flat || "", phone: m.phone || "", notes: m.notes || "", orders: [], last: "" }); });
   return [...map.values()].map(c => ({ ...c, spend: c.orders.reduce((s, o) => s + total(o), 0), balance: c.orders.reduce((s, o) => s + bal(o), 0), received: c.orders.reduce((s, o) => s + Math.min(received(o), total(o)), 0), credit: Math.round(creditOf(c.key) * 100) / 100 }));
 }
 // Customer credit: money held for a customer but not on any order (advances, overpayments moved to credit), less credit used or refunded.
@@ -330,16 +333,19 @@ export const AGE = [["0–30", 0], ["31–60", 31], ["61–90", 61], ["90+", 91]
 export function supplierLedger(name) {
   const n = nameKey(name); const sup = supplierByName(name) || { name, days: 0 }; const days = +sup.days || 0; const t = today();
   const bills = grns().filter(g => !g.void && nameKey(g.supplier) === n).map(g => ({ date: g.date, doc: g.no, id: g.id, inv: g.invoiceNo || "", bill: +g.total || 0, open: +g.total || 0, due: addDays(g.date, days) })).sort((a, b) => a.date < b.date ? -1 : 1);
+  // An opening balance set on the supplier (imported when moving to the app) is a bill dated when it stood; a negative one is an advance with them.
+  const ob = +sup.opening || 0, obDate = sup.openingDate || "2000-01-01";
+  if (ob > 0) bills.unshift({ date: obDate, doc: "Opening balance", id: "ob:" + n, inv: "", bill: ob, open: ob, due: addDays(obDate, days) });
   const byId = Object.fromEntries(bills.map(b => [b.id, b]));
   const pays = spays().filter(p => nameKey(p.supplier) === n); const dns = preturns().filter(d => !d.void && nameKey(d.supplier) === n);
   const settle = (b, amt) => { const u = Math.min(b.open, Math.max(0, amt)); b.open = Math.round((b.open - u) * 100) / 100; return amt - u; };
   // A payment and its reversal cancel out, so neither settles anything.
-  const reversed = new Set(pays.filter(p => p.revOf).map(p => p.revOf)); let pool = 0;
+  const reversed = new Set(pays.filter(p => p.revOf).map(p => p.revOf)); let pool = ob < 0 ? -ob : 0;
   dns.slice().reverse().forEach(d => { let left = +d.total || 0; if (d.grnId && byId[d.grnId]) left = settle(byId[d.grnId], left); pool += left; });
   pays.slice().reverse().filter(p => !p.revOf && !reversed.has(p.id)).forEach(p => { let left = +p.amount || 0; (p.bills || []).forEach(id => { if (byId[id]) left = settle(byId[id], left); }); pool += left; });
   bills.forEach(b => { pool = settle(b, pool); });
   const entries = [...bills.map(b => ({ date: b.date, doc: b.doc, bill: b.bill, paid: 0, ref: b.id })),
-    ...dns.map(d => ({ date: d.date, doc: `Debit note ${d.no}`, bill: 0, paid: +d.total || 0, dn: d })),
+    ...dns.map(d => ({ date: d.date, doc: `Debit note ${d.no}`, bill: 0, paid: +d.total || 0, dn: d })), ...(ob < 0 ? [{ date: obDate, doc: "Opening advance", bill: 0, paid: -ob }] : []),
     ...pays.map(p => ({ date: p.date, doc: (p.mode ? `Paid · ${p.mode}${p.ref ? " " + p.ref : ""}` : "Paid") + (p.bills && p.bills.length ? ` · for ${p.bills.map(id => (byId[id] || {}).doc).filter(Boolean).join(", ")}` : ""), bill: 0, paid: +p.amount || 0, pay: p }))]
     .sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : a.bill ? -1 : 1);
   let run = 0; entries.forEach(e => { run += e.bill - e.paid; e.bal = Math.round(run * 100) / 100; });

@@ -1,4 +1,5 @@
 // Money: the Payments tab, payment confirmations, customers and the sales and profit reports.
+import * as ev from "./events.js";
 import * as M from "./model.js";
 import * as R from "./roles.js";
 import { asLines, layoutSwitch } from "./table.js";
@@ -76,6 +77,7 @@ function custSheet(key) {
   openSheet({ kind: "cust", key, redraw: () => custSheet(key) }, `<div class="sh-head">${plate(c.flat)}<h2 class="h">${esc(c.customer)}</h2><button class="x" data-close aria-label="Close">×</button></div>
   <div class="kpis" style="padding:0;margin-bottom:10px"><div class="kpi"><b>${rs(c.spend)}</b><span>${c.orders.length} orders</span></div><div class="kpi"><b style="color:${c.balance > 0 ? "var(--due)" : "var(--ok)"}">${rs(c.balance)}</b><span>balance</span></div>${c.credit ? `<div class="kpi"><b style="color:var(--ok)">${rs(c.credit)}</b><span>credit held</span></div>` : ""}</div>
   ${R.can("pay.record") ? `<div class="btnrow">${c.credit > 0 && c.balance > 0 ? `<button class="btn btn-ok" data-act="useCredit">Use credit on unpaid orders</button>` : ""}<button class="btn btn-ghost" data-act="takeAdvance">Take an advance</button>${c.credit > 0 && R.can("pay.reverse") ? `<button class="btn btn-ghost" data-act="refundCredit">Refund credit</button>` : ""}</div>` : ""}
+  ${c.notes ? `<p class="hint">${esc(c.notes)}</p>` : ""}
   ${M.creditEntries(c.key).length ? `<label class="f" style="margin-top:12px">Credit</label><div class="kv">${M.creditEntries(c.key).map(p => `<div><span>${esc(dLong(p.date))} · ${esc(p.note || (p.amount > 0 ? "Advance" : "Used"))}${p.mode ? ` <small class="mut">${esc(p.mode)}</small>` : ""}</span><b style="color:${p.amount > 0 ? "var(--ok)" : "var(--due)"}">${p.amount > 0 ? "+" : "−"}${rs(Math.abs(p.amount))}</b></div>`).join("")}</div>` : ""}
   ${phone ? `<label class="f" for="cuPhone">Phone</label><div class="two"><input class="in" id="cuPhone" value="${esc(c.phone)}" placeholder="10-digit mobile" inputmode="tel"><button class="btn btn-ghost" style="margin:0;height:48px" data-act="savePhone">Save phone</button></div>` : ""}
   ${c.balance > 0 && R.can("pay.record") ? `<button class="btn btn-ok" data-quickpay="${esc(c.key)}">Mark paid · ${rs(c.balance)}</button>` : ""}
@@ -100,7 +102,8 @@ A.refundCredit = async () => { const c = sheetCust(); if (!c || !guard("pay.reve
 A.customers = customersSheet;
 A.orderForCust = () => { const c = sheetCust(); compose(null, { customer: c.customer, flat: c.flat, phone: c.phone, date: today() }); };
 A.copyReminder = async () => toast(await copyText(reminderText(sheetCust())) ? "Reminder copied. Paste it in WhatsApp." : "Couldn’t copy here");
-A.savePhone = async () => { const c = sheetCust(); const p = $("#cuPhone").value.trim(); for (const o of c.orders) if (o.phone !== p) await saveOrder({ ...o, phone: p }); toast("Phone saved"); custSheet(c.key); };
+A.savePhone = async () => { const c = sheetCust(); const p = $("#cuPhone").value.trim(); for (const o of c.orders) if (o.phone !== p) await saveOrder({ ...o, phone: p });
+  const m = ev.get("custs", c.key); if (m && m.phone !== p) { const { _at, _by, ...r } = m; await ev.put("custs", { ...r, phone: p }); } toast("Phone saved"); custSheet(c.key); };
 
 /* ---------- reports ---------- */
 function reportsSheet() {

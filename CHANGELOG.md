@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.13.0 — 19 Oct 2026 · import & export for every data type
+- New templates and imports: Customers (phone, notes, advance held; customers can exist before their first order), Users & roles (role, Restaurant / ERP, location, email; admins and PINs stay in More → Users), Locations (kitchens and outlets), Payments (against order numbers, or advances), Purchase orders (draft or approved), GRNs (past purchases: add stock and become supplier bills) and Supplier payments (against chosen bills)
+- Suppliers import adds credit days, other names and an opening balance with its date, shown as the first bill in the ledger (negative = an advance)
+- New exports: Work orders, Stock-takes, Purchase returns, Day closes and Stock movements
+- Re-importing an export skips payments, GRNs, POs and supplier payments already in the app; export-only columns (spend, balance, state) are ignored on import
+- The Import & export screen lists masters first, then counts and transactions, then what the app records itself
+- A customer's page shows their notes; saving a phone updates their customer record too
+
 ## 2.12.0 — 19 Oct 2026
 - Backups: with cloud sync on, an admin's phone saves a full backup to the Drive folder every week, keeping the last four; admins are reminded when a week passes without one; restore from any of them in More → Backup
 - Customer advances and credit: take an advance, use credit on unpaid orders, refund credit; refunds on cancelled or overpaid orders

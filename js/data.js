@@ -4,7 +4,7 @@ import * as sync from "./sync.js";
 import * as M from "./model.js";
 import * as R from "./roles.js";
 import { asLines, layoutSwitch } from "./table.js";
-import { S, A, V, H, band, clean, saveOrder } from "./core.js";
+import { S, A, V, H, band, clean, saveOrder, addCredit } from "./core.js";
 import { putMove } from "./inventory.js";
 import { esc, uid, today, ICON } from "./util.js";
 import { ui, toast, openSheet, closeSheet } from "./ui.js";
@@ -163,25 +163,227 @@ const T = {
         out.put("add", `Order ${no} · ${o.customer} · ${items.length} item${items.length > 1 ? "s" : ""}${paid ? ` · paid ${paid}` : ""}`, async () => { await saveOrder(o);
           if (paid > 0) await ev.put("payments", { id: uid("p"), orderId: o.id, customerKey: M.ckey(o), amount: Math.round(paid * 100) / 100, mode: f.mode || "", date: f.date, note: "Imported", businessId: M.config().businessId }); }); });
       return out; } },
-  customers: { label: "Customers", icon: "people", desc: "Built from orders, so they’re export only; import orders to bring customers in.", exportOnly: true,
-    cols: ["Customer", "Flat", "Phone", "Orders", "Spend", "Received", "Balance", "Last order"].map(label => ({ label })), count: () => M.customers().length,
-    rows: () => M.customers().map(c => [c.customer, c.flat, c.phone, c.orders.length, c.spend, c.received, c.balance, c.last]) },
-  payments: { label: "Payments", icon: "pay", desc: "Every payment and reversal.", exportOnly: true,
-    cols: ["Date", "Order #", "Customer", "Amount", "Mode", "Note"].map(label => ({ label })), count: () => ev.all("payments").length,
-    rows: () => { const byId = Object.fromEntries(M.orders().map(o => [o.id, o])); return ev.all("payments").sort((a, b) => a.date < b.date ? -1 : 1).map(p => { const o = byId[p.orderId] || {}; return [p.date, o.no || "", o.customer || "", p.amount, p.mode, p.note || ""]; }); } },
   batches: { label: "Batches", icon: "batch", desc: "Every batch with pieces, spoiled, prep and cost.", exportOnly: true,
     cols: ["Batch #", "Date", "Location", "Item or prep", "Pieces or runs", "Spoiled", "Batch cost", "Made by", "Note", "Status"].map(label => ({ label })), count: () => M.batches().length,
     rows: () => { const ings = M.ingMap(); const out = []; M.batches().slice().reverse().forEach(b => { const st = b.void ? "Undone" : "";
       b.lines.forEach((l, ix) => out.push([b.no, b.date, M.locName(b.outletId || M.locations()[0].id), l.item, l.qty, l.spoiled, ix ? "" : Math.round(M.batchCost(b) * 100) / 100, ix ? "" : memberName(b.madeBy || b._by), ix ? "" : b.notes, st]));
       b.prep.forEach(p => out.push([b.no, b.date, M.locName(b.outletId || M.locations()[0].id), (ings[p.ingId] || {}).name || "?", p.runs + " run(s)", "", "", "", "", st])); }); return out; } },
-  grns: { label: "GRNs", icon: "inbox", desc: "Goods received, line by line, with tax.", exportOnly: true,
-    cols: ["GRN", "Date", "Supplier", "Invoice", "Received at", "Material", "Qty", "Unit", "Amount", "Tax %", "Cost to stock", "Status"].map(label => ({ label })), count: () => M.grns().length,
-    rows: () => { const ings = M.ingMap(); const out = []; M.grns().slice().reverse().forEach(g => g.lines.forEach(l => { const i = ings[l.ingId]; out.push([g.no, g.date, g.supplier, g.invoiceNo || "", M.locName(g.loc), i ? i.name : "?", l.qty, i ? i.unit : "", l.amount, l.taxPct || "", l.cost ?? l.amount, g.void ? "Undone" : ""]); })); return out; } },
   transfers: { label: "Transfers", icon: "truck", desc: "Sent and received quantities between locations.", exportOnly: true,
     cols: ["Transfer", "Date", "From", "To", "Item or material", "Sent", "Received", "Unit", "Status"].map(label => ({ label })), count: () => M.transfers().length,
     rows: () => { const ings = M.ingMap(); const out = []; M.transfers().slice().reverse().forEach(t => t.lines.forEach(l => { const i = l.ingId ? ings[l.ingId] : null;
       out.push([t.no, t.date, M.locName(t.from), M.locName(t.to), l.item || (i ? i.name : "?"), l.qty, M.xferReceived(t) ? (l.recv ?? l.qty) : "", l.item ? "pcs" : (i ? i.unit : ""), t.void ? "Undone" : M.xferReceived(t) ? (M.xferShort(t) ? "Received short" : "Received") : "In transit"]); })); return out; } }
 };
+/* ---------- more data types: people, places, money and purchasing ---------- */
+// Columns marked out are only in exports (worked out by the app); templates and imports leave them out.
+const ISO_D = /^\d{4}-\d{2}-\d{2}$/;
+const r2 = v => Math.round(v * 100) / 100;
+const usesOf = m => { const mm = Array.isArray(m.modes) ? m.modes : ["restaurant"]; return mm.length > 1 ? "Both" : mm[0] === "erp" ? "ERP" : "Restaurant"; };
+// Same rule as adding a person by hand: first letter, then letter pairs, never one already used.
+const prefixOf = (name, used) => { const base = (name.trim()[0] || "X").toUpperCase(); if (!used.has(base)) return base; for (const ch of name.toUpperCase().replace(/[^A-Z]/g, "").slice(1)) if (!used.has(base + ch)) return base + ch; for (const a of "ABCDEFGHIJKLMNOPQRSTUVWXYZ") for (const b of "ABCDEFGHIJKLMNOPQRSTUVWXYZ") if (!used.has(base + a + b)) return base + a + b; return base + "Z"; };
+const supKnown = n => M.supplierByName(n) || M.payables().find(p => M.nameKey(p.name) === M.nameKey(n));
+const big = i => BIG[i.unit] || [i.unit, 1];
+// A material named in a purchase file: matched (or created) like the BOM import, with a unit that must fit it.
+function lineMat(out, r, ings, made, ctx) {
+  const uh = r.unit ? unitIn(r.unit) : null; if (r.unit && !uh) { out.err(r, `Unit “${r.unit}” isn’t g, kg, ml, L or pcs`); return null; }
+  const m = askMaterial(out, r.material, uh ? uh[0] : "", ings, made, ctx, ["rm", "pm"]); if (m === undefined) return undefined; if (!m) { out.skip(`“${r.material}” skipped`); return null; }
+  const uu = uh || [m.unit, BIG[m.unit] ? BIG[m.unit][1] : 1]; if (uu[0] !== m.unit) { out.err(r, `${m.name} is measured in ${m.unit}; “${r.unit}” doesn’t fit`); return null; }
+  return { m, f: uu[1] };
+}
+const taxDefault = m => M.taxCfg().on ? (m.taxPct != null && m.taxPct !== "" ? +m.taxPct : +M.taxCfg().rate || 0) : 0;
+
+T.customers = { label: "Customers", icon: "people", desc: "Name, flat, phone, notes and advance held. Customers also come in with their orders.",
+  cols: [{ k: "customer", label: "Customer", req: true }, { k: "flat", label: "Flat" }, { k: "phone", label: "Phone" }, { k: "notes", label: "Notes" }, { k: "credit", label: "Advance held" }, ...["Orders", "Spend", "Received", "Balance", "Last order"].map(label => ({ label, out: true }))],
+  notes: ["Matched by Customer and Flat together. Existing customers get the phone and notes given; new ones can be added before their first order.", "Advance held: money of theirs you already hold (₹). If it is more than the app shows, the difference is added as an advance; it is never reduced here (use Refund credit on their page). What they owe comes in with the Orders import (its Paid column)."],
+  ex: ["Asha Mehta", "A-1201", "9876543210", "No nuts", 500],
+  count: () => M.customers().length,
+  rows: () => M.customers().sort((a, b) => a.customer.localeCompare(b.customer)).map(c => [c.customer, c.flat, c.phone, c.notes || "", c.credit || "", c.orders.length, c.spend, c.received, c.balance, c.last || ""]),
+  plan(recs) { const out = newPlan(); const cs = M.customers(); const seen = new Set();
+    recs.forEach(r => { const name = r.customer.trim(); if (!name) return out.err(r, "Customer is blank"); const flat = r.flat.trim().toUpperCase(); const key = M.ckey({ customer: name, flat }); const who = name + (flat ? " · " + flat : "");
+      if (seen.has(key)) return out.err(r, `${who} appears twice`); seen.add(key);
+      const credit = numOr(r.credit); if (Number.isNaN(credit) || (credit != null && credit < 0)) return out.err(r, "Advance held must be 0 or more");
+      const c = cs.find(x => x.key === key); const ex = ev.get("custs", key);
+      const rec = { ...(ex ? clean(ex) : { id: key }), customer: name, flat, phone: r.phone.trim() || (ex ? ex.phone || "" : c ? c.phone || "" : ""), notes: r.notes.trim() || (ex ? ex.notes || "" : "") };
+      if (ex || !c || rec.phone !== (c.phone || "") || rec.notes) out.upsert(ex, rec, who, () => ev.put("custs", rec)); else out.skip(`${who} unchanged`);
+      const have = c ? c.credit : 0;
+      if (credit != null && credit > have + 0.005) out.put("update", `${who}: advance +${r2(credit - have)}`, () => addCredit({ key, customer: name, flat }, credit - have, "Opening", "Imported advance"));
+      else if (credit != null && credit < have - 0.005) out.skip(`${who} holds ${have} already; import never reduces an advance`); });
+    return out; } };
+
+T.users = { label: "Users & roles", icon: "people", desc: "People, their role, Restaurant / ERP, location and Google email.",
+  cols: [{ k: "name", label: "Name", req: true }, { k: "role", label: "Role", req: true }, { k: "uses", label: "Uses" }, { k: "location", label: "Location" }, { k: "email", label: "Email" }, { label: "Number prefix", out: true }, { label: "PIN set", out: true }],
+  notes: [`Role: ${R.ROLE_KEYS.filter(k => k !== "admin").map(k => R.ROLES[k].label).join(", ")}. Admins are added in More → Users, not by import, and an admin’s role can’t be changed here.`, "Matched by Name, or by Email. Uses: Restaurant, ERP or Both (blank = Restaurant for new people). Location blank = the first. PINs are never imported or exported; each person sets their own."],
+  ex: ["Ravi", "Kitchen", "ERP", "Central kitchen", "ravi@gmail.com"],
+  count: () => R.members().length,
+  rows: () => R.members().map(m => [m.name, (R.ROLES[m.role] || {}).label || m.role, usesOf(m), M.locName(m.loc || M.locations()[0].id), m.email || "", m.prefix || "", m.pin ? "Yes" : "No"]),
+  plan(recs) { const out = newPlan(); const ms = R.members(); const seen = new Set(); const used = new Set(ms.map(m => m.prefix).filter(Boolean));
+    const roles = R.ROLE_KEYS.filter(k => k !== "admin").map(k => R.ROLES[k].label).join(", ");
+    recs.forEach(r => { const name = r.name.trim(); if (!name) return out.err(r, "Name is blank"); if (seen.has(name.toLowerCase())) return out.err(r, `${name} appears twice`); seen.add(name.toLowerCase());
+      const rl = r.role.trim().toLowerCase(); const role = R.ROLE_KEYS.find(k => k === rl || R.ROLES[k].label.toLowerCase() === rl); if (!role) return out.err(r, `Role “${r.role}” isn’t one of ${roles}`);
+      const email = r.email.trim().toLowerCase(); if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return out.err(r, `Email “${r.email}” doesn’t look right`);
+      const ex = ms.find(m => m.name.trim().toLowerCase() === name.toLowerCase()) || (email ? ms.find(m => (m.email || "").toLowerCase() === email) : null);
+      if (role === "admin" && !(ex && ex.role === "admin")) return out.err(r, `${name}: admins are added in More → Users, not by import`);
+      if (ex && ex.role === "admin" && role !== "admin") return out.err(r, `${ex.name} is an admin; change that in More → Users`);
+      const u = r.uses.trim().toLowerCase(); const modes = !u ? null : u.startsWith("both") ? ["restaurant", "erp"] : u.startsWith("erp") ? ["erp"] : u.startsWith("rest") ? ["restaurant"] : undefined;
+      if (modes === undefined) return out.err(r, "Uses must be Restaurant, ERP or Both");
+      const l = r.location.trim() ? locByName(r.location) : null; if (r.location.trim() && !l) return out.err(r, `Location “${r.location}” doesn’t exist`);
+      let prefix = ex && ex.prefix; if (!prefix) { prefix = prefixOf(name, used); used.add(prefix); }
+      const rec = { ...(ex ? clean(ex) : { id: uid("u"), pin: "", modes: ["restaurant"] }), name, role, email: email || (ex ? ex.email || "" : ""), prefix, ...(modes ? { modes } : {}), ...(l ? { loc: l.id } : {}) };
+      out.upsert(ex, rec, `${name} · ${R.ROLES[role].label}`, () => ev.put("members", rec)); });
+    return out; },
+  // ERP starts counting finished goods from the day it is first given to someone (as when adding a person by hand).
+  after: async () => { if (M.erpOn() && !M.config().erpStart) await ev.put("config", clean({ ...M.config(), erpStart: today(), id: "app" })); } };
+
+T.locations = { label: "Locations", icon: "store", desc: "Kitchens and outlets.",
+  cols: [{ k: "name", label: "Name", req: true }, { k: "kind", label: "Kind" }],
+  notes: ["Matched by Name: a new name adds a location; Kind changes an existing one. Kind: Kitchen or Outlet (blank = Outlet for a new one). Import never removes a location; rename or remove them in Business settings."],
+  ex: ["Baner shop", "Outlet"],
+  count: () => M.locations().length,
+  rows: () => M.locations().map(l => [l.name, l.kind === "kitchen" ? "Kitchen" : "Outlet"]),
+  plan(recs) { const out = newPlan(); const locs = M.locations().map(l => ({ ...l })); const seen = new Set(); let done = false;
+    const save = async () => { if (done) return; done = true; await ev.put("config", clean({ ...M.config(), id: "app", locations: locs })); };
+    recs.forEach(r => { const name = r.name.trim(); if (!name) return out.err(r, "Name is blank"); if (seen.has(name.toLowerCase())) return out.err(r, `${name} appears twice`); seen.add(name.toLowerCase());
+      const k = r.kind.trim().toLowerCase(); const kind = !k ? null : k.startsWith("kitchen") ? "kitchen" : /^(outlet|shop|store)/.test(k) ? "outlet" : undefined; if (kind === undefined) return out.err(r, "Kind must be Kitchen or Outlet");
+      const ex = locs.find(l => l.name.trim().toLowerCase() === name.toLowerCase());
+      if (ex) { if (kind && kind !== (ex.kind || "outlet")) { ex.kind = kind; out.put("update", `${ex.name} → ${kind}`, save); } else out.skip(`${ex.name} unchanged`); }
+      else { locs.push({ id: uid("l"), name, kind: kind || "outlet" }); out.put("add", `${name} (${kind || "outlet"})`, save); } });
+    if (out.ops.length && !locs.some(l => l.kind === "kitchen")) { out.ops = []; out.adds = out.updates = 0; out.errors.push({ line: "", msg: "At least one location has to stay a kitchen" }); }
+    return out; } };
+
+{ // suppliers: credit days, other names and an opening balance as well
+  const t = T.suppliers;
+  t.desc = "Supplier names with phone, GSTIN, credit days and the balance owed when you start.";
+  t.cols = [...t.cols, { k: "days", label: "Credit days" }, { k: "aka", label: "Other names" }, { k: "opening", label: "Opening balance" }, { k: "asOn", label: "Balance as on" }];
+  t.notes = ["Matched by Name (or another name): existing suppliers are updated.", "Opening balance: what you owed them when you started with the app (negative = an advance with them), as on the date given (YYYY-MM-DD, blank = today). It shows as the first bill in their ledger. Other names: comma separated, in quotes."];
+  t.ex = ["Sharma Traders", "9876543210", "27ABCDE1234F1Z5", 15, "Sharma, ST", 12500, "2026-04-01"];
+  t.rows = () => M.suppliers().map(s => [s.name, s.phone || "", s.gstin || "", s.days || "", (s.aka || []).join(", "), s.opening || "", s.opening ? s.openingDate || "" : ""]);
+  t.plan = (recs, dec) => { const out = newPlan(dec); const sup = M.suppliers(); const seen = new Set();
+    recs.forEach(r => { let name = r.name.trim(); if (!name) return out.err(r, "Name is blank"); if (seen.has(name.toLowerCase())) return out.err(r, `${name} appears twice`); seen.add(name.toLowerCase());
+      let ex = byNameOrAka(sup, name); if (!ex) { const same = askSame(out, "supplier", name, sup); if (same === undefined) return; if (same !== "new") ex = same; } if (ex) name = ex.name;
+      const days = numOr(r.days), ob = numOr(r.opening); if (Number.isNaN(days) || (days != null && days < 0)) return out.err(r, "Credit days must be 0 or more"); if (Number.isNaN(ob)) return out.err(r, "Opening balance must be a number");
+      if (r.asOn && !ISO_D.test(r.asOn)) return out.err(r, "Balance as on must be YYYY-MM-DD");
+      const aka = r.aka ? [...new Set([...(ex ? ex.aka || [] : []), ...r.aka.split(",").map(x => x.trim()).filter(x => x && x.toLowerCase() !== name.toLowerCase())])] : (ex ? ex.aka : undefined);
+      const rec = { ...(ex ? clean(ex) : { id: uid("s") }), name, phone: r.phone || (ex ? ex.phone || "" : ""), gstin: (r.gstin || (ex ? ex.gstin || "" : "")).toUpperCase(), ...(days != null ? { days: Math.round(days) } : {}), ...(aka && aka.length ? { aka } : {}),
+        ...(ob != null ? { opening: r2(ob), openingDate: r.asOn || (ex && ex.openingDate) || today() } : {}) };
+      out.upsert(ex, rec, name, () => ev.put("suppliers", rec)); });
+    return out; };
+}
+
+T.payments = { label: "Payments", icon: "pay", desc: "Every payment, reversal and advance. Import payments against order numbers, or advances for a customer.",
+  cols: [{ k: "date", label: "Date", req: true }, { k: "no", label: "Order #" }, { k: "customer", label: "Customer" }, { k: "flat", label: "Flat" }, { k: "amount", label: "Amount", req: true }, { k: "mode", label: "Mode" }, { k: "note", label: "Note" }],
+  notes: ["Date as YYYY-MM-DD. With an Order #, the payment goes on that order and can’t be more than the order still owes. Without one, it is an advance held for the Customer and Flat given.", "Mode: UPI, Cash, Card, Bank… Reversals are made in the app, not imported. A row matching a payment already in the app (same order or customer, date, amount and mode) is skipped, so an export can be imported again safely."],
+  ex: ["2026-10-18", "1001", "", "", 252, "UPI", ""],
+  count: () => ev.all("payments").length,
+  rows: () => { const byId = Object.fromEntries(M.orders().map(o => [o.id, o])); return ev.all("payments").sort((a, b) => a.date < b.date ? -1 : 1).map(p => { const o = byId[p.orderId] || {}; return [p.date, o.no || "", o.customer || p.customer || "", o.flat || p.flat || "", p.amount, p.mode, p.note || ""]; }); },
+  plan(recs) { const out = newPlan(); const byNo = new Map(M.orders().map(o => [String(o.no), o])); const pays = ev.all("payments"); const left = {};
+    const same = (p, d, a, m) => p.date === d && Math.abs((+p.amount || 0) - a) < 0.005 && (p.mode || "") === m;
+    recs.forEach(r => { if (!ISO_D.test(r.date)) return out.err(r, "Date must be YYYY-MM-DD"); const a = numOr(r.amount); if (a == null || Number.isNaN(a)) return out.err(r, "Amount must be a number"); const mode = r.mode.trim();
+      if (r.no.trim()) { const o = byNo.get(r.no.trim()); if (!o) return out.err(r, `Order ${r.no} isn’t in the app`);
+        if (pays.some(p => p.orderId === o.id && same(p, r.date, a, mode))) return out.skip(`Order ${o.no}: ${a} on ${r.date} already recorded`);
+        if (a <= 0) return out.err(r, "Amount must be more than 0; reversals are made in the app"); if (o.status === "cancelled") return out.err(r, `Order ${o.no} is cancelled`);
+        const owe = left[o.id] ?? M.bal(o); if (a > owe + 0.005) return out.err(r, `Order ${o.no} owes ${r2(owe)}; ${a} is more`); left[o.id] = owe - a;
+        out.put("add", `Order ${o.no} · ${o.customer}: ${a}${mode ? " " + mode : ""}`, () => ev.put("payments", { id: uid("p"), orderId: o.id, customerKey: M.ckey(o), amount: r2(a), mode, date: r.date, note: r.note || "Imported", businessId: M.config().businessId })); }
+      else { const name = r.customer.trim(); if (!name) return out.err(r, "Give an Order #, or a Customer for an advance"); const flat = r.flat.trim().toUpperCase(); const key = M.ckey({ customer: name, flat });
+        if (pays.some(p => !p.orderId && p.customerKey === key && same(p, r.date, a, mode))) return out.skip(`${name}: ${a} on ${r.date} already recorded`);
+        if (a <= 0) return out.err(r, "Amount must be more than 0; refunds are made in the app");
+        out.put("add", `Advance · ${name}${flat ? " · " + flat : ""}: ${a}`, () => ev.put("payments", { id: uid("p"), orderId: "", customerKey: key, customer: name, flat, amount: r2(a), mode, date: r.date, note: r.note || "Imported advance", businessId: M.config().businessId })); } });
+    return out; } };
+
+T.grns = { label: "GRNs", icon: "inbox", desc: "Goods received, line by line, with tax. Import past purchases: they add stock and become supplier bills.",
+  cols: [{ k: "no", label: "GRN" }, { k: "date", label: "Date", req: true }, { k: "supplier", label: "Supplier", req: true }, { k: "invoice", label: "Invoice" }, { k: "loc", label: "Received at" }, { k: "material", label: "Material", req: true }, { k: "qty", label: "Qty", req: true }, { k: "unit", label: "Unit" }, { k: "amount", label: "Amount", req: true }, { k: "tax", label: "Tax %" }, { label: "Cost to stock", out: true }, { k: "status", label: "Status" }],
+  notes: ["One row per material. Rows with the same GRN (or, without one, the same Supplier, Invoice and Date) make one GRN. Date as YYYY-MM-DD; Received at blank = the first location.", "Qty in the Unit given (g, kg, ml, L or pcs; blank = kg / L / pcs). Amount = before tax. Tax % blank = the material’s rate. A GRN whose number, or supplier and invoice, is already in the app is skipped; undone ones are skipped too."],
+  ex: ["", "2026-10-15", "Sharma Traders", "INV-778", "Central kitchen", "Maida", 50, "kg", 2250, 5, "", ""],
+  count: () => M.grns().length,
+  rows: () => { const ings = M.ingMap(); const out = []; M.grns().slice().reverse().forEach(g => g.lines.forEach(l => { const i = ings[l.ingId]; const [u, f] = i ? big(i) : ["", 1]; out.push([g.no, g.date, g.supplier, g.invoiceNo || "", M.locName(g.loc), i ? i.name : "?", r4(l.qty / f), u, l.amount, l.taxPct || "", l.cost ?? l.amount, g.void ? "Undone" : ""]); })); return out; },
+  plan(recs, dec) { const out = newPlan(dec); const ings = M.ingredients(); const made = {}; const groups = new Map(); const have = M.grns();
+    recs.forEach(r => { if (/undone/i.test(r.status)) return out.skip(`${r.no || "A GRN"} line marked undone`); const key = r.no.trim() || [M.nameKey(r.supplier), r.invoice.trim().toLowerCase(), r.date].join("|");
+      const g = groups.get(key) || { first: r, rows: [] }; g.rows.push(r); groups.set(key, g); });
+    const ready = [];
+    groups.forEach(g => { const f0 = g.first; const label = f0.no || `${f0.supplier} ${f0.invoice || f0.date}`;
+      if (f0.no && have.some(x => x.no === f0.no)) return out.skip(`${f0.no} is already in the app`);
+      if (f0.invoice && have.some(x => !x.void && M.nameKey(x.supplier) === M.nameKey(f0.supplier) && (x.invoiceNo || "").toLowerCase() === f0.invoice.trim().toLowerCase())) return out.skip(`${f0.supplier} invoice ${f0.invoice} is already in the app`);
+      if (!ISO_D.test(f0.date)) return out.err(f0, `${label}: date must be YYYY-MM-DD`); if (!f0.supplier.trim()) return out.err(f0, `${label}: Supplier is blank`);
+      const l = locByName(f0.loc); if (!l) return out.err(f0, `Location “${f0.loc}” doesn’t exist`);
+      const lines = []; for (const r of g.rows) { const x = lineMat(out, r, ings, made, `in ${label}`); if (x === undefined) return; if (!x) continue;
+        const q = numOr(r.qty), a = numOr(r.amount), t = numOr(r.tax); if (q == null || Number.isNaN(q) || q <= 0) return out.err(r, `${label}: Qty must be more than 0`); if (a == null || Number.isNaN(a) || a < 0 || Number.isNaN(t)) return out.err(r, `${label}: Amount and Tax % must be numbers`);
+        lines.push({ ing: x.m, qty: q * x.f, amount: r2(a), taxPct: t ?? taxDefault(x.m) }); }
+      if (lines.length) ready.push({ f0, l, lines, label }); });
+    if (out.pend.length) return out;   // every material name settled first
+    ready.forEach(({ f0, l, lines, label }) => { const sup = byNameOrAka(M.suppliers(), f0.supplier); const name = sup ? sup.name : f0.supplier.trim();
+      const amount = r2(lines.reduce((s, x) => s + x.amount, 0)), tax = r2(lines.reduce((s, x) => s + x.amount * x.taxPct / 100, 0));
+      out.put("add", `${label} · ${name} · ${lines.length} line${lines.length > 1 ? "s" : ""} · ${r2(amount + tax)}`, async () => {
+        if (!M.supplierByName(name)) await ev.put("suppliers", { id: uid("s"), name });
+        const id = uid("g"); const no = f0.no.trim() || M.nextDocNo("grns", R.numPrefix(), "GRN"); const cur = M.ingMap(); const costOf = x => r2(x.amount * (1 + ((cur[x.ing.id] || x.ing).taxInCost ? x.taxPct / 100 : 0)));
+        for (const x of lines) await putMove({ ingId: x.ing.id, type: "purchase", qty: x.qty, amount: costOf(x), date: f0.date, note: `${no} · ${name}`, ref: id, outletId: l.id });
+        await ev.put("grns", { id, no, date: f0.date, supplier: name, invoiceNo: f0.invoice.trim(), loc: l.id, notes: "Imported", lines: lines.map(x => ({ ingId: x.ing.id, qty: x.qty, amount: x.amount, taxPct: x.taxPct, cost: costOf(x) })), amount, tax, total: r2(amount + tax), by: (R.me() || {}).id || "" }); }); });
+    return out; } };
+
+T.spays = { label: "Supplier payments", icon: "pay", desc: "Payments made to suppliers, with the bills they settle.",
+  cols: [{ k: "date", label: "Date", req: true }, { k: "supplier", label: "Supplier", req: true }, { k: "amount", label: "Amount", req: true }, { k: "mode", label: "Mode" }, { k: "ref", label: "Reference" }, { k: "bills", label: "Against bills" }],
+  notes: ["Date as YYYY-MM-DD. Mode: Bank, UPI, Cash or Cheque. Against bills: GRN numbers or supplier invoice numbers, separated by ; (blank = the oldest bills first).", "Reversals are made in the app. A row matching a payment already in the app (supplier, date, amount, reference) is skipped."],
+  ex: ["2026-10-18", "Sharma Traders", 12500, "Bank", "UTR 1234", "GRN-P4; INV-778"],
+  count: () => M.spays().length,
+  rows: () => { const g = Object.fromEntries(M.grns().map(x => [x.id, x.no])); return M.spays().slice().reverse().map(p => [p.date, p.supplier, p.amount, p.mode || "", p.ref || "", (p.bills || []).map(id => g[id] || (id.startsWith("ob:") ? "Opening balance" : "")).filter(Boolean).join("; ")]); },
+  plan(recs) { const out = newPlan(); const pays = M.spays();
+    recs.forEach(r => { if (!ISO_D.test(r.date)) return out.err(r, "Date must be YYYY-MM-DD"); const s = supKnown(r.supplier); if (!s) return out.err(r, `“${r.supplier}” isn’t a supplier yet; import Suppliers first`);
+      const name = s.name; const a = numOr(r.amount); if (a == null || Number.isNaN(a)) return out.err(r, "Amount must be a number"); const ref = r.ref.trim();
+      if (pays.some(p => M.nameKey(p.supplier) === M.nameKey(name) && p.date === r.date && Math.abs(p.amount - a) < 0.005 && (p.ref || "") === ref)) return out.skip(`${name}: ${a} on ${r.date} already recorded`);
+      if (a <= 0) return out.err(r, "Amount must be more than 0; reversals are made in the app");
+      const mine = M.grns().filter(g => !g.void && M.nameKey(g.supplier) === M.nameKey(name)); const ids = []; const wanted = r.bills.split(/[;,]/).map(x => x.trim()).filter(Boolean);
+      for (const w of wanted) { const g = mine.find(x => x.no.toLowerCase() === w.toLowerCase() || (x.invoiceNo || "").toLowerCase() === w.toLowerCase()); if (!g && !/^opening/i.test(w)) return out.err(r, `${name} has no bill “${w}”`); ids.push(g ? g.id : "ob:" + M.nameKey(name)); }
+      out.put("add", `${name}: ${a}${r.mode ? " " + r.mode : ""}${ids.length ? " · for " + wanted.join(", ") : ""}`, () => ev.put("spays", { id: uid("sp"), supplier: name, date: r.date, amount: r2(a), mode: r.mode.trim() || "Bank", ref, ...(ids.length ? { bills: ids } : {}), by: (R.me() || {}).id || "" })); });
+    return out; } };
+
+T.porders = { label: "Purchase orders", icon: "orders", desc: "POs line by line. Import open POs as drafts or approved.",
+  cols: [{ k: "no", label: "PO #" }, { k: "date", label: "Date", req: true }, { k: "supplier", label: "Supplier", req: true }, { k: "expected", label: "Expected" }, { k: "loc", label: "Deliver to" }, { k: "material", label: "Material", req: true }, { k: "qty", label: "Qty", req: true }, { k: "unit", label: "Unit" }, { k: "rate", label: "Rate" }, { k: "tax", label: "Tax %" }, { k: "status", label: "Status" }, { label: "State", out: true }],
+  notes: ["One row per material; rows with the same PO # (or, without one, the same Supplier and Date) make one PO. Dates as YYYY-MM-DD. Deliver to blank = the first location.", "Rate is per Unit given (kg, L, pcs…; blank = the supplier’s last price). Status: Draft or Approved (blank = Draft). A PO number already in the app is skipped; closed, cancelled or received POs aren’t imported."],
+  ex: ["", "2026-10-18", "Sharma Traders", "2026-10-20", "Central kitchen", "Maida", 100, "kg", 44, 5, "Approved", ""],
+  count: () => M.porders().length,
+  rows: () => { const ings = M.ingMap(); const out = []; M.porders().slice().reverse().forEach(p => p.lines.forEach(l => { const i = ings[l.ingId]; const [u, f] = i ? big(i) : ["", 1];
+    out.push([p.no, p.date, p.supplier, p.expected || "", M.locName(p.loc || M.locations()[0].id), i ? i.name : "?", r4(l.qty / f), u, r4((+l.rate || 0) * f), l.taxPct || "", p.status === "approved" ? "Approved" : p.status === "draft" ? "Draft" : (M.PO_LABEL[p.status] || p.status), M.PO_LABEL[M.poState(p)]]); })); return out; },
+  plan(recs, dec) { const out = newPlan(dec); const ings = M.ingredients(); const made = {}; const groups = new Map(); const have = new Set(M.porders().map(p => p.no)); const ready = [];
+    recs.forEach(r => { const key = r.no.trim() || M.nameKey(r.supplier) + "|" + r.date; const g = groups.get(key) || { first: r, rows: [] }; g.rows.push(r); groups.set(key, g); });
+    groups.forEach(g => { const f0 = g.first; const label = f0.no || `${f0.supplier} ${f0.date}`; if (f0.no && have.has(f0.no.trim())) return out.skip(`${f0.no} is already in the app`);
+      const st = f0.status.trim().toLowerCase(); const status = !st || st.startsWith("draft") || st.startsWith("waiting") ? "draft" : st.startsWith("approv") ? "approved" : null; if (!status) return out.skip(`${label}: only draft or approved POs are imported`);
+      if (!ISO_D.test(f0.date) || (f0.expected && !ISO_D.test(f0.expected))) return out.err(f0, `${label}: dates must be YYYY-MM-DD`); if (!f0.supplier.trim()) return out.err(f0, `${label}: Supplier is blank`);
+      const l = locByName(f0.loc); if (!l) return out.err(f0, `Location “${f0.loc}” doesn’t exist`); const sup = (supKnown(f0.supplier) || {}).name || f0.supplier.trim();
+      const lines = []; for (const r of g.rows) { const x = lineMat(out, r, ings, made, `in ${label}`); if (x === undefined) return; if (!x) continue;
+        const q = numOr(r.qty), rate = numOr(r.rate), t = numOr(r.tax); if (q == null || Number.isNaN(q) || q <= 0) return out.err(r, `${label}: Qty must be more than 0`); if (Number.isNaN(rate) || Number.isNaN(t)) return out.err(r, `${label}: Rate and Tax % must be numbers`);
+        const per = rate != null ? rate / x.f : (M.lastRate(sup, x.m.id) || M.lastPrice(x.m)); const d = lines.find(y => y.ingId === x.m.id);
+        if (d) { d.rate = (d.rate * d.qty + per * q * x.f) / (d.qty + q * x.f); d.qty += q * x.f; } else lines.push({ ingId: x.m.id, qty: q * x.f, rate: r4(per), taxPct: t ?? taxDefault(x.m) }); }
+      if (lines.length) ready.push({ f0, l, lines, label, status, sup }); });
+    if (out.pend.length) return out;
+    ready.forEach(({ f0, l, lines, label, status, sup }) => out.put("add", `${label} · ${sup} · ${lines.length} line${lines.length > 1 ? "s" : ""} · ${status}`, async () => {
+      if (!M.supplierByName(sup)) await ev.put("suppliers", { id: uid("s"), name: sup });
+      const me = (R.me() || {}).id || ""; await ev.put("porders", { id: uid("po"), no: f0.no.trim() || M.nextDocNo("porders", R.numPrefix(), "PO"), date: f0.date, supplier: sup, loc: l.id, expected: f0.expected || f0.date, lines, status, notes: "Imported", by: me, ...(status === "approved" ? { approvedBy: me, approvedAt: new Date().toISOString() } : {}) }); }));
+    return out; } };
+
+// Records made by the app's own steps (work orders, closes, counts, returns, every stock movement): exported, not imported.
+const memName = id => (ev.get("members", id) || {}).name || "";
+T.wos = { label: "Work orders", icon: "oven", desc: "Work orders with what they were to make and their status.", exportOnly: true,
+  cols: ["WO", "Date", "Location", "Status", "Item or semi-finished", "Pieces or runs", "Notes"].map(label => ({ label })), count: () => ev.all("wos").length,
+  rows: () => { const ings = M.ingMap(); const out = []; ev.all("wos").sort((a, b) => a.date < b.date ? -1 : 1).forEach(w => { (w.lines || []).filter(l => l.qty > 0).forEach(l => out.push([w.no, w.date, M.locName(w.loc || M.locations()[0].id), w.status, l.item, l.qty, w.notes || ""]));
+    (w.prep || []).filter(p => p.runs > 0).forEach(p => out.push([w.no, w.date, M.locName(w.loc || M.locations()[0].id), w.status, (ings[p.ingId] || {}).name || "?", p.runs + " run(s)", w.notes || ""])); }); return out; } };
+T.closes = { label: "Day closes", icon: "pay", desc: "Each person’s day close: expected, counted and the difference by mode.", exportOnly: true,
+  cols: ["Date", "Person", "Mode", "Expected", "Counted", "Difference", "Opening cash", "Paid out", "Note"].map(label => ({ label })), count: () => ev.all("closes").length,
+  rows: () => { const out = []; ev.all("closes").sort((a, b) => a.date < b.date ? -1 : 1).forEach(c => Object.keys(c.expected || {}).forEach(m => { if (!(c.expected[m] || (c.counted || {})[m] != null)) return;
+    out.push([c.date, memName(c.who), m, c.expected[m], (c.counted || {})[m] ?? "", (c.diff || {})[m] ?? "", m === "Cash" ? c.opening || 0 : "", m === "Cash" ? c.paidOut || 0 : "", c.note || ""]); })); return out; } };
+T.stocktakes = { label: "Stock-takes", icon: "stock", desc: "Every stock-take line: app quantity, counted, difference and reason.", exportOnly: true,
+  cols: ["Stock-take", "Date", "Location", "Material", "In the app", "Counted", "Difference", "Unit", "Reason", "Value"].map(label => ({ label })), count: () => ev.all("stocktakes").length,
+  rows: () => { const ings = M.ingMap(); const out = []; ev.all("stocktakes").sort((a, b) => a.date < b.date ? -1 : 1).forEach(t => t.lines.forEach(l => { const i = ings[l.ingId]; const [u, f] = i ? big(i) : ["", 1];
+    out.push([t.no, t.date, M.locName(t.loc), i ? i.name : "?", r4(l.system / f), r4(l.counted / f), r4(l.diff / f), u, l.reason || "", l.value]); })); return out; } };
+T.preturns = { label: "Purchase returns", icon: "inbox", desc: "Debit notes line by line, with the GRN, reason and tax.", exportOnly: true,
+  cols: ["Debit note", "Date", "Supplier", "Against GRN", "Material", "Qty", "Unit", "Amount", "Tax %", "Reason", "Status"].map(label => ({ label })), count: () => M.preturns().length,
+  rows: () => { const ings = M.ingMap(); const out = []; M.preturns().slice().reverse().forEach(d => d.lines.forEach(l => { const i = ings[l.ingId]; const [u, f] = i ? big(i) : ["", 1];
+    out.push([d.no, d.date, d.supplier, d.grnNo || "", i ? i.name : "?", r4(l.qty / f), u, l.amount, l.taxPct || "", d.reason || "", d.void ? "Undone" : ""]); })); return out; } };
+T.moves = { label: "Stock movements", icon: "stock", desc: "Every change to material stock: purchases, use, counts, wastage, transfers.", exportOnly: true,
+  cols: ["Date", "Material", "Type", "Qty", "Unit", "Location", "Amount", "Note"].map(label => ({ label })), count: () => ev.all("moves").length,
+  rows: () => { const ings = M.ingMap(); return ev.all("moves").sort((a, b) => (a.date + (a._at || "")) < (b.date + (b._at || "")) ? -1 : 1).map(m => { const i = ings[m.ingId]; const [u, f] = i ? big(i) : ["", 1];
+    return [m.date, i ? i.name : "?", m.type, r4((+m.qty || 0) / f), u, M.locName(m.outletId || M.locations()[0].id), m.amount ?? "", m.note || ""]; }); } };
+
+// Screen order: masters first, then opening balances and transactions, then what the app records by itself.
+{ const order = ["menu", "materials", "bom", "customers", "suppliers", "users", "locations", "stock", "fg", "orders", "payments", "porders", "grns", "spays", "batches", "transfers", "wos", "stocktakes", "preturns", "closes", "moves"];
+  const all = { ...T }; Object.keys(T).forEach(k => delete T[k]); [...order, ...Object.keys(all).filter(k => !order.includes(k))].forEach(k => { if (all[k]) T[k] = all[k]; }); }
+
 // dec: the answers given on the check screen so far, by question key. A question without an answer holds its rows back (out.pend).
 function newPlan(dec = {}) {
   const out = { adds: 0, updates: 0, skips: [], errors: [], ops: [], pend: [], seenQ: new Set(), aka: new Set() };
@@ -271,6 +473,7 @@ A.applyImport = async el => {
   const st = ui.sheet; if (!st || st.kind !== "imp" || st.out.pend.length) return; const t = T[st.k]; if (!(t.finish ? R.can("stock.buy") : canImport())) return;
   el.disabled = true; el.textContent = "Saving…";
   let n = 0; for (const op of st.out.ops) { await op.run(); n++; }
+  if (t.after) await t.after(st.out);
   sync.soon(); closeSheet(); if (t.finish) { t.finish(st.out, st); return; } toast(`${t.label}: ${n} change${n === 1 ? "" : "s"} imported`);
 };
 
@@ -352,7 +555,7 @@ const invMeta = () => ({ supplier: (document.getElementById("ivSup") || {}).valu
 H.click.push(async T0 => {
   const ex = T0.closest("[data-exp]"); if (ex) { if (!canExport()) return true; const t = T[ex.dataset.exp]; download(fileName(ex.dataset.exp, "export"), [t.cols.map(c => c.label), ...t.rows()]); toast(`${t.label} exported`); return true; }
   const tp = T0.closest("[data-tpl]"); if (tp) { const t = T[tp.dataset.tpl];
-    download(fileName(tp.dataset.tpl, "template"), [[`# Batchwala template: ${t.label}. Lines starting with # are ignored. Fill one row per record under the header line.`], ...t.notes.map(n => ["# " + n]), ["# Example: " + t.ex.join(" | ")], t.cols.map(c => c.label)]);
+    download(fileName(tp.dataset.tpl, "template"), [[`# Batchwala template: ${t.label}. Lines starting with # are ignored. Fill one row per record under the header line.`], ...t.notes.map(n => ["# " + n]), ["# Example: " + t.ex.join(" | ")], t.cols.filter(c => !c.out).map(c => c.label)]);
     toast(`${t.label} template downloaded`); return true; }
   if (T0.closest("[data-invkey]")) { const k = ((document.getElementById("ivKey") || {}).value || "").trim(); if (!/^sk-ant-/.test(k)) { toast("That doesn’t look like a Claude API key (it starts with sk-ant-)"); return true; }
     await setKey(k); toast("Key saved on this device"); ui.sheet.redraw(); return true; }
@@ -388,7 +591,7 @@ H.change.push(async T0 => {
     try { const { recs, error } = invoiceLines(await readFile(f)); if (error) { toast(error); return true; } if (!recs.length) { toast("No item lines found under the header"); return true; } startImport("invoice", recs, f.name, meta); }
     catch (e) { toast(e.message || "Couldn’t read that file"); } return true; }
   if (!T0.dataset || T0.dataset.imp == null) return false; const k = T0.dataset.imp; const f = T0.files && T0.files[0]; T0.value = ""; if (!f || !canImport()) return true;
-  try { const raw = await readFile(f); const { recs, error } = toRecords(raw, T[k].cols); if (error) { toast(error); return true; }
+  try { const raw = await readFile(f); const { recs, error } = toRecords(raw, T[k].cols.filter(c => !c.out)); if (error) { toast(error); return true; }
     if (!recs.length) { toast("No rows under the header line"); return true; } startImport(k, recs, f.name); }
   catch (e) { toast(e.message || "Couldn’t read that file"); }
   return true;
