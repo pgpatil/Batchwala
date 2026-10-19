@@ -75,6 +75,9 @@ export function createDriveAdapter({ clientId, folderName, folderId, onToken }) 
   a.writeFile = (name, text, existingId) => upload(name, text, "application/x-ndjson", existingId);
   a.writeBinary = async (name, blob, mime) => { const files = await a.listFiles(); const ex = files.find(f => f.name === name); return upload(name, blob, mime, ex && ex.id); };
   a.shareWith = email => call(`${API}/files/${a.folderId}/permissions?sendNotificationEmail=true&supportsAllDrives=true`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ role: "writer", type: "user", emailAddress: email }) });
+  // Takes a person off the folder (not its owner). Resolves to true when access was removed, false when they had none.
+  a.unshareWith = async email => { const e = String(email || "").toLowerCase(); const r = await call(`${API}/files/${a.folderId}/permissions?fields=permissions(id,emailAddress,role)&supportsAllDrives=true`);
+    const ps = (r.permissions || []).filter(x => String(x.emailAddress || "").toLowerCase() === e && x.role !== "owner"); for (const x of ps) await call(`${API}/files/${a.folderId}/permissions/${x.id}?supportsAllDrives=true`, { method: "DELETE" }, true); return ps.length > 0; };
   a.folderLink = () => a.folderId ? `https://drive.google.com/drive/folders/${a.folderId}` : "";
   return a;
 }

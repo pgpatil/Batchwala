@@ -33,6 +33,10 @@ It is a Progressive Web App: it opens from a link, installs to the home screen, 
 | Purchase returns | Debit notes against a GRN or any supplier: stock off at cost, supplier balance reduced, Debit Note voucher for Tally |
 | Payables | Payments against chosen bills, supplier advances, ageing (0–30 / 31–60 / 61–90 / 90+) and bills due this week |
 | Recipe versions | A recipe change can start on a date; past food cost and work-order standards keep the recipe in force at the time |
+| Counter extras | Split payment across UPI, cash and card; split a table's bill by items; delivery, packing and other charges; custom % or ₹ discounts and coupons |
+| Labels | Allergens on materials carried through the BOM; printable product labels with ingredients, allergens, veg mark, MRP, batch, made and best-before dates, FSSAI licence |
+| Finance reports | Profit & loss with monthly overheads, month-end stock value by location, reorder levels from use and lead time, price-rise alerts, HSN-wise sales summary |
+| Security | Hashed PINs; removing a person revokes their Drive access; device sync health list; printable purchase orders |
 | Editing locks | A saved record being edited is locked for others until saved or closed (lapses after 8 quiet minutes; admin can take over); saves check for changes made meanwhile |
 | Menu | Prices, categories, short names for WhatsApp reading, par levels, recipes with cost and margin |
 | Reports | Sales by day and channel, best sellers with margin, wastage value, repeat customers |

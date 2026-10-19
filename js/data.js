@@ -46,17 +46,18 @@ const r4 = v => Math.round(v * 10000) / 10000;
 const byName = (list, n) => list.find(x => x.name.toLowerCase() === String(n).trim().toLowerCase());
 const locByName = n => { const s = String(n || "").trim().toLowerCase(); return !s ? M.locations()[0] : M.locations().find(l => l.name.toLowerCase() === s || l.id === s); };
 const TYPE_IN = { rm: "rm", raw: "rm", "raw material": "rm", pm: "pm", packing: "pm", "packing material": "pm", sf: "sf", semi: "sf", "semi-finished": "sf", "semi finished": "sf" };
+const algIn = v => { const parts = String(v).split(",").map(x => x.trim()).filter(Boolean); const list = [], bad = []; parts.forEach(x => { const a = M.ALLERGENS.find(y => y.toLowerCase() === x.toLowerCase() || (x.toLowerCase().startsWith("nut") && y === "Tree nuts") || (/^(wheat|gluten)/i.test(x) && y === "Gluten") || (/^(dairy|milk)/i.test(x) && y === "Milk") || (/^eggs?$/i.test(x) && y === "Egg")); a ? list.push(a) : bad.push(x); }); return { list: [...new Set(list)], bad }; };
 const memberName = id => (ev.get("members", id) || {}).name || "";
 
 /* ---------- data types ---------- */
 // cols: k = key, label = column header, req = required on import. notes: template guidance. ex: example row for the template (written as a # note).
 const T = {
   menu: { label: "Menu items", icon: "menu", desc: "Prices, categories, short names, keep-ready levels, tax rate.",
-    cols: [{ k: "name", label: "Name", req: true }, { k: "category", label: "Category" }, { k: "price", label: "Price" }, { k: "tax", label: "Tax %" }, { k: "par", label: "Keep ready" }, { k: "aliases", label: "Short names" }, { k: "active", label: "On sale" }, { k: "life", label: "Shelf life days" }],
-    notes: ["Matched by Name: existing items are updated, new ones added.", "Tax % blank = the default rate. On sale: Yes or No (blank = Yes). Short names: comma separated, in quotes. Shelf life days blank = 30 for cookies, 3 for others."],
-    ex: ["Paneer Strudel", "Savoury", 120, 5, 6, "strudel, ps", "Yes", 3],
+    cols: [{ k: "name", label: "Name", req: true }, { k: "category", label: "Category" }, { k: "price", label: "Price" }, { k: "tax", label: "Tax %" }, { k: "par", label: "Keep ready" }, { k: "aliases", label: "Short names" }, { k: "active", label: "On sale" }, { k: "life", label: "Shelf life days" }, { k: "diet", label: "Food type" }, { k: "may", label: "May contain" }, { k: "net", label: "Net quantity" }, { k: "alg", label: "Allergens" }],
+    notes: ["Matched by Name: existing items are updated, new ones added.", "Food type: Veg, Egg or Non-veg (for labels). Allergens: any the BOM doesn’t already bring in, comma separated. Tax % blank = the default rate. On sale: Yes or No (blank = Yes). Short names: comma separated, in quotes. Shelf life days blank = 30 for cookies, 3 for others."],
+    ex: ["Paneer Strudel", "Savoury", 120, 5, 6, "strudel, ps", "Yes", 3, "Veg", "sesame", "1 pc", ""],
     count: () => M.menu().length,
-    rows: () => M.menu().map(m => [m.name, m.category, m.price, m.taxPct ?? "", m.par || "", m.aliases, m.active !== false ? "Yes" : "No", m.shelfLife ?? ""]),
+    rows: () => M.menu().map(m => [m.name, m.category, m.price, m.taxPct ?? "", m.par || "", m.aliases, m.active !== false ? "Yes" : "No", m.shelfLife ?? "", { veg: "Veg", egg: "Egg", nonveg: "Non-veg" }[m.diet || "veg"], m.mayContain || "", m.netQty || "", M.allergensOf(m).join(", ")]),
     plan(recs, dec) { const out = newPlan(dec); const menu = M.menu(); const seen = new Set();
       recs.forEach(r => { let name = r.name.trim(); if (!name) return out.err(r, "Name is blank"); if (seen.has(name.toLowerCase())) return out.err(r, `${name} appears twice`); seen.add(name.toLowerCase());
         const price = numOr(r.price), tax = numOr(r.tax), par = numOr(r.par, 0), life = numOr(r.life); if ([price, tax, par, life].some(Number.isNaN)) return out.err(r, "Price, Tax %, Shelf life and Keep ready must be numbers");
@@ -64,14 +65,17 @@ const T = {
         if (!ex && price == null) return out.err(r, `${name} is new and needs a Price`);
         const rec = { ...(ex ? clean(ex) : { id: uid("m"), recipe: [], sort: menu.length + out.adds + 1 }), name, shelfLife: r.life === "" ? (ex ? ex.shelfLife ?? null : null) : Math.max(1, Math.round(life)), category: r.category || (ex ? ex.category : ""), price: price ?? ex.price, par: r.par === "" ? (ex ? ex.par || 0 : 0) : par,
           aliases: r.aliases || (ex ? ex.aliases : ""), active: r.active === "" ? (ex ? ex.active !== false : true) : yes(r.active), taxPct: r.tax === "" ? (ex ? ex.taxPct ?? null : null) : tax };
+        if (r.diet) { const d = /^non/i.test(r.diet) ? "nonveg" : /egg/i.test(r.diet) ? "egg" : /^veg/i.test(r.diet) ? "veg" : null; if (!d) return out.err(r, "Food type must be Veg, Egg or Non-veg"); rec.diet = d; }
+        if (r.may) rec.mayContain = r.may; if (r.net) rec.netQty = r.net;
+        if (r.alg) { const al = algIn(r.alg); if (al.bad.length) return out.err(r, `Allergen “${al.bad[0]}” isn’t one of ${M.ALLERGENS.join(", ")}`); rec.allergens = al.list.filter(a => !M.allergensOf({ recipe: rec.recipe }).includes(a)); }
         out.upsert(ex, rec, name, () => ev.put("menu", rec)); });
       return out; } },
   materials: { label: "Materials", icon: "stock", desc: "Raw materials, packing and semi-finished: unit, reorder level, price, supplier, tax.",
-    cols: [{ k: "name", label: "Name", req: true }, { k: "type", label: "Type" }, { k: "unit", label: "Unit" }, { k: "reorder", label: "Reorder level" }, { k: "price", label: "Price per unit" }, { k: "supplier", label: "Supplier" }, { k: "barcode", label: "Barcode" }, { k: "tax", label: "Tax %" }, { k: "taxcost", label: "Purchase tax in cost" }, { k: "yield", label: "Yield per run" }, { k: "category", label: "Category" }],
-    notes: ["Matched by Name. Type: RM, PM or Semi-finished (blank = RM). Unit: g, kg, ml, L or pcs; Reorder level, Price per unit and Yield per run are in that unit.", "Price is used until a GRN or purchase is recorded. Purchase tax in cost: Yes = tax paid is added to cost; No = recoverable. Yield per run is for semi-finished items; give their recipe in the BOM import."],
-    ex: ["Maida", "RM", "kg", 5, 45, "Sharma Traders", "", 5, "No", "", "Flour & grains"],
+    cols: [{ k: "name", label: "Name", req: true }, { k: "type", label: "Type" }, { k: "unit", label: "Unit" }, { k: "reorder", label: "Reorder level" }, { k: "price", label: "Price per unit" }, { k: "supplier", label: "Supplier" }, { k: "barcode", label: "Barcode" }, { k: "tax", label: "Tax %" }, { k: "taxcost", label: "Purchase tax in cost" }, { k: "yield", label: "Yield per run" }, { k: "category", label: "Category" }, { k: "alg", label: "Allergens" }],
+    notes: ["Matched by Name. Type: RM, PM or Semi-finished (blank = RM). Unit: g, kg, ml, L or pcs; Reorder level, Price per unit and Yield per run are in that unit.", "Allergens: comma separated, in quotes (Gluten, Milk, Egg, Tree nuts, Peanut, Soy, Sesame, Mustard, Sulphites, Fish, Crustaceans). Price is used until a GRN or purchase is recorded. Purchase tax in cost: Yes = tax paid is added to cost; No = recoverable. Yield per run is for semi-finished items; give their recipe in the BOM import."],
+    ex: ["Maida", "RM", "kg", 5, 45, "Sharma Traders", "", 5, "No", "", "Flour & grains", "Gluten"],
     count: () => M.ingredients().length,
-    rows: () => M.ingredients().map(i => { const [u, f] = BIG[i.unit] || [i.unit, 1]; return [i.name, { rm: "RM", pm: "PM", sf: "Semi-finished" }[i.type], u, i.reorder ? r4(i.reorder / f) : "", r4(M.unitCost(i) * f) || "", i.supplier, i.barcode, i.taxPct ?? "", i.taxInCost ? "Yes" : "No", i.type === "sf" && i.yield ? r4(i.yield / f) : "", i.category || ""]; }),
+    rows: () => M.ingredients().map(i => { const [u, f] = BIG[i.unit] || [i.unit, 1]; return [i.name, { rm: "RM", pm: "PM", sf: "Semi-finished" }[i.type], u, i.reorder ? r4(i.reorder / f) : "", r4(M.unitCost(i) * f) || "", i.supplier, i.barcode, i.taxPct ?? "", i.taxInCost ? "Yes" : "No", i.type === "sf" && i.yield ? r4(i.yield / f) : "", i.category || "", (i.allergens || []).join(", ")]; }),
     plan(recs, dec) { const out = newPlan(dec); const ings = M.ingredients(); const seen = new Set();
       recs.forEach(r => { let name = r.name.trim(); if (!name) return out.err(r, "Name is blank"); if (seen.has(name.toLowerCase())) return out.err(r, `${name} appears twice`); seen.add(name.toLowerCase());
         let ex = byNameOrAka(ings, name); if (!ex) { const same = askSame(out, "material", name, ings); if (same === undefined) return; if (same !== "new") ex = same; } if (ex) name = ex.name; const type = r.type ? TYPE_IN[r.type.trim().toLowerCase()] : (ex ? ex.type : "rm"); if (!type) return out.err(r, `Type “${r.type}” isn’t RM, PM or Semi-finished`);
@@ -81,6 +85,7 @@ const T = {
         const rec = { ...(ex ? clean(ex) : { id: uid("i"), recipe: [], barcode: "", supplier: "" }), name, type, unit, reorder: reorder != null ? reorder * f : (ex ? ex.reorder : 0), cost: price != null ? price / f : (ex ? ex.cost : 0),
           category: r.category || (ex ? ex.category || "" : ""), supplier: r.supplier || (ex ? ex.supplier : ""), barcode: r.barcode || (ex ? ex.barcode : ""), taxPct: r.tax === "" ? (ex ? ex.taxPct ?? null : null) : tax, taxInCost: r.taxcost === "" ? !!(ex && ex.taxInCost) : yes(r.taxcost),
           yield: type === "sf" ? (y != null ? y * f : (ex ? ex.yield : 0)) : 0 };
+        if (r.alg) { const al = algIn(r.alg); if (al.bad.length) return out.err(r, `Allergen “${al.bad[0]}” isn’t one of ${M.ALLERGENS.join(", ")}`); rec.allergens = al.list; }
         if (type !== "sf") rec.recipe = [];
         out.upsert(ex, rec, name, () => ev.put("ingredients", rec)); });
       return out; } },
@@ -142,11 +147,11 @@ const T = {
         out.upsert(ex, rec, name, () => ev.put("suppliers", rec)); });
       return out; } },
   orders: { label: "Orders", icon: "orders", desc: "One row per item; rows with the same order number make one order.",
-    cols: [{ k: "no", label: "Order #", req: true }, { k: "date", label: "Date", req: true }, { k: "customer", label: "Customer" }, { k: "flat", label: "Flat" }, { k: "phone", label: "Phone" }, { k: "channel", label: "Channel" }, { k: "status", label: "Status" }, { k: "item", label: "Item", req: true }, { k: "qty", label: "Qty", req: true }, { k: "rate", label: "Rate" }, { k: "tax", label: "Tax %" }, { k: "disc", label: "Offer %" }, { k: "paid", label: "Paid" }, { k: "mode", label: "Paid by" }, { k: "notes", label: "Notes" }],
+    cols: [{ k: "no", label: "Order #", req: true }, { k: "date", label: "Date", req: true }, { k: "customer", label: "Customer" }, { k: "flat", label: "Flat" }, { k: "phone", label: "Phone" }, { k: "channel", label: "Channel" }, { k: "status", label: "Status" }, { k: "item", label: "Item", req: true }, { k: "qty", label: "Qty", req: true }, { k: "rate", label: "Rate" }, { k: "tax", label: "Tax %" }, { k: "disc", label: "Offer %" }, { k: "damt", label: "Discount ₹" }, { k: "paid", label: "Paid" }, { k: "mode", label: "Paid by" }, { k: "notes", label: "Notes" }],
     notes: ["Date as YYYY-MM-DD. Orders whose number is already in the app are skipped. Order details (customer, channel, status, offer, paid) are read from the order’s first row.", "Channel: WhatsApp, Phone, Instagram, Bulk / event, Other, Walk-in, Swiggy or Zomato. Status: Received, Confirmed, Ready, Delivered or Cancelled. Rate blank = menu price. Tax % blank = today’s rate. Paid = amount received for the whole order."],
-    ex: ["1001", "2026-10-18", "Asha", "A-1201", "9876543210", "WhatsApp", "Delivered", "Paneer Strudel", 2, 120, 5, 0, 252, "UPI", ""],
+    ex: ["1001", "2026-10-18", "Asha", "A-1201", "9876543210", "WhatsApp", "Delivered", "Paneer Strudel", 2, 120, 5, 0, "", 252, "UPI", ""],
     count: () => M.orders().length,
-    rows: () => { const out = []; M.orders().sort((a, b) => a.date < b.date ? -1 : 1).forEach(o => o.items.forEach((i, ix) => out.push([o.no, o.date, o.customer, o.flat, o.phone, M.CHANNELS[o.channel] || o.channel, M.STATUS_LABEL[o.status] || o.status, i.item, i.qty, i.rate, i.taxPct ?? "", ix ? "" : o.discountPct || "", ix ? "" : M.received(o) || "", ix ? "" : M.lastPayMode(o), ix ? "" : o.notes]))); return out; },
+    rows: () => { const out = []; M.orders().sort((a, b) => a.date < b.date ? -1 : 1).forEach(o => o.items.forEach((i, ix) => out.push([o.no, o.date, o.customer, o.flat, o.phone, M.CHANNELS[o.channel] || o.channel, M.STATUS_LABEL[o.status] || o.status, i.item, i.qty, i.rate, i.taxPct ?? "", ix ? "" : o.discountPct || "", ix ? "" : o.discountAmt || "", ix ? "" : M.received(o) || "", ix ? "" : M.lastPayMode(o), ix ? "" : o.notes]))); return out; },
     plan(recs) { const out = newPlan(); const have = new Set(M.orders().map(o => String(o.no))); const groups = new Map();
       const chan = v => { const s = String(v || "").trim().toLowerCase(); if (!s) return "whatsapp"; return Object.keys(M.CHANNELS).find(k => k === s || M.CHANNELS[k].toLowerCase() === s || M.CHANNELS[k].toLowerCase().split(" ")[0] === s) || null; };
       const stat = v => { const s = String(v || "").trim().toLowerCase(); if (!s) return "received"; return Object.keys(M.STATUS_LABEL).find(k => k === s || M.STATUS_LABEL[k].toLowerCase() === s) || null; };
@@ -158,8 +163,8 @@ const T = {
           if (!r.item) return out.err(r, `Order ${no}: item is blank`); if (q == null || Number.isNaN(q) || q <= 0) return out.err(r, `Order ${no}: Qty must be more than 0`);
           if (Number.isNaN(rate) || Number.isNaN(tax)) return out.err(r, `Order ${no}: Rate and Tax % must be numbers`); if (rate == null && !m) return out.err(r, `Order ${no}: “${r.item}” isn’t on the menu, so it needs a Rate`);
           items.push({ item: m ? m.name : r.item, qty: q, rate: rate ?? m.price, ...(m ? { menuId: m.id } : {}), ...(tax != null ? { taxPct: tax } : {}) }); }
-        const paid = numOr(f.paid, 0), disc = numOr(f.disc, 0); if (Number.isNaN(paid) || Number.isNaN(disc)) return out.err(f, `Order ${no}: Paid and Offer % must be numbers`);
-        const o = { id: uid("o"), no, date: f.date, customer: f.customer || M.CHANNELS[channel], flat: (f.flat || "").toUpperCase(), phone: f.phone || "", channel, status, items, discountPct: disc, notes: f.notes || "", tag: "", source: "import", createdAt: new Date().toISOString(), ...(status === "delivered" ? { deliveredAt: f.date + "T12:00:00.000Z" } : {}) };
+        const paid = numOr(f.paid, 0), disc = numOr(f.disc, 0), damt = numOr(f.damt, 0); if ([paid, disc, damt].some(Number.isNaN)) return out.err(f, `Order ${no}: Paid, Offer % and Discount ₹ must be numbers`);
+        const o = { id: uid("o"), no, date: f.date, customer: f.customer || M.CHANNELS[channel], flat: (f.flat || "").toUpperCase(), phone: f.phone || "", channel, status, items, discountPct: damt ? 0 : disc, discountAmt: damt, notes: f.notes || "", tag: "", source: "import", createdAt: new Date().toISOString(), ...(status === "delivered" ? { deliveredAt: f.date + "T12:00:00.000Z" } : {}) };
         out.put("add", `Order ${no} · ${o.customer} · ${items.length} item${items.length > 1 ? "s" : ""}${paid ? ` · paid ${paid}` : ""}`, async () => { await saveOrder(o);
           if (paid > 0) await ev.put("payments", { id: uid("p"), orderId: o.id, customerKey: M.ckey(o), amount: Math.round(paid * 100) / 100, mode: f.mode || "", date: f.date, note: "Imported", businessId: M.config().businessId }); }); });
       return out; } },
@@ -214,7 +219,7 @@ T.users = { label: "Users & roles", icon: "people", desc: "People, their role, R
   notes: [`Role: ${R.ROLE_KEYS.filter(k => k !== "admin").map(k => R.ROLES[k].label).join(", ")}. Admins are added in More → Users, not by import, and an admin’s role can’t be changed here.`, "Matched by Name, or by Email. Uses: Restaurant, ERP or Both (blank = Restaurant for new people). Location blank = the first. PINs are never imported or exported; each person sets their own."],
   ex: ["Ravi", "Kitchen", "ERP", "Central kitchen", "ravi@gmail.com"],
   count: () => R.members().length,
-  rows: () => R.members().map(m => [m.name, (R.ROLES[m.role] || {}).label || m.role, usesOf(m), M.locName(m.loc || M.locations()[0].id), m.email || "", m.prefix || "", m.pin ? "Yes" : "No"]),
+  rows: () => R.members().map(m => [m.name, (R.ROLES[m.role] || {}).label || m.role, usesOf(m), M.locName(m.loc || M.locations()[0].id), m.email || "", m.prefix || "", R.hasPin(m) ? "Yes" : "No"]),
   plan(recs) { const out = newPlan(); const ms = R.members(); const seen = new Set(); const used = new Set(ms.map(m => m.prefix).filter(Boolean));
     const roles = R.ROLE_KEYS.filter(k => k !== "admin").map(k => R.ROLES[k].label).join(", ");
     recs.forEach(r => { const name = r.name.trim(); if (!name) return out.err(r, "Name is blank"); if (seen.has(name.toLowerCase())) return out.err(r, `${name} appears twice`); seen.add(name.toLowerCase());
@@ -252,17 +257,17 @@ T.locations = { label: "Locations", icon: "store", desc: "Kitchens and outlets."
 { // suppliers: credit days, other names and an opening balance as well
   const t = T.suppliers;
   t.desc = "Supplier names with phone, GSTIN, credit days and the balance owed when you start.";
-  t.cols = [...t.cols, { k: "days", label: "Credit days" }, { k: "aka", label: "Other names" }, { k: "opening", label: "Opening balance" }, { k: "asOn", label: "Balance as on" }];
+  t.cols = [...t.cols, { k: "days", label: "Credit days" }, { k: "lead", label: "Lead days" }, { k: "aka", label: "Other names" }, { k: "opening", label: "Opening balance" }, { k: "asOn", label: "Balance as on" }];
   t.notes = ["Matched by Name (or another name): existing suppliers are updated.", "Opening balance: what you owed them when you started with the app (negative = an advance with them), as on the date given (YYYY-MM-DD, blank = today). It shows as the first bill in their ledger. Other names: comma separated, in quotes."];
-  t.ex = ["Sharma Traders", "9876543210", "27ABCDE1234F1Z5", 15, "Sharma, ST", 12500, "2026-04-01"];
-  t.rows = () => M.suppliers().map(s => [s.name, s.phone || "", s.gstin || "", s.days || "", (s.aka || []).join(", "), s.opening || "", s.opening ? s.openingDate || "" : ""]);
+  t.ex = ["Sharma Traders", "9876543210", "27ABCDE1234F1Z5", 15, 2, "Sharma, ST", 12500, "2026-04-01"];
+  t.rows = () => M.suppliers().map(s => [s.name, s.phone || "", s.gstin || "", s.days || "", s.lead ?? "", (s.aka || []).join(", "), s.opening || "", s.opening ? s.openingDate || "" : ""]);
   t.plan = (recs, dec) => { const out = newPlan(dec); const sup = M.suppliers(); const seen = new Set();
     recs.forEach(r => { let name = r.name.trim(); if (!name) return out.err(r, "Name is blank"); if (seen.has(name.toLowerCase())) return out.err(r, `${name} appears twice`); seen.add(name.toLowerCase());
       let ex = byNameOrAka(sup, name); if (!ex) { const same = askSame(out, "supplier", name, sup); if (same === undefined) return; if (same !== "new") ex = same; } if (ex) name = ex.name;
-      const days = numOr(r.days), ob = numOr(r.opening); if (Number.isNaN(days) || (days != null && days < 0)) return out.err(r, "Credit days must be 0 or more"); if (Number.isNaN(ob)) return out.err(r, "Opening balance must be a number");
+      const days = numOr(r.days), ob = numOr(r.opening), lead = numOr(r.lead); if (Number.isNaN(lead) || (lead != null && lead < 0)) return out.err(r, "Lead days must be 0 or more"); if (Number.isNaN(days) || (days != null && days < 0)) return out.err(r, "Credit days must be 0 or more"); if (Number.isNaN(ob)) return out.err(r, "Opening balance must be a number");
       if (r.asOn && !ISO_D.test(r.asOn)) return out.err(r, "Balance as on must be YYYY-MM-DD");
       const aka = r.aka ? [...new Set([...(ex ? ex.aka || [] : []), ...r.aka.split(",").map(x => x.trim()).filter(x => x && x.toLowerCase() !== name.toLowerCase())])] : (ex ? ex.aka : undefined);
-      const rec = { ...(ex ? clean(ex) : { id: uid("s") }), name, phone: r.phone || (ex ? ex.phone || "" : ""), gstin: (r.gstin || (ex ? ex.gstin || "" : "")).toUpperCase(), ...(days != null ? { days: Math.round(days) } : {}), ...(aka && aka.length ? { aka } : {}),
+      const rec = { ...(ex ? clean(ex) : { id: uid("s") }), name, phone: r.phone || (ex ? ex.phone || "" : ""), gstin: (r.gstin || (ex ? ex.gstin || "" : "")).toUpperCase(), ...(days != null ? { days: Math.round(days) } : {}), ...(lead != null ? { lead: Math.round(lead) } : {}), ...(aka && aka.length ? { aka } : {}),
         ...(ob != null ? { opening: r2(ob), openingDate: r.asOn || (ex && ex.openingDate) || today() } : {}) };
       out.upsert(ex, rec, name, () => ev.put("suppliers", rec)); });
     return out; };

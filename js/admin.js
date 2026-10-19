@@ -7,7 +7,7 @@ import { APP_NAME, GOOGLE_CLIENT_ID, DATA_FOLDER } from "./config.js";
 import { createDriveAdapter } from "./storage/drive.js";
 import * as L from "./lock.js";
 import { S, A, V, H, guard, logoHtml, toran, clean } from "./core.js";
-import { $, esc, rs, rs2, num, uid, today, cmpFlat, ICON } from "./util.js";
+import { $, esc, rs, rs2, num, uid, today, cmpFlat, dLabel, ICON } from "./util.js";
 import { ui, toast, openSheet, closeSheet, ask, yesNo } from "./ui.js";
 
 /* ---------- More ---------- */
@@ -37,7 +37,7 @@ V.more = () => {
   return `<div class="band"><div class="top">${logoHtml(c)}<div class="biz"><div class="name">${esc(c.business)}</div><div class="sub">${esc(me ? me.name + " · " + R.ROLES[me.role].label : "")}</div></div></div>${toran()}</div>
   ${H.switchers ? `<div class="moresw">${H.switchers()}</div>` : ""}${H.backupBanner && H.backupBanner() ? `<div class="boardfoot" style="padding-bottom:0">${H.backupBanner()}</div>` : ""}
   <div class="menu-list" style="margin-top:14px">${items.map(([a, ic, t, s]) => `<button class="mi" ${a[0] === "@" ? `data-go="${a.slice(1)}"` : `data-act="${a}"`}><span class="ic">${ICON[ic]}</span><span class="grow">${t}<small>${esc(s)}</small></span><span class="chev">${ICON.chev}</span></button>`).join("")}</div>
-  <p class="hint" style="padding:4px 18px">${APP_NAME} 2.13${R.mode() !== "classic" ? " · " + esc(M.MODES[R.mode()]) + " mode" : ""} · ${st.state === "off" ? "data saved on this phone only" : "synced through Google Drive"}${st.last ? " · last sync " + new Date(st.last).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" }) : ""}</p>`;
+  <p class="hint" style="padding:4px 18px">${APP_NAME} 2.14${R.mode() !== "classic" ? " · " + esc(M.MODES[R.mode()]) + " mode" : ""} · ${st.state === "off" ? "data saved on this phone only" : "synced through Google Drive"}${st.last ? " · last sync " + new Date(st.last).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" }) : ""}</p>`;
 };
 
 /* ---------- first run ---------- */
@@ -102,7 +102,7 @@ async function memberSheet(m) {
   <p class="hint">Restaurant: counter, orders, payments, deliveries and the outlet’s bake board. ERP: purchases (GRN), stock by location, BOM, production, batches, transfers and finished goods. Both: a switch between the two.</p>
   ${M.locations().length > 1 ? `<label class="f" for="mbLoc">Usually works at</label><select class="in" id="mbLoc">${M.locations().map(l => `<option value="${esc(l.id)}" ${(x.loc || M.locations()[0].id) === l.id ? "selected" : ""}>${esc(l.name)}</option>`).join("")}</select>` : ""}
   <label class="f" for="mbEmail">Google account email <small class="mut">(for signing in on their own phone)</small></label><input class="in" id="mbEmail" type="email" value="${esc(x.email)}" autocapitalize="off">
-  <label class="f" for="mbPin">PIN for switching on a shared phone <small class="mut">(optional, 4 digits)</small></label><input class="in" id="mbPin" inputmode="numeric" maxlength="4" value="${esc(x.pin || "")}">
+  <label class="f" for="mbPin">PIN for switching on a shared phone <small class="mut">(optional, 4 digits)</small></label><input class="in" id="mbPin" inputmode="numeric" maxlength="4" value="" placeholder="${R.hasPin(x) ? "Set · type 4 new digits to change it" : "None"}" autocomplete="off">${R.hasPin(x) ? `<label class="f" style="display:flex;align-items:center;gap:8px;font-weight:600"><input type="checkbox" id="mbPinOff"> Remove the PIN</label>` : ""}
   <button class="btn btn-primary" data-act="saveMember">${isNew ? "Add" : "Save"}</button>
   ${a && x.email ? `<button class="btn btn-ghost" data-act="shareFolder">Share the data folder with ${esc(x.email)}</button>` : ""}
   ${!isNew && x.id !== (R.me() || {}).id ? `<button class="btn btn-danger" data-act="removeMember">Remove ${esc(x.name)}</button>` : ""}`);
@@ -110,9 +110,10 @@ async function memberSheet(m) {
 A.users = usersSheet;
 A.newMember = () => memberSheet(null);
 A.saveMember = async () => {
-  const st = ui.sheet, x = st.x; x.name = $("#mbName").value.trim(); x.email = $("#mbEmail").value.trim().toLowerCase(); x.pin = $("#mbPin").value.replace(/\D/g, "").slice(0, 4);
+  const st = ui.sheet, x = st.x; x.name = $("#mbName").value.trim(); x.email = $("#mbEmail").value.trim().toLowerCase(); const newPin = $("#mbPin").value.replace(/\D/g, "").slice(0, 4); const pinOff = $("#mbPinOff") && $("#mbPinOff").checked;
   if (!x.name) { toast("Add a name"); return; }
-  if (x.pin && x.pin.length !== 4) { toast("PIN must be 4 digits"); return; }
+  if (newPin && newPin.length !== 4) { toast("PIN must be 4 digits"); return; }
+  if (newPin) Object.assign(x, await R.hashPin(newPin)); else if (pinOff) { x.pin = ""; delete x.pinHash; delete x.pinSalt; }
   if (!x.prefix) x.prefix = prefixFor(x.name);
   if (x.id === (R.me() || {}).id && x.role !== "admin" && R.members().filter(m => m.role === "admin").length < 2) { toast("Keep at least one admin"); return; }
   if ($("#mbLoc")) x.loc = $("#mbLoc").value;
@@ -123,12 +124,15 @@ A.saveMember = async () => {
   if (x.id === (R.me() || {}).id) { R.setMode(null); S.view = R.home(); }
   sync.soon(); toast(st.isNew ? `${x.name} added` : "Saved"); usersSheet();
 };
-A.removeMember = async () => { const x = ui.sheet.x; if (await yesNo(`<p class="cq">Remove ${esc(x.name)}?</p><div class="cdetail">They can no longer use the app. Their past work stays in the history.</div>`, "Remove", "btn-danger-solid")) { await ev.del("members", x.id); sync.soon(); usersSheet(); } };
+A.removeMember = async () => { const x = ui.sheet.x; const a = sync.current();
+  if (await yesNo(`<p class="cq">Remove ${esc(x.name)}?</p><div class="cdetail">They can no longer use the app. Their past work stays in the history.${a && x.email ? `<br><br>Their access to the Drive data folder (${esc(x.email)}) is removed too. A copy already on their phone stays there until they clear the app's data.` : ""}</div>`, "Remove", "btn-danger-solid")) { await ev.del("members", x.id); sync.soon();
+    if (a && x.email) { try { await a.ready(); const done = await a.unshareWith(x.email); toast(done ? `Drive access removed for ${x.email}` : `${x.email} had no access to the folder`); } catch (e) { toast(`Removed from the team, but Drive access couldn’t be removed: ${e.message || e}. Remove it in Drive's sharing settings.`); } } usersSheet(); } };
+H.migratePins = () => R.isAdmin() ? R.migratePins() : null;
 A.shareFolder = async () => { const x = ui.sheet.x; const a = sync.current(); try { await a.ready(); await a.shareWith(x.email); toast(`Folder shared with ${x.email}`); } catch (e) { toast(e.message || "Couldn’t share the folder"); } };
 A.switchUser = () => {
   const ms = R.members();
   openSheet({ kind: "switch" }, `<div class="sh-head"><h2 class="h">Who is using this phone?</h2><button class="x" data-close aria-label="Close">×</button></div>
-  <div class="kv">${ms.map(m => `<div><button class="who" data-switch="${esc(m.id)}"><div class="nm">${esc(m.name)}</div><div class="subl">${esc(R.ROLES[m.role].label)}${m.pin ? " · PIN" : ""}</div></button><span class="chev">${ICON.chev}</span></div>`).join("")}</div>`);
+  <div class="kv">${ms.map(m => `<div><button class="who" data-switch="${esc(m.id)}"><div class="nm">${esc(m.name)}</div><div class="subl">${esc(R.ROLES[m.role].label)}${R.hasPin(m) ? " · PIN" : ""}</div></button><span class="chev">${ICON.chev}</span></div>`).join("")}</div>`);
 };
 H.click.push(async T => {
   const st = ui.sheet;
@@ -137,11 +141,14 @@ H.click.push(async T => {
   const mr = T.closest("[data-mrole]"); if (mr && st && st.kind === "member") { st.x.role = mr.dataset.mrole; document.querySelectorAll("[data-mrole]").forEach(b => b.setAttribute("aria-pressed", b.dataset.mrole === st.x.role)); $("#mbNote").textContent = R.ROLES[st.x.role].note; return true; }
   const sw = T.closest("[data-switch]"); if (sw) { const m = ev.get("members", sw.dataset.switch);
     // Switching into an admin or management login needs that person's PIN; without one set, only they can use it on their own phone.
-    if (["admin", "management"].includes(m.role) && !m.pin && m.id !== (R.me() || {}).id) { toast(`${m.name} has no PIN yet. They can set one in Users & roles to allow switching here.`); return true; }
-    if (m.pin) { const v = await ask(`<p class="cq">PIN for ${esc(m.name)}</p><input class="in" id="pinIn" inputmode="numeric" maxlength="4" style="margin-top:12px;text-align:center;font-size:24px;letter-spacing:8px">`, [{ label: "Cancel", cls: "btn-ghost", value: false }, { label: "Unlock", cls: "btn-primary", value: true }], true);
-      if (!v) return true; if (($("#pinIn") || {}).value !== m.pin) { toast("Wrong PIN"); return true; } }
+    if (["admin", "management"].includes(m.role) && !R.hasPin(m) && m.id !== (R.me() || {}).id) { toast(`${m.name} has no PIN yet. They can set one in Users & roles to allow switching here.`); return true; }
+    if (R.hasPin(m)) { const v = await ask(`<p class="cq">PIN for ${esc(m.name)}</p><input class="in" id="pinIn" inputmode="numeric" maxlength="4" style="margin-top:12px;text-align:center;font-size:24px;letter-spacing:8px">`, [{ label: "Cancel", cls: "btn-ghost", value: false }, { label: "Unlock", cls: "btn-primary", value: true }], true);
+      if (!v) return true; if (!await R.checkPin(m, ($("#pinIn") || {}).value || "")) { toast("Wrong PIN"); return true; } }
     await R.setMe(m.id); R.setMode(null); await ev.setMeta("mode", null); if (m.loc) { M.setHere(m.loc); await ev.setMeta("here", m.loc); } S.view = R.home(); closeSheet(); toast(`Now using as ${m.name}`); return true; }
   if (st && st.kind === "settings") {
+    const chr = T.closest("[data-chrm]"); if (chr) { syncSettings(); st.c.charges.splice(+chr.dataset.chrm, 1); drawSettings(st); return true; }
+    const cpr = T.closest("[data-cprm]"); if (cpr) { syncSettings(); st.c.coupons.splice(+cpr.dataset.cprm, 1); drawSettings(st); return true; }
+    const cpk = T.closest("[data-cpkind]"); if (cpk) { syncSettings(); const [ix, k] = cpk.dataset.cpkind.split(":"); st.c.coupons[+ix].kind = k; drawSettings(st); return true; }
     const co = T.closest("[data-costing]"); if (co) { syncSettings(); st.c.costing = co.dataset.costing; drawSettings(st); return true; }
     const ti = T.closest("[data-taxincl]"); if (ti) { syncSettings(); st.c.tax.incl = ti.dataset.taxincl === "1"; drawSettings(st); return true; }
     const ts = T.closest("[data-taxsplit]"); if (ts) { syncSettings(); st.c.tax.split = ts.dataset.taxsplit === "1"; drawSettings(st); return true; }
@@ -178,8 +185,17 @@ function drawSettings(st) {
   <label class="f" for="sAddr">Business address</label><textarea class="in" id="sAddr" rows="2" placeholder="Shop no, street, area, city, PIN">${esc(c.address || "")}</textarea>
   <div class="two"><div><label class="f" for="sPhone">Business phone</label><input class="in" id="sPhone" value="${esc(c.phone || "")}" inputmode="tel"></div><div><label class="f" for="sState">State</label><input class="in" id="sState" value="${esc(c.state || "")}" placeholder="e.g. Maharashtra (27)"></div></div>
   <div class="two"><div><label class="f" for="sInvPre">Invoice number prefix</label><input class="in" id="sInvPre" value="${esc(c.invoicePrefix || "INV")}" autocapitalize="characters"></div><div><label class="f" for="sHsn">Default HSN / SAC</label><input class="in" id="sHsn" value="${esc(c.hsn || "")}" placeholder="e.g. 1905"></div></div>
+  <label class="f" for="sFssai">FSSAI licence no. <small class="mut">(printed on product labels)</small></label><input class="in" id="sFssai" value="${esc(c.fssai || "")}" inputmode="numeric" placeholder="14 digits">
   <label class="f" style="display:flex;align-items:center;gap:12px">Print a receipt after every counter sale <button class="swt" role="switch" aria-checked="${!!c.autoReceipt}" data-act="toggleAutoReceipt" aria-label="Print receipt after counter sale"></button></label>
   <p class="hint">Invoices are numbered per financial year and per device (${esc((c.invoicePrefix || "INV").toUpperCase())}-${"2627"}-P-0001). Each menu item can have its own HSN in Menu & recipes.</p>
+  <label class="f" style="margin-top:18px">Charges on bills <small class="mut">(tapped on at the counter or on an order)</small></label>
+  <div class="kv">${(c.charges || []).map((x, ix) => `<div style="align-items:center;gap:8px"><input class="in" data-chname="${ix}" value="${esc(x.name)}" placeholder="Delivery" style="flex:1;min-width:0"><input class="in" data-chamt="${ix}" inputmode="decimal" value="${x.amount || ""}" placeholder="₹" style="max-width:90px"><button class="rm" data-chrm="${ix}" aria-label="Remove charge">×</button></div>`).join("") || `<div class="mut">None yet</div>`}</div>
+  <button class="add-line" data-act="addCharge">+ Add a charge (delivery, packing…)</button>
+  ${c.tax.on ? `<p class="hint">Charges are taxed at the default ${esc(c.tax.name || "GST")} rate. HSN / SAC on invoices: <input class="in" id="sSac" value="${esc(c.sac || "")}" placeholder="e.g. 996813" style="display:inline-block;max-width:140px;height:36px"></p>` : ""}
+  <label class="f" style="margin-top:18px">Coupons</label>
+  <div class="kv">${(c.coupons || []).map((x, ix) => `<div style="align-items:center;gap:6px;flex-wrap:wrap"><input class="in" data-cpcode="${ix}" value="${esc(x.code)}" placeholder="CODE" autocapitalize="characters" style="max-width:120px"><input class="in" data-cpval="${ix}" inputmode="decimal" value="${x.value || ""}" placeholder="10" style="max-width:70px"><div class="chips">${[["pct", "% off"], ["amt", "₹ off"]].map(([k, l]) => `<button class="chip" data-cpkind="${ix}:${k}" aria-pressed="${(x.kind || "pct") === k}">${l}</button>`).join("")}</div><input class="in" data-cpmin="${ix}" inputmode="decimal" value="${x.min || ""}" placeholder="min bill ₹" style="max-width:100px"><input class="in" type="date" data-cpuntil="${ix}" value="${esc(x.until || "")}" style="max-width:150px" aria-label="Valid till"><button class="rm" data-cprm="${ix}" aria-label="Remove coupon">×</button></div>`).join("") || `<div class="mut">None yet</div>`}</div>
+  <button class="add-line" data-act="addCoupon">+ Add a coupon</button>
+  <p class="hint">A coupon gives % or ₹ off the items, above an optional minimum bill and until an optional date.</p>
   <label class="f" style="margin-top:18px">Material cost</label><div class="chips">${[["avg", "Weighted average of stock"], ["last", "Last purchase price"]].map(([k, l]) => `<button class="chip" data-costing="${k}" aria-pressed="${(c.costing === "last" ? "last" : "avg") === k}">${l}</button>`).join("")}</div>
   <p class="hint">Used for recipe, batch and stock values. Average smooths price changes; old batches keep the cost they were saved with.</p>
   <label class="f" style="margin-top:18px">Locations</label><div class="kv">${c.locations.map((l, ix) => `<div style="align-items:center;gap:8px"><input class="in" data-locname="${ix}" value="${esc(l.name)}" style="flex:1;min-width:0"><div class="chips">${[["kitchen", "Kitchen"], ["outlet", "Outlet"]].map(([k, n]) => `<button class="chip" data-lockind="${ix}:${k}" aria-pressed="${l.kind === k}">${n}</button>`).join("")}</div>${ix ? `<button class="rm" data-locrm="${ix}" aria-label="Remove location">×</button>` : ""}</div>`).join("")}</div>
@@ -193,7 +209,11 @@ function drawSettings(st) {
 }
 function syncSettings() { const c = ui.sheet.c; const g = id => document.getElementById(id); if (g("sAddr")) { c.address = g("sAddr").value.trim(); c.phone = g("sPhone").value.trim(); c.state = g("sState").value.trim(); c.invoicePrefix = g("sInvPre").value.trim().toUpperCase().replace(/[^A-Z0-9]/g, "") || "INV"; c.hsn = g("sHsn").value.trim(); } c.business = g("sBiz").value.trim() || "My Bakery"; c.tagline = g("sTag").value.trim(); c.upi = g("sUpi").value.trim(); c.payee = g("sPayee").value.trim(); c.activeTag = g("sActive").value; c.accent = g("sAccent").value; c.tables = Math.min(60, Math.max(0, Math.round(num(g("sTables").value)))) || 10;
   if (g("sTaxName")) { c.tax.name = g("sTaxName").value.trim() || "GST"; c.tax.rate = num(g("sTaxRate").value); c.tax.gstin = g("sGstin").value.trim().toUpperCase(); }
-  c.locations.forEach((l, ix) => { const el = document.querySelector(`[data-locname="${ix}"]`); if (el) l.name = el.value.trim() || l.name; }); }
+  c.locations.forEach((l, ix) => { const el = document.querySelector(`[data-locname="${ix}"]`); if (el) l.name = el.value.trim() || l.name; });
+  const q = sel => document.querySelector(sel); if (g("sSac")) c.sac = g("sSac").value.trim(); if (g("sFssai")) c.fssai = g("sFssai").value.replace(/\D/g, "");
+  (c.charges || []).forEach((x, ix) => { const n = q(`[data-chname="${ix}"]`), a = q(`[data-chamt="${ix}"]`); if (n) x.name = n.value.trim(); if (a) x.amount = num(a.value); });
+  (c.coupons || []).forEach((x, ix) => { const cd = q(`[data-cpcode="${ix}"]`), v = q(`[data-cpval="${ix}"]`), mn = q(`[data-cpmin="${ix}"]`), u = q(`[data-cpuntil="${ix}"]`);
+    if (cd) x.code = cd.value.trim().toUpperCase().replace(/\s+/g, ""); if (v) x.value = num(v.value); if (mn) x.min = num(mn.value); if (u) x.until = u.value; }); }
 async function shrinkImage(file, size = 256) {
   const url = URL.createObjectURL(file); const img = new Image(); img.src = url; await img.decode();
   const cv = document.createElement("canvas"); const s = Math.min(img.width, img.height); cv.width = cv.height = size;
@@ -206,7 +226,12 @@ A.addLocation = () => { syncSettings(); const c = ui.sheet.c; c.locations.push({
 A.toggleFestive = () => { syncSettings(); ui.sheet.c.festive = !ui.sheet.c.festive; drawSettings(ui.sheet); };
 A.addTag = () => { syncSettings(); const v = $("#sNewTag").value.trim(); if (!v) { toast("Type the occasion name"); return; } ui.sheet.c.tags = [...new Set([...(ui.sheet.c.tags || []), v])]; drawSettings(ui.sheet); };
 A.toggleAutoReceipt = () => { syncSettings(); ui.sheet.c.autoReceipt = !ui.sheet.c.autoReceipt; ui.sheet.redraw(); };
+A.addCharge = () => { syncSettings(); const c = ui.sheet.c; c.charges = [...(c.charges || []), { name: (c.charges || []).length ? "Packing" : "Delivery", amount: 0 }]; drawSettings(ui.sheet); };
+A.addCoupon = () => { syncSettings(); const c = ui.sheet.c; c.coupons = [...(c.coupons || []), { code: "", kind: "pct", value: 10, min: 0, until: "" }]; drawSettings(ui.sheet); };
 A.saveSettings = async () => { syncSettings(); const h = hue(ui.sheet.c.accent); if (!await L.saveOk(ui.sheet)) return;
+  { const c = ui.sheet.c; c.charges = (c.charges || []).filter(x => x.name && x.amount > 0); c.coupons = (c.coupons || []).filter(x => x.code && x.value > 0);
+    const dup = c.coupons.map(x => x.code).find((x, i, a) => a.indexOf(x) !== i); if (dup) { toast(`Coupon ${dup} is listed twice`); return; }
+    if (c.coupons.some(x => x.kind !== "amt" && x.value > 100)) { toast("A % coupon can’t be over 100%"); return; } }
   if ((h >= 0 && (h < 15 || h > 340)) || (h > 100 && h < 170)) { toast("That colour is too close to the red or green used for status. Pick another."); return; }
   await ev.put("config", clean({ ...ui.sheet.c, id: "app" })); sync.soon(); closeSheet(); toast("Settings saved"); };
 H.change.push(async T => {
@@ -223,6 +248,7 @@ function syncSheet() {
     <div><span>Google account</span><span>${esc(a.account || s.account || "")}</span></div><div><span>Last sync</span><span>${s.last ? new Date(s.last).toLocaleString("en-IN") : "Not yet"}</span></div></div>
     ${s.error ? `<p class="hint" style="color:var(--due)">${esc(s.error)}</p>` : ""}
     <button class="btn btn-primary" data-act="syncNow">Sync now</button>
+    ${syncHealth()}
     ${a.folderLink && a.folderLink() ? `<a class="btn btn-ghost" href="${esc(a.folderLink())}" target="_blank" rel="noopener">Open the data folder in Drive</a>` : ""}
     ${R.isAdmin() ? `<button class="btn btn-danger" data-act="syncOff">Turn off sync on this phone</button>` : ""}`
   : (R.isAdmin() ? `<p class="hint" style="margin-top:0">Sync keeps every phone up to date through one shared folder in your Google Drive. Each phone writes only its own files, so two people working at once never overwrite each other.</p>
@@ -257,6 +283,16 @@ export async function resumeSync() {
 }
 
 /* ---------- backup and legacy import ---------- */
+/* ---------- sync health ---------- */
+// Every device with the team's data: who used it last, when it last synced and backed up. One quiet for a day may have stopped syncing.
+const ago = t => { if (!t) return "never"; const m = Math.round((Date.now() - new Date(t)) / 60000); return m < 2 ? "just now" : m < 60 ? `${m} min ago` : m < 48 * 60 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} days ago`; };
+function syncHealth() {
+  const ds = ev.all("devices").slice().sort((a, b) => String(b.synced || b.seen).localeCompare(String(a.synced || a.seen))); if (!ds.length) return "";
+  return `<label class="f" style="margin-top:14px">Devices</label><div class="card tablecard" style="margin:0"><table class="reg"><thead><tr><th>Device</th><th>Last used by</th><th>Last synced</th><th>Last seen</th></tr></thead><tbody>${ds.map(d => { const t = d.synced || ""; const stale = !t || Date.now() - new Date(t) > 24 * 3600e3; const mine = d.id === ev.device();
+    return `<tr><td><b>${esc(d.letter || "?")}</b> ${esc(d.agent || "")}${mine ? ` <span class="tag t-camp">this one</span>` : ""}</td><td>${esc((ev.get("members", d.by) || {}).name || "–")}</td><td data-v="${esc(t)}">${stale ? `<b class="due">${esc(ago(t))}</b>` : esc(ago(t))}</td><td data-v="${esc(d.seen || "")}">${esc(d.seen ? dLabel(d.seen) : "–")}</td></tr>`; }).join("")}</tbody></table></div>
+  <p class="hint">A device that hasn’t synced for a day is in red: it may be offline, signed out of Google, or no longer in use. Its unsynced work stays on it until it syncs.</p>`;
+}
+
 /* ---------- backups ---------- */
 // Four rotating weekly backups live in the shared Drive folder (backup_1…4.json), made automatically by an admin's device
 // when the last one is a week old. Every device records when it last backed up, so everyone sees the same "last backup".

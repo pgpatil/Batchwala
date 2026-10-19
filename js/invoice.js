@@ -24,10 +24,13 @@ export function words(n) { n = Math.round(n); if (!n) return "Zero"; const parts
   if (cr) parts.push(three(cr) + " Crore"); if (lk) parts.push(two(lk) + " Lakh"); if (th) parts.push(two(th) + " Thousand"); if (rest) parts.push(three(rest)); return parts.join(" "); }
 
 // Lines with taxable value and tax per line, after the order's offer %.
-function lines(o) { const f = 1 - (o.discountPct || 0) / 100; const menu = M.menu(); const t = M.taxCfg();
+function lines(o) { const f = 1 - M.discF(o); const menu = M.menu(); const t = M.taxCfg();
   return o.items.map(i => { const m = (i.menuId && menu.find(x => x.id === i.menuId)) || M.menuByName(i.item) || {}; const r = +i.taxPct || 0; const gross = i.qty * i.rate * f;
     const taxable = o.taxIncl ? gross / (1 + r / 100) : gross; const tax = taxable * r / 100;
-    return { ...i, hsn: m.hsn || M.config().hsn || "", rate: r, taxable, tax, half: t.split ? tax / 2 : 0, amount: taxable + tax, price: i.rate }; }); }
+    return { ...i, hsn: m.hsn || M.config().hsn || "", rate: r, taxable, tax, half: t.split ? tax / 2 : 0, amount: taxable + tax, price: i.rate }; })
+    // Delivery and packing charges are lines of their own, taxed at their own rate.
+    .concat((o.charges || []).map(c => { const r = +c.taxPct || 0; const taxable = o.taxIncl ? c.amount / (1 + r / 100) : c.amount; const tax = taxable * r / 100;
+      return { item: c.name, qty: 1, hsn: M.config().sac || "", rate: r, taxable, tax, half: t.split ? tax / 2 : 0, amount: taxable + tax, price: c.amount }; })); }
 
 function invoiceHtml(o) {
   const c = M.config(); const t = M.taxCfg(); const L = lines(o); const taxable = L.reduce((s, l) => s + l.taxable, 0), tax = L.reduce((s, l) => s + l.tax, 0); const total = M.total(o);
@@ -37,7 +40,7 @@ function invoiceHtml(o) {
     <div class="inv-to"><small>Bill to</small><b>${esc(o.customer || "Walk-in customer")}</b>${o.flat ? ` · ${esc(o.flat)}` : ""}${o.phone ? ` · ${esc(o.phone)}` : ""}${o.gstin ? `<div>${esc(t.name)}IN ${esc(o.gstin)}</div>` : ""}</div>
     <table class="inv-t"><thead><tr><th>#</th><th>Item</th>${gst ? "<th>HSN</th>" : ""}<th class="num">Qty</th><th class="num">Rate</th><th class="num">Taxable</th>${gst ? (t.split ? `<th class="num">CGST</th><th class="num">SGST</th>` : `<th class="num">${esc(t.name)}</th>`) : ""}<th class="num">Amount</th></tr></thead>
     <tbody>${L.map((l, i) => `<tr><td>${i + 1}</td><td>${esc(l.item)}</td>${gst ? `<td>${esc(l.hsn)}</td>` : ""}<td class="num">${l.qty}</td><td class="num">${rs2(l.price)}</td><td class="num">${rs2(l.taxable)}</td>${gst ? (t.split ? `<td class="num">${rs2(l.half)}<small> @${l.rate / 2}%</small></td><td class="num">${rs2(l.half)}<small> @${l.rate / 2}%</small></td>` : `<td class="num">${rs2(l.tax)}<small> @${l.rate}%</small></td>`) : ""}<td class="num">${rs2(l.amount)}</td></tr>`).join("")}</tbody></table>
-    <div class="inv-tot"><div><span>Taxable value${o.discountPct ? ` (after ${o.discountPct}% off)` : ""}</span><b>${rs2(taxable)}</b></div>${gst ? (t.split ? `<div><span>CGST</span><b>${rs2(tax / 2)}</b></div><div><span>SGST</span><b>${rs2(tax / 2)}</b></div>` : `<div><span>${esc(t.name)}</span><b>${rs2(tax)}</b></div>`) : ""}${Math.abs(ro) >= 0.01 ? `<div><span>Round off</span><b>${ro > 0 ? "+" : "−"}${rs2(Math.abs(ro))}</b></div>` : ""}
+    <div class="inv-tot"><div><span>Taxable value${M.disc(o) ? ` (after ${esc(M.offerText(o).replace(/^\w/, ch => ch.toLowerCase()))} ${rs2(M.disc(o))})` : ""}</span><b>${rs2(taxable)}</b></div>${gst ? (t.split ? `<div><span>CGST</span><b>${rs2(tax / 2)}</b></div><div><span>SGST</span><b>${rs2(tax / 2)}</b></div>` : `<div><span>${esc(t.name)}</span><b>${rs2(tax)}</b></div>`) : ""}${Math.abs(ro) >= 0.01 ? `<div><span>Round off</span><b>${ro > 0 ? "+" : "−"}${rs2(Math.abs(ro))}</b></div>` : ""}
       <div class="grand"><span>Total</span><b>${rs2(total)}</b></div><div class="inv-words">Rupees ${words(total)} only</div>${paid ? `<div><span>Paid</span><b>${rs2(paid)}</b></div>${total - paid > 0.5 ? `<div><span>Balance due</span><b>${rs2(total - paid)}</b></div>` : ""}` : ""}</div>
     <div class="inv-foot">${c.upi && total - paid > 0.5 ? `Pay by UPI: ${esc(c.upi)} · ` : ""}Thank you!${gst ? " This is a computer-generated invoice." : ""}</div></div>`;
 }
@@ -47,7 +50,7 @@ function receiptHtml(o) {
   return `<div class="rcpt"><b class="rc-biz">${esc(c.business)}</b>${c.address ? `<div>${esc(c.address.split("\n")[0])}</div>` : ""}${M.taxCfg().on && M.taxCfg().gstin ? `<div>${esc(M.taxCfg().name)}IN ${esc(M.taxCfg().gstin)}</div>` : ""}
     <div class="rc-line">${esc(o.invoiceNo || "#" + o.no)} · ${esc(new Date(o.createdAt || o._at || Date.now()).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" }))}${o.table ? ` · Table ${esc(o.table)}` : ""}</div>
     ${L.map(l => `<div class="rc-row"><span>${esc(l.item)} × ${l.qty}</span><span>${rs2(l.price * l.qty)}</span></div>`).join("")}
-    ${o.discountPct ? `<div class="rc-row"><span>Offer ${o.discountPct}%</span><span>−${rs2(M.disc(o))}</span></div>` : ""}${M.taxLines(o).map(([n, v]) => `<div class="rc-row"><span>${esc(n)}</span><span>${rs2(v)}</span></div>`).join("")}
+    ${M.disc(o) ? `<div class="rc-row"><span>${esc(M.offerText(o))}</span><span>−${rs2(M.disc(o))}</span></div>` : ""}${M.taxLines(o).map(([n, v]) => `<div class="rc-row"><span>${esc(n)}</span><span>${rs2(v)}</span></div>`).join("")}
     <div class="rc-row rc-tot"><span>Total</span><span>${rs2(total)}</span></div>${paid ? `<div class="rc-row"><span>Paid${modes.length ? " · " + esc(modes.join(", ")) : ""}</span><span>${rs2(paid)}</span></div>` : ""}<div class="rc-thanks">Thank you! Visit again 💛</div></div>`;
 }
 export async function printInvoice(id) { let o = M.orders().find(x => x.id === id); if (!o) return; o = await ensureInvoiceNo(o); printHtml(`Invoice ${o.invoiceNo}`, invoiceHtml(o), true); }
@@ -57,4 +60,4 @@ H.click.push(async T => {
   const r = T.closest("[data-receipt]"); if (r) { printReceipt(r.dataset.receipt); return true; }
   return false;
 });
-H.printReceipt = printReceipt;
+H.printReceipt = printReceipt; H.words = words;

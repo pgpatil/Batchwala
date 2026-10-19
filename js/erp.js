@@ -17,6 +17,8 @@ const big = u => UNITS[u] || null;
 export const unitOpts = i => { const b = big(i.unit); const p = M.packOf(i); return [[i.unit, 1], ...(b ? [[b.big, b.f]] : []), ...(p ? [[`${p.name} (${qty(p.size, i.unit)})`, p.size]] : [])]; };
 const unitPick = (i, f, attr) => { const o = unitOpts(i); return o.length > 1 ? `<div class="chips unitchips">${o.map(([n, v]) => `<button class="chip" data-${attr}:${v}" aria-pressed="${f === v}">${esc(n)}</button>`).join("")}</div>` : `<span class="unitlbl">${esc(i.unit)}</span>`; };
 const rateDiff = (got, po, i) => { const d = (got - po) / po * 100; const b = big(i.unit); return Math.abs(d) < 2 ? ` · at PO rate` : ` · <b class="${d > 0 ? "due" : ""}">${d > 0 ? "+" : ""}${Math.round(d)}% vs PO ${rs2(po * (b ? b.f : 1))}/${b ? b.big : i.unit}</b>`; };
+// A rise of the alert % or more over the material's previous GRN price is flagged as the bill is entered.
+const priceHint = (got, i) => { const p = M.prevGrnRate(i.id); if (!p) return ""; const d = (got - p) / p * 100; const b = big(i.unit); return d >= +(M.config().priceAlertPct ?? 5) ? ` · <b class="due">+${Math.round(d)}% vs last ${rs2(p * (b ? b.f : 1))}/${b ? b.big : i.unit}</b>` : ""; };
 const who = x => { const m = ev.get("members", x.by || x._by); return m ? m.name : ""; };
 const prefix = () => R.numPrefix();
 const r2 = v => Math.round(v * 100) / 100;
@@ -115,7 +117,7 @@ function drawGrn(st) {
       <div class="gl2"><label><span>Qty</span><input class="in" data-grqty="${ix}" inputmode="decimal" value="${l.qty ? +(l.qty / l.f).toFixed(3) : ""}" placeholder="0"></label>${unitPick(i, l.f, `grf="${ix}`)}
       <label><span>Amount ₹${tax ? " before tax" : ""}</span><input class="in" data-gramt="${ix}" inputmode="decimal" value="${l.amount || ""}" placeholder="0"></label>${tax ? `<label class="tx"><span>${esc(M.taxCfg().name)} %</span><input class="in" data-grtax="${ix}" inputmode="decimal" value="${l.taxPct}"></label>` : ""}</div>
       <div class="gl2"><label><span>Best before</span><input class="in" type="date" data-grexp="${ix}" value="${esc(l.exp || (i.shelfDays ? addDays(x.date, +i.shelfDays) : ""))}"></label><label><span>Lot / batch no.</span><input class="in" data-grlot="${ix}" value="${esc(l.lot || "")}" placeholder="Optional"></label></div>
-      <small class="mut">Have ${qty(Math.max(0, sm[i.id] || 0), i.unit)}${l.qty && l.amount ? ` · ${rs2(l.amount / l.qty * (b ? b.f : 1))}/${b ? b.big : i.unit}` : ""}${l.poRate && l.qty && l.amount ? rateDiff(l.amount / l.qty, l.poRate, i) : ""}${tax && l.taxPct ? (i.taxInCost ? " · tax added to stock cost" : " · tax recoverable, not in cost") : ""}</small></div>`; }).join("")}</div>
+      <small class="mut">Have ${qty(Math.max(0, sm[i.id] || 0), i.unit)}${l.qty && l.amount ? ` · ${rs2(l.amount / l.qty * (b ? b.f : 1))}/${b ? b.big : i.unit}` : ""}${l.poRate && l.qty && l.amount ? rateDiff(l.amount / l.qty, l.poRate, i) : l.qty && l.amount ? priceHint(l.amount / l.qty, i) : ""}${tax && l.taxPct ? (i.taxInCost ? " · tax added to stock cost" : " · tax recoverable, not in cost") : ""}</small></div>`; }).join("")}</div>
   <button class="add-line" data-gradd>+ Add item</button>
   <div class="kv" id="grTotals" style="margin-top:12px">${grnTotals(x.lines)}</div>
   <label class="f" for="grNote">Note</label><input class="in" id="grNote" value="${esc(x.notes)}" placeholder="Optional · short delivery, damaged items">

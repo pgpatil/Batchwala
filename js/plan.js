@@ -83,6 +83,7 @@ export function printHtml(title, html, bare = false) {
   const done = () => { document.body.classList.remove("printing"); window.removeEventListener("afterprint", done); };
   window.addEventListener("afterprint", done); window.print(); setTimeout(done, 1500);
 }
+H.printHtml = printHtml;
 
 /* ---------- screen ---------- */
 const TABS = [["fg", "Finished goods"], ["sf", "Semi-finished"], ["indent", "Indent"], ["card", "Batch card"], ["calc", "Requirement calculator"]];

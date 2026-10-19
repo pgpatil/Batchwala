@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.14.0 — 19 Oct 2026 · good-to-haves
+- Counter: split payment across UPI, cash and card (and when settling a table); split a table's bill by items, each guest paying their part
+- Charges and discounts: delivery, packing and one-off charges on the counter and order form (taxed, on bills and invoices, own Tally ledger); custom % or ₹ discounts; coupons with % or ₹ off, minimum bill and end date (Business settings); orders import/export has a Discount ₹ column
+- Allergens on materials, carried through every BOM level to menu items, with "may contain", food type and net quantity; printable product labels (2 or 3 across) from a batch or item with ingredients largest first, allergens, MRP, batch, made and best-before dates and FSSAI licence
+- Reports: Profit & loss (sales, materials used from opening and closing stock, gross profit, monthly overheads, net profit); Stock value at period end by location at that day's cost; Reorder with suggested levels from 30-day use and supplier lead time, set in one go; price rises over an alert % in Buying and flagged on GRN lines; HSN-wise sales summary in Tax with CSV
+- Suppliers have a lead time (also in the suppliers import)
+- Purchase orders print as a document with both GSTINs, rates, tax and amount in words
+- Security: PINs stored as salted hashes (older PINs converted automatically); removing a person removes their Drive folder access
+- Sync health: every device with who used it last and when it last synced, quiet ones in red
+
 ## 2.13.0 — 19 Oct 2026 · import & export for every data type
 - New templates and imports: Customers (phone, notes, advance held; customers can exist before their first order), Users & roles (role, Restaurant / ERP, location, email; admins and PINs stay in More → Users), Locations (kitchens and outlets), Payments (against order numbers, or advances), Purchase orders (draft or approved), GRNs (past purchases: add stock and become supplier bills) and Supplier payments (against chosen bills)
 - Suppliers import adds credit days, other names and an opening balance with its date, shown as the first bill in the ledger (negative = an advance)

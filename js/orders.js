@@ -8,13 +8,14 @@ import { $, esc, rs, rs2, num, uid, today, addDays, dObj, dLabel, dLong, plate, 
 import { ui, toast, openSheet, closeSheet, ask, yesNo } from "./ui.js";
 import * as L from "./lock.js";
 import { checkCustomer } from "./match.js";
+import { extrasHtml, extrasClick, recheckCoupon } from "./extras.js";
 
 /* ---------- WhatsApp text ---------- */
 export function orderText(o) {
   const c = M.config(); const first = (o.customer || "").split(" ")[0];
   let t = `Hi ${first}! 🧁 Your ${c.business} order for ${dLong(o.date)}${o.slot ? ", " + o.slot : ""}:\n`;
   o.items.forEach(i => t += `• ${i.item} × ${i.qty} — ${rs(i.qty * i.rate)}\n`);
-  if (o.discountPct) t += `Offer ${o.discountPct}% off — −${rs(M.disc(o))}\n`;
+  if (M.disc(o)) t += `${M.offerText(o)} — −${rs(M.disc(o))}\n`; (o.charges || []).forEach(c => t += `${c.name} — ${rs(c.amount)}\n`);
   t += taxBlock(o, " — ").map(x => x + "\n").join("");
   if (o.cakeMsg || o.weight || o.flavour) t += [o.weight && `Size: ${o.weight}`, o.flavour && `Flavour: ${o.flavour}`, o.cakeMsg && `Message: “${o.cakeMsg}”`].filter(Boolean).join("\n") + "\n";
   t += `*Total ${rs(M.total(o))}*`; if (advanceDue(o)) t += `\nAdvance to confirm: ${rs(advanceDue(o))}`; if (M.bal(o) > 0 && c.upi) t += `\n\nPay by UPI: ${c.upi}`;
@@ -33,8 +34,8 @@ function billLines(o) { return o.items.map(i => ({ ...i, list: i.list != null &&
 // Tax lines for messages and bills: exclusive tax is added ("CGST 2.5%: ₹3"); inclusive is shown as included. Round-off when the total was rounded.
 export function taxBlock(o, sep = ": ") {
   const tl = M.taxLines(o); if (!tl.length) return [];
-  const out = o.taxIncl ? tl.map(([n, v]) => `Includes ${n}${sep}${rs2(v)}`) : [`Taxable value${sep}${rs2(M.sub(o) - M.disc(o))}`, ...tl.map(([n, v]) => `${n}${sep}${rs2(v)}`)];
-  const ro = Math.round((M.total(o) - (M.sub(o) - M.disc(o) + (o.taxIncl ? 0 : M.taxOf(o).tax))) * 100) / 100;
+  const out = o.taxIncl ? tl.map(([n, v]) => `Includes ${n}${sep}${rs2(v)}`) : [`Taxable value${sep}${rs2(M.sub(o) - M.disc(o) + M.charges(o))}`, ...tl.map(([n, v]) => `${n}${sep}${rs2(v)}`)];
+  const ro = Math.round((M.total(o) - (M.sub(o) - M.disc(o) + M.charges(o) + (o.taxIncl ? 0 : M.taxOf(o).tax))) * 100) / 100;
   if (Math.abs(ro) >= 0.01) out.push(`Round off${sep}${ro > 0 ? "+" : "−"}${rs2(Math.abs(ro))}`);
   return out;
 }
@@ -43,7 +44,7 @@ export function billText(o) {
   const L = billLines(o); const gross = L.reduce((s, l) => s + l.list * l.qty, 0); const payable = M.total(o); const discount = Math.max(0, gross - (M.sub(o) - M.disc(o)));
   let t = `${M.config().business} – Bill summary\n${taxId(o)}${o.customer}${o.flat ? " · " + o.flat : ""}\n${dLong(o.date)}\n\n`;
   L.forEach(l => t += `${l.item} × ${l.qty} @ ${rs(l.list)} = ${rs(l.list * l.qty)}\n`);
-  return t + `\nTotal: ${rs(gross)}\nDiscount: ${discount > 0 ? "−" + rs(discount) : rs(0)}\n${taxBlock(o).map(x => x + "\n").join("")}Total payable: ${rs(payable)}`;
+  return t + `\nTotal: ${rs(gross)}\nDiscount: ${discount > 0 ? "−" + rs(discount) : rs(0)}${o.coupon ? ` (coupon ${o.coupon})` : ""}\n${(o.charges || []).map(c => `${c.name}: ${rs(c.amount)}\n`).join("")}${taxBlock(o).map(x => x + "\n").join("")}Total payable: ${rs(payable)}`;
 }
 const billChanged = o => o.billSentAt && o.billTotal != null && +o.billTotal !== M.total(o);
 const billWhen = o => new Date(o.billSentAt).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
@@ -158,7 +159,7 @@ export function openOrder(id) {
   <div class="subl" style="margin:-4px 0 10px">Order ${noLabel(o)} · ${esc(dLong(o.date))} · ${esc(M.chanLabel(o))}${o.phone && R.can("phone") ? " · " + esc(o.phone) : ""}${o.tag ? ` · <span class="tag t-camp">${esc(o.tag)}</span>` : ""}</div>
   ${cancelled ? `<div class="banner bad">Cancelled${o.cancelReason ? ": " + esc(o.cancelReason) : ""}</div>` : `<div class="steps" role="group" aria-label="Order status">${steps}</div>`}
   <div class="kv">${o.items.map(i => `<div><span>${esc(i.item)} × ${i.qty}${money ? ` <small class="mut">@ ${rs(i.rate)}</small>` : ""}</span>${money ? `<span>${rs(i.qty * i.rate)}</span>` : ""}</div>`).join("")}
-  ${money && o.discountPct ? `<div><span>Offer ${o.discountPct}% off</span><span>−${rs(M.disc(o))}</span></div>` : ""}${money ? taxBlock(o, "|").map(x => { const [a, b] = x.split("|"); return `<div><span class="mut">${esc(a)}</span><span class="mut">${esc(b)}</span></div>`; }).join("") : ""}${money ? `<div class="tot"><span>Total</span><span>${rs(M.total(o))}</span></div>` : ""}</div>
+  ${money && M.disc(o) ? `<div><span>${esc(M.offerText(o))}</span><span>−${rs(M.disc(o))}</span></div>` : ""}${money ? (o.charges || []).map(c => `<div><span>${esc(c.name)}</span><span>${rs(c.amount)}</span></div>`).join("") : ""}${money ? taxBlock(o, "|").map(x => { const [a, b] = x.split("|"); return `<div><span class="mut">${esc(a)}</span><span class="mut">${esc(b)}</span></div>`; }).join("") : ""}${money ? `<div class="tot"><span>Total</span><span>${rs(M.total(o))}</span></div>` : ""}</div>
   ${o.slot || o.cakeMsg || o.weight || o.flavour || o.advance ? `<div class="kv" style="margin-top:8px">${o.slot ? `<div><span>Delivery time</span><b>${esc(o.slot)}</b></div>` : ""}${o.cakeMsg ? `<div><span>Message on the cake</span><b>“${esc(o.cakeMsg)}”</b></div>` : ""}${o.weight ? `<div><span>Weight / size</span><b>${esc(o.weight)}</b></div>` : ""}${o.flavour ? `<div><span>Flavour / theme</span><b>${esc(o.flavour)}</b></div>` : ""}${o.advance ? `<div><span>Advance</span><b>${rs(o.advance)}${advanceDue(o) ? ` · <span class="due">${rs(advanceDue(o))} still due</span>` : " · received"}</b></div>` : ""}</div>` : ""}
   ${o.notes ? `<p class="hint">Note: ${esc(o.notes)}</p>` : ""}
   ${cancelled ? "" : `<div class="statusrow"><button class="sbox ${M.isDelivered(o) ? "on" : "off"}" data-act="toggleDeliver" ${R.can("deliver") ? "" : "disabled"}><small>Delivery</small><b>${M.isDelivered(o) ? "Delivered ✓" : "Not delivered"}</b><em>${R.can("deliver") ? "Tap to " + (M.isDelivered(o) ? "undo" : "mark delivered") : ""}</em></button>
@@ -287,8 +288,8 @@ function drawCompose(st) {
     <div class="two"><div><label class="f" for="cTag">Occasion</label><select class="in" id="cTag"><option value="">Regular order</option>${[...new Set([...(c.tags || []), o.tag].filter(Boolean))].map(g => `<option ${g === o.tag ? "selected" : ""}>${esc(g)}</option>`).join("")}</select></div>
     <div><label class="f" for="cNotes">Notes</label><input class="in" id="cNotes" value="${esc(o.notes)}" placeholder="Optional"></div></div>
   </div>
-  <div class="comp-foot"><div class="offer">Offer ${[0, 5, 10, 15].map(p => `<button class="chip" data-offer="${p}" aria-pressed="${(o.discountPct || 0) === p}">${p ? p + "% off" : "None"}</button>`).join("")}</div>
-    <div class="totline"><small>${M.pcs(o)} pcs${o.discountPct ? ` · saves ${rs(M.disc(o))}` : ""}${M.taxOf(M.withTax(o)).tax ? ` · ${M.withTax(o).taxIncl ? "incl." : "+"} ${esc(M.taxCfg().name)} ${rs2(M.taxOf(M.withTax(o)).tax)}` : ""}</small><b>${rs(M.total(M.withTax(o)))}</b></div>
+  <div class="comp-foot">${extrasHtml(o, "Offer")}
+    <div class="totline"><small>${M.pcs(o)} pcs${M.disc(o) ? ` · saves ${rs(M.disc(o))}` : ""}${M.charges(o) ? ` · charges ${rs(M.charges(o))}` : ""}${M.taxOf(M.withTax(o)).tax ? ` · ${M.withTax(o).taxIncl ? "incl." : "+"} ${esc(M.taxCfg().name)} ${rs2(M.taxOf(M.withTax(o)).tax)}` : ""}</small><b>${rs(M.total(M.withTax(o)))}</b></div>
     <button class="btn btn-primary" data-act="saveCompose" ${o.items.length ? "" : "disabled"}>${st.isNew ? "Save order" : "Save changes"}</button></div>`, true);
   const cs = $(".comp-scroll"); if (cs) cs.scrollTop = sc;
   if (fid) { const el = document.getElementById(fid); if (el) { el.focus(); try { el.setSelectionRange(fpos, fpos); } catch (_) {} } }
@@ -303,6 +304,7 @@ A.saveCompose = async el => { syncCompose(); const st = ui.sheet; const o = st.o
   o.customer = o.customer.trim(); o.flat = o.flat.trim().toUpperCase().replace(/^([A-Z])\s*-?\s*(\d+)$/, "$1-$2"); o.phone = o.phone.trim(); o.notes = o.notes.trim();
   if (!o.customer) { toast("Add the customer’s name"); $("#cName").focus(); return; }
   if (!o.items.length) { toast("Add at least one item"); return; }
+  recheckCoupon(o);
   // A customer not seen before is checked against saved ones (same flat or phone, similar name) before the order is saved.
   const prev = st.isNew ? null : M.orders().find(x => x.id === o.id);
   if (!prev || M.ckey(prev) !== M.ckey(o)) { const r = await checkCustomer(o); if (!r) return; if (r !== "new") { Object.assign(o, r); st.dirty = true; } }
@@ -321,7 +323,7 @@ H.click.push(async T => {
   const ct = T.closest("[data-cat]"); if (ct) { syncCompose(); st.cat = ct.dataset.cat; drawCompose(st); return true; }
   const am = T.closest("[data-addm]"); if (am) { syncCompose(); const m = M.menu().find(x => x.id === am.dataset.addm); if (!m) return true; const ex = o.items.find(i => i.menuId === m.id); if (ex) ex.qty++; else o.items.push({ item: m.name, qty: 1, rate: m.price, menuId: m.id }); st.dirty = true; st.sugg = false; drawCompose(st); return true; }
   const sp = T.closest("[data-step]"); if (sp) { syncCompose(); const [ix, d] = sp.dataset.step.split(":").map(Number); o.items[ix].qty += d; if (o.items[ix].qty <= 0) o.items.splice(ix, 1); st.dirty = true; drawCompose(st); return true; }
-  const of = T.closest("[data-offer]"); if (of) { syncCompose(); o.discountPct = +of.dataset.offer; st.dirty = true; drawCompose(st); return true; }
+  if (T.closest("[data-xdisc],[data-xcustom],[data-xcoupon],[data-xcharge],[data-xother]")) { syncCompose(); if (await extrasClick(T, o)) { st.dirty = true; drawCompose(st); } return true; }
   return false;
 });
 H.input.push(T => {
