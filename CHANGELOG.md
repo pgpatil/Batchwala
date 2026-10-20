@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.15.0 — 20 Oct 2026 · analytics and report periods
+- Analytics section (Reports & analytics): Overview, Sales, Production, Buying and Stock dashboards with trends against the previous period, and Explore for slicing sales lines, payments, production, purchases or stock movements by any dimension and measure, with filters, bar or line charts, a table with totals and shares, CSV download and saved views shared with the team
+- Every report has a period picker: today, yesterday, this or last week, this or last month, quarter, this or last financial year, last 30 or 90 days, all time, or a custom from–to range (Cost & stock reports, Sales & profit, Analytics)
+
 ## 2.14.1 — 20 Oct 2026 · simpler navigation
 - Screens in four groups: Orders, Make, Stock and Buying (Buying split out of Stores); on a computer the sidebar shows them as headers that open and close, the current group always open, plus Reports & records
 - Counts of what needs attention on many more tabs, chips and closed headers: red for overdue or owed (payments, late orders, low stock, expired pieces, overdue supplier bills, late POs, yesterday's day close, backup due), yellow for today's to-dos (deliveries, items to bake, work orders, incoming transfers, POs to approve)

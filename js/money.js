@@ -1,5 +1,6 @@
 // Money: the Payments tab, payment confirmations, customers and the sales and profit reports.
 import * as ev from "./events.js";
+import { periodBar, periodRange } from "./period.js";
 import * as M from "./model.js";
 import * as R from "./roles.js";
 import { asLines, layoutSwitch } from "./table.js";
@@ -58,7 +59,6 @@ H.click.push(T => {
   if (st && st.kind === "part") { const pm = T.closest("[data-pmode]"); if (pm) { st.mode = st.mode === pm.dataset.pmode ? "" : pm.dataset.pmode; document.querySelectorAll("[data-pmode]").forEach(b => b.setAttribute("aria-pressed", b.dataset.pmode === st.mode)); return true; } }
   const qp = T.closest("[data-quickpay]"); if (qp) { const c = M.customers().find(x => x.key === qp.dataset.quickpay); if (c) confirmPay(c); return true; }
   const cu = T.closest("[data-cust]"); if (cu) { custSheet(cu.dataset.cust); return true; }
-  const rp = T.closest("[data-rep]"); if (rp) { S.filter.rep = rp.dataset.rep; reportsSheet(); return true; }
   return false;
 });
 
@@ -108,9 +108,7 @@ A.savePhone = async () => { const c = sheetCust(); const p = $("#cuPhone").value
 /* ---------- reports ---------- */
 function reportsSheet() {
   if (!guard("reports")) return;
-  const period = S.filter.rep || "month"; const t = today(); const cost = R.can("prices");
-  const wk = addDays(t, -((dObj(t).getDay() + 6) % 7)); const mEnd = (() => { const d = dObj(t.slice(0, 8) + "01"); d.setMonth(d.getMonth() + 1); d.setDate(0); return t.slice(0, 8) + String(d.getDate()).padStart(2, "0"); })();
-  const [start, end] = { week: [wk, addDays(wk, 6)], month: [t.slice(0, 8) + "01", mEnd], d30: [addDays(t, -29), t], all: ["0000", "9999"] }[period];
+  const cost = R.can("prices"); const [start, end] = periodRange("sales");
   const list = M.orders(false).filter(o => o.date >= start && o.date <= end);
   const sales = list.reduce((s, o) => s + M.total(o), 0), coll = list.reduce((s, o) => s + Math.min(M.received(o), M.total(o)), 0);
   const byDay = {}; list.forEach(o => byDay[o.date] = (byDay[o.date] || 0) + M.total(o)); const days = Object.keys(byDay).sort().slice(-31); const mx = Math.max(1, ...days.map(d => byDay[d]));
@@ -126,7 +124,7 @@ function reportsSheet() {
   const repeat = Object.values(cs).filter(x => x.c > 1).length;
   const bt = M.batches().filter(b => b.date >= start && b.date <= end); const bPcs = bt.reduce((s, b) => s + M.batchPcs(b), 0), bSp = bt.reduce((s, b) => s + M.batchSpoiled(b), 0);
   openSheet({ kind: "reports", redraw: reportsSheet }, `<div class="sh-head"><h2 class="h">Sales & profit</h2><button class="x" data-close aria-label="Close">×</button></div>
-  <div class="chips" style="margin-bottom:12px">${[["week", "This week"], ["month", "This month"], ["d30", "Last 30 days"], ["all", "All time"]].map(([k, l]) => `<button class="chip" data-rep="${k}" aria-pressed="${period === k}">${l}</button>`).join("")}</div>
+  <div style="margin-bottom:12px">${periodBar("sales")}</div>
   <div class="kpis" style="padding:0"><div class="kpi"><b>${rs(sales)}</b><span>sales · ${list.length} orders</span></div><div class="kpi"><b>${rs(sales - coll)}</b><span>still to collect</span></div>
   ${cost ? `<div class="kpi"><b>${rs(purchases)}</b><span>spent on stock</span></div><div class="kpi"><b>${costed ? Math.round((1 - cogs / costed) * 100) + "%" : "–"}</b><span>gross margin${costed && costed < sales ? " (costed items)" : ""}</span></div>
   <div class="kpi"><b>${rs(waste)}</b><span>wastage value</span></div>` : ""}${M.taxCfg().on || list.some(o => M.taxOf(o).tax) ? `<div class="kpi"><b>${rs(list.reduce((s, o) => s + M.taxOf(o).tax, 0))}</b><span>${esc(M.taxCfg().name)} on sales</span></div>` : ""}<div class="kpi"><b>${repeat}</b><span>repeat customers</span></div><div class="kpi"><b>${bPcs - bSp}</b><span>good pieces baked · ${bt.length} batches${bSp ? ` · ${bSp} spoiled` : ""}</span></div></div>

@@ -589,3 +589,22 @@ table.reg td:not(.items){white-space:nowrap}
   .nav .nav-grp .chev{display:flex;transition:transform .15s} .nav .nav-grp[aria-expanded="true"] .chev{transform:rotate(90deg)}
   .nav .nav-items.dx{display:block;padding-left:10px}
 }
+/* period picker */
+.periodbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px}.periodbar .sel{margin:0}.periodbar select.in{width:auto;min-width:170px;height:40px;padding:0 10px}
+.periodbar input[type=date].in{width:auto;height:40px}.periodbar .perlbl{font-size:13px}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+/* analytics */
+.adash{padding:0 12px 24px}.agrid{display:grid;grid-template-columns:1fr;gap:10px;margin-top:10px}
+@media (min-width:900px){.agrid{grid-template-columns:1fr 1fr}.agrid .wide{grid-column:1/-1}}
+.acard{margin:0;padding:12px 14px}.acard h3{margin:0 0 8px;font-size:14.5px}
+.kpi small{display:block;font-size:11.5px;font-weight:700;margin-top:2px}.kpi small.good{color:var(--ok)}.kpi small.bad{color:var(--due)}
+.hbars{display:flex;flex-direction:column;gap:6px}.hb{display:grid;grid-template-columns:minmax(80px,38%) 1fr auto;align-items:center;gap:8px;font-size:13px}
+.hb .hl{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.hb .hbar{height:12px;background:var(--surface);border-radius:6px;overflow:hidden}.hb .hbar i{display:block;height:100%;background:var(--marigold);border-radius:6px}
+.hb b{font-variant-numeric:tabular-nums;font-size:12.5px}
+.aline{width:100%;height:auto;display:block}.aline .ax{stroke:var(--line)}.aline polyline{fill:none;stroke-width:2.2}.aline .cu{stroke:var(--accent);fill:var(--accent)}.aline polyline.cu{fill:none}
+.aline .pv{stroke:var(--muted);stroke-dasharray:4 4;opacity:.7}.aline text{font-size:10.5px;fill:var(--muted)}
+.lg .sw{display:inline-block;width:14px;height:3px;vertical-align:middle;margin:0 4px 0 8px}.lg .sw.cu{background:var(--accent)}.lg .sw.pv{background:var(--muted)}
+.exctl{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}.exctl label{display:flex;flex-direction:column;gap:3px;font-size:12px;font-weight:700;color:var(--muted)}.exctl .in{height:40px}
+.exvals{margin:10px 0 4px;max-height:132px;overflow:auto}.exf{display:inline-flex;align-items:center;gap:4px;margin:6px 4px 0 0}
+td.heat{background:color-mix(in srgb,var(--marigold) calc(var(--h) * 55%),transparent)}
+.reg tfoot td{border-top:2px solid var(--line);font-weight:700}
