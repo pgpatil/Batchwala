@@ -19,6 +19,13 @@ const memName = id => (ev.get("members", id) || {}).name || "–";
 const inR = (d, [a, b]) => d >= a && d <= b;
 
 /* ---------- datasets: flat rows with dimensions and measures ---------- */
+// Rows are built once per dataset, period and data change; every chart on a dashboard reads the same rows.
+let rowStamp = "", rowCache = new Map(), stdCache = new Map();
+function rowsOf(ds, R) { const st = ev.dataVersion() + "|" + today(); if (st !== rowStamp) { rowStamp = st; rowCache = new Map(); stdCache = new Map(); }
+  const k = ds + "|" + R[0] + "|" + R[1]; if (!rowCache.has(k)) rowCache.set(k, DATA[ds].rows(R)); return rowCache.get(k); }
+// Standard cost of one piece, for the recipe in force on the date (cached per item and recipe version).
+function unitStd(m, date) { const v = (m.versions || []).filter(x => x.until > date).map(x => x.until).sort()[0] || "now"; const k = m.id + "|" + v;
+  if (!stdCache.has(k)) { const rec = M.recipeAt(m, date); stdCache.set(k, rec && (rec.recipe || []).length ? M.recipeCost(rec).cost : 0); } return stdCache.get(k); }
 // Each: label, dims [key, label], measures [key, label, kind] (kind: money / num / pct-able), rows(range).
 const TIME = [["day", "Day"], ["week", "Week"], ["month", "Month"], ["weekday", "Weekday"]];
 export const DATA = {
@@ -28,7 +35,7 @@ export const DATA = {
       M.orders(false).filter(o => inR(o.date, R)).forEach(o => { const f = 1 - M.discF(o); const tx = M.taxOf(o); const sub = M.sub(o) || 1; const hr = o.createdAt ? String(new Date(o.createdAt).getHours()).padStart(2, "0") + ":00" : "–";
         const base = { ...timeDims(o.date), hour: hr, channel: M.CHANNELS[o.channel] || o.channel, customer: o.channel === "walkin" ? "Walk-in" : o.customer, flat: o.flat || "–", location: M.locName(o.outletId || home), occasion: o.tag || "Regular", coupon: o.coupon || "None", paid: { paid: "Paid", part: "Part paid", due: "Due" }[M.payState(o)], status: M.STATUS_LABEL[o.status] || o.status, oid: o.id };
         o.items.forEach(i => { const m = (i.menuId && menu.find(x => x.id === i.menuId)) || M.menuByName(i.item); const g = i.qty * i.rate; const net = g * f; const share = g / sub;
-          const rec = m ? M.recipeAt(m, o.date) : null; const cost = rec && (rec.recipe || []).length ? M.recipeCost(rec).cost * i.qty : 0;
+          const cost = m ? unitStd(m, o.date) * i.qty : 0;
           const nx = o.taxIncl ? net - tx.tax * share : net;
           out.push({ ...base, item: i.item, category: (m && m.category) || "Uncategorised", qty: i.qty, gross: g, discount: g - net, net: nx, tax: tx.tax * share, cost, margin: cost ? nx - cost : 0 }); }); });
       return out; } },
@@ -54,7 +61,7 @@ const DISTINCT = { sales: { orders: "oid" }, production: { batches: "bid" }, pur
 /* ---------- pivot ---------- */
 // spec: { ds, rows, cols, measure, agg (sum | avg), filters: { dim: [values] }, top, sort (value | label) }
 export function pivot(spec, range) {
-  const d = DATA[spec.ds]; let rows = d.rows(range); const fl = spec.filters || {};
+  const d = DATA[spec.ds]; let rows = rowsOf(spec.ds, range); const fl = spec.filters || {};
   Object.entries(fl).forEach(([k, vs]) => { if (vs && vs.length) rows = rows.filter(r => vs.includes(String(r[k]))); });
   const dk = (DISTINCT[spec.ds] || {})[spec.measure]; const cnt = spec.measure === "count";
   const cell = () => ({ s: 0, n: 0, set: dk ? new Set() : null });
@@ -100,8 +107,8 @@ function kpi(label, cur, prv, kind = "money", goodUp = true) {
   const d = prv ? (cur - prv) / Math.abs(prv) * 100 : null; const up = d != null && d >= 0;
   return `<div class="kpi"><b>${kind === "pct" ? (Math.round(cur * 10) / 10) + "%" : fmtV(cur, kind)}</b><span>${esc(label)}</span>${d != null && isFinite(d) ? (Math.abs(d) < 0.5 ? `<small class="mut">≈ same as previous</small>` : `<small class="${up === goodUp ? "good" : "bad"}">${up ? "▲" : "▼"} ${Math.abs(Math.round(d))}% vs previous</small>`) : ""}</div>`;
 }
-const sum = (ds, m, R, f) => { let rows = DATA[ds].rows(R); if (f) rows = rows.filter(f); return rows.reduce((s, r) => s + (+r[m] || 0), 0); };
-const distinct = (ds, k, R) => new Set(DATA[ds].rows(R).map(r => r[k])).size;
+const sum = (ds, m, R, f) => { let rows = rowsOf(ds, R); if (f) rows = rows.filter(f); return rows.reduce((s, r) => s + (+r[m] || 0), 0); };
+const distinct = (ds, k, R) => new Set(rowsOf(ds, R).map(r => r[k])).size;
 const grain = R => { const n = Math.round((dObj(R[1]) - dObj(R[0] <= "0001" ? (M.orders().map(o => o.date).sort()[0] || R[1]) : R[0])) / 864e5); return n > 120 ? "month" : n > 35 ? "week" : "day"; };
 
 /* ---------- dashboards ---------- */
@@ -119,7 +126,7 @@ function overview(R, P) {
     ${card("Spend by supplier", hbars(series({ ds: "purchases", rows: "supplier", measure: "amount", top: 8 }, R), "money"))}${card("Wastage by material", hbars(series({ ds: "moves", rows: "material", measure: "value", filters: { move: ["Wastage"] }, top: 8 }, R).map(x => ({ ...x, v: -x.v })), "money"))}</div>`;
 }
 function sales(R, P) {
-  const g = grain(R); const rows = DATA.sales.rows(R); const cust = {}; rows.forEach(r => { if (r.customer !== "Walk-in") cust[r.customer + "|" + r.flat] = 1; });
+  const g = grain(R); const rows = rowsOf("sales", R); const cust = {}; rows.forEach(r => { if (r.customer !== "Walk-in") cust[r.customer + "|" + r.flat] = 1; });
   const firstSeen = {}; M.orders(false).forEach(o => { if (o.channel === "walkin") return; const k = o.customer + "|" + (o.flat || "–"); if (!firstSeen[k] || o.date < firstSeen[k]) firstSeen[k] = o.date; });
   const newC = Object.keys(cust).filter(k => firstSeen[k] >= R[0]).length; const disc = rows.reduce((s, r) => s + r.discount, 0);
   return `<div class="kpis" style="padding:0">${kpi("net sales", sum("sales", "net", R), P && sum("sales", "net", P))}${kpi("pieces sold", sum("sales", "qty", R), P && sum("sales", "qty", P), "num")}${kpi("customers who ordered", Object.keys(cust).length, null, "num")}${kpi("new customers", newC, null, "num")}${kpi("discounts given", disc, P && sum("sales", "discount", P), "money", false)}</div>
@@ -173,7 +180,7 @@ const spec = () => (S.ex = S.ex || { ...DEF, filters: {} });
 const views = () => ev.all("aviews").sort((a, b) => a.name.localeCompare(b.name));
 function explore(R) {
   const x = spec(); const d = DATA[x.ds]; const res = pivot(x, R); const dims = d.dims; const opt = (list, v, blank) => `${blank ? `<option value="">${blank}</option>` : ""}${list.map(([k, l]) => `<option value="${k}" ${v === k ? "selected" : ""}>${esc(l)}</option>`).join("")}`;
-  const valuesOf = k => [...new Set(d.rows(R).map(r => String(r[k] ?? "–")))].sort().slice(0, 200);
+  const valuesOf = k => [...new Set(rowsOf(x.ds, R).map(r => String(r[k] ?? "–")))].sort().slice(0, 200);
   const fk = x.fdim || ""; const fl = x.filters || {};
   const timeRows = ["day", "week", "month", "hour"].includes(x.rows);
   const chart = x.chart === "none" ? "" : x.cols ? "" : x.chart === "line" || (timeRows && x.chart !== "bar") ? line(res.list.map(r => ({ label: labelOf(x.rows, r.key), v: r.v })), res.kind) : hbars(res.list.map(r => ({ label: labelOf(x.rows, r.key), v: r.v })), res.kind, 30);

@@ -24,10 +24,12 @@ V.insights = () => {
 
 /* food cost: sales against the standard material cost of what was sold, by item */
 function cost(a, b) {
-  const list = M.orders(false).filter(o => o.date >= a && o.date <= b); const items = {};
+  const list = M.orders(false).filter(o => o.date >= a && o.date <= b); const items = {}; const std = {};   // standard cost per item and recipe version
   // Each sale is costed with the recipe in force on its order date (recipe versions), at today's material costs.
   list.forEach(o => o.items.forEach(i => { const x = items[i.item] = items[i.item] || { q: 0, v: 0, c: 0, has: false }; x.q += i.qty; x.v += i.qty * i.rate * (1 - M.discF(o)) / (o.taxIncl && i.taxPct ? 1 + i.taxPct / 100 : 1);
-    const m = M.recipeAt(M.menuByName(i.item), o.date); if (m && (m.recipe || []).length) { x.c += M.recipeCost(m).cost * i.qty; x.has = true; } }));
+    const m = M.menuByName(i.item); if (!m) return; const vk = m.id + "|" + ((m.versions || []).filter(v => v.until > o.date).map(v => v.until).sort()[0] || "now");
+    if (!(vk in std)) { const rec = M.recipeAt(m, o.date); std[vk] = rec && (rec.recipe || []).length ? M.recipeCost(rec).cost : null; }
+    if (std[vk] != null) { x.c += std[vk] * i.qty; x.has = true; } }));
   let sales = 0, cogs = 0, costed = 0; const rows = Object.entries(items).sort((x, y) => y[1].v - x[1].v).map(([n, x]) => { const c = x.has && x.q ? x.c / x.q : null;
     sales += x.v; if (c != null) { cogs += c * x.q; costed += x.v; }
     return `<tr>${td(esc(n))}${td(x.q, 1)}${td(rs(x.v), 1, x.v)}${td(c != null ? rs2(c) : "no BOM", 1, c ?? -1)}${td(c != null ? pct(c * x.q, x.v) : "–", 1, c != null && x.v ? c * x.q / x.v : -1)}</tr>`; });
