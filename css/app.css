@@ -577,3 +577,15 @@ table.reg td:not(.items){white-space:nowrap}
 .lblsheet{display:grid;gap:3mm}.lblsheet.c2{grid-template-columns:repeat(2,1fr)}.lblsheet.c2 .lbl{min-height:52mm}
 .lblsheet.c3{grid-template-columns:repeat(3,1fr)}.lblsheet.c3 .lbl{min-height:34mm;font-size:8.5px}.lblsheet.c3 .lbl .lb-name{font-size:11px}.lblsheet.c3 .lbl .lb-biz{font-size:7.5px}
 @media print{ .lblsheet .lbl{border-color:#bbb} }
+/* grouped sidebar: collapsible headers with a count of what needs attention */
+.nb .dot em.info,.bucketbar em.info,.nav-grp em.info{background:var(--accent);color:var(--on-accent)}
+.bucketbar em{font-style:normal;font-size:10px;font-weight:800;border-radius:8px;padding:1px 5px;margin-left:4px;background:var(--due);color:#fff;vertical-align:1px}
+@media (min-width:1024px){
+  .nav .nav-grp.dx{display:flex;align-items:center;gap:12px;width:100%;padding:10px 12px;margin-top:6px;border-radius:12px;font-size:12.5px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);text-align:left;background:none;border:0;cursor:pointer}
+  .nav .nav-grp:hover{background:var(--surface)} .nav .nav-grp.cur{color:var(--ink)}
+  .nav .nav-grp svg{width:19px;height:19px} .nav .nav-grp .nl{flex:1}
+  .nav .nav-grp em{font-style:normal;font-size:10.5px;font-weight:800;border-radius:8px;padding:1px 6px;background:var(--due);color:#fff;letter-spacing:0}
+  .nav .nav-grp em.info{background:var(--accent);color:var(--on-accent)}
+  .nav .nav-grp .chev{display:flex;transition:transform .15s} .nav .nav-grp[aria-expanded="true"] .chev{transform:rotate(90deg)}
+  .nav .nav-items.dx{display:block;padding-left:10px}
+}

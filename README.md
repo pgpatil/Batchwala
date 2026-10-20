@@ -15,7 +15,7 @@ It is a Progressive Web App: it opens from a link, installs to the home screen, 
 | Bake board | Per item: pre-ordered, kept ready (par level), baked, spoiled, sold at counter, left, and how many still to bake |
 | Batches | Every bake recorded as a numbered batch: pieces per item, prep runs of semi-finished items, spoiled pieces, note, who made it, stock used and made, and net cost. Undone batches stay in the register, marked |
 | Orders | Every order from every channel (WhatsApp, Phone, Instagram, Bulk / event, Other, Walk-in, Swiggy, Zomato), filtered by period, channel and occasion |
-| Navigation and views | Screens grouped into Orders, Make and Stores (one bottom-bar button each on phones, sidebar sections on desktop). Grid or lines on list screens; every table sorts by any column and filters per column, with number comparisons. N for new order, / to search |
+| Navigation and views | Screens grouped into Orders, Make, Stock and Buying (one bottom-bar button each on phones; collapsible headers in the desktop sidebar, with Reports & records). Counts on tabs and headers show what needs attention. Grid or lines on list screens; every table sorts by any column and filters per column, with number comparisons. N for new order, / to search |
 | Delivery run | Today’s pre-orders by wing and floor; Delivered + paid by UPI or cash in one confirm |
 | Bill summary | Per order: items with quantity, rate and amount, then Total, Discount and Total payable. Copy marks it “Bill summary sent”; editing the order afterwards flags it |
 | Payments | Balances by customer, one-tap UPI or cash, part payments oldest-first, reversals instead of edits, WhatsApp reminders with your UPI ID |
