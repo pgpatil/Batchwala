@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.14.1 — 20 Oct 2026 · simpler navigation
+- Screens in four groups: Orders, Make, Stock and Buying (Buying split out of Stores); on a computer the sidebar shows them as headers that open and close, the current group always open, plus Reports & records
+- Counts of what needs attention on many more tabs, chips and closed headers: red for overdue or owed (payments, late orders, low stock, expired pieces, overdue supplier bills, late POs, yesterday's day close, backup due), yellow for today's to-dos (deliveries, items to bake, work orders, incoming transfers, POs to approve)
+- Phones get a Buying button in the bottom bar
+
 ## 2.14.0 — 19 Oct 2026 · good-to-haves
 - Counter: split payment across UPI, cash and card (and when settling a table); split a table's bill by items, each guest paying their part
 - Charges and discounts: delivery, packing and one-off charges on the counter and order form (taxed, on bills and invoices, own Tally ledger); custom % or ₹ discounts; coupons with % or ₹ off, minimum bill and end date (Business settings); orders import/export has a Discount ₹ column

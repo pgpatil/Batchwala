@@ -26,14 +26,42 @@ import "./data.js";
 import { waSheet } from "./ops.js";
 import { setupView, resumeSync, dailyReport } from "./admin.js";
 import { APP_NAME } from "./config.js";
-import { $, esc, ICON, today } from "./util.js";
+import { $, esc, ICON, today, addDays } from "./util.js";
 import { ui, toast, closeSheet, yesNo, focusKey, refocus } from "./ui.js";
 
 const TAB = { help: ["Help", ICON.help], data: ["Import & export", ICON.dl], pos: ["Counter", ICON.cart], bom: ["BOM", ICON.tree], plan: ["Planning", ICON.plan], wo: ["Work orders", ICON.oven], po: ["Purchase orders", ICON.orders], sup: ["Suppliers & payables", ICON.people], insights: ["Cost & stock reports", ICON.chart], close: ["Day close", ICON.pay], take: ["Stock-take", ICON.stock], dn: ["Purchase returns", ICON.inbox], prod: ["Production", ICON.oven], grn: ["Purchases (GRN)", ICON.inbox], xfer: ["Transfers", ICON.truck], fg: ["Finished goods", ICON.batch], today: ["Today", ICON.today], orders: ["Orders", ICON.orders], pay: ["Payments", ICON.pay], stock: ["Inventory", ICON.stock], bake: ["Bake board", ICON.oven], batches: ["Batches", ICON.batch], run: ["Delivery run", ICON.run], more: ["More", ICON.more] };
 const SHORT = { close: "Day close", take: "Stock-take", dn: "Returns", plan: "Plan", wo: "Work orders", po: "POs", sup: "Payables", insights: "Reports", bake: "Bake", run: "My run", grn: "GRN", fg: "FG stock", prod: "Make" };   // bottom-bar labels on phones
 const ORDER = ["pos", "today", "orders", "bake", "prod", "grn", "stock", "xfer", "fg", "batches", "bom", "run", "pay", "more"];
 // Screens grouped into buckets: one bottom-bar button per bucket on phones, a strip of its screens on top of each page, sections in the sidebar.
-const BUCKETS = { orders: ["Orders", ICON.orders, ["today", "orders", "run", "pay", "close"]], make: ["Make", ICON.oven, ["plan", "wo", "prod", "bake", "batches", "bom"]], stores: ["Stores", ICON.store, ["po", "grn", "dn", "sup", "stock", "take", "xfer", "fg"]] };
+const BUCKETS = { orders: ["Orders", ICON.orders, ["today", "orders", "run", "pay", "close"]], make: ["Make", ICON.oven, ["plan", "wo", "prod", "bake", "batches", "bom"]], stores: ["Stock", ICON.store, ["stock", "take", "xfer", "fg"]], buy: ["Buying", ICON.inbox, ["po", "grn", "dn", "sup"]] };
+SHORT.buy = "Buying";
+// What needs attention, per screen: a count on its tab (and the sum on a closed group). Worked out once per data change.
+// urgent counts (overdue, short, owed) show red; the rest (to do today) in the brand colour.
+let attnStamp = "", attnCache = {};
+function attention() {
+  const stamp = ev.dataVersion() + "|" + today() + "|" + ((R.me() || {}).id || "") + "|" + R.mode() + "|" + M.here(); if (stamp === attnStamp) return attnCache;
+  const t = today(); const c = R.can; const a = {}; const put = (v, n, urgent) => { if (n > 0) a[v] = { n, urgent }; };
+  try {
+    const os = M.orders(false);
+    if (c("money")) put("pay", M.customers().filter(x => x.balance > 0).length, true);
+    const due = os.filter(o => o.date === t && M.PREORDER.includes(o.channel) && !M.isDelivered(o)).length; put("today", due, false); if (c("deliver")) put("run", due, false);
+    put("orders", os.filter(o => o.date < t && !M.isDelivered(o) && o.status !== "cancelled").length, true);
+    if (H.lowCount) put("stock", H.lowCount(), true);
+    put("bake", M.board(t).filter(r => r.toBake > 0).length, false);
+    put("batches", M.batchLots().filter(l => l.expired && l.left > 0).length, true);
+    put("wo", ev.all("wos").filter(w => ["planned", "issued"].includes(w.status) && w.date <= t).length, false);
+    put("xfer", ev.all("transfers").filter(x => !x.void && x.to === M.here() && !M.xferReceived(x)).length, false);
+    if (c("po.approve")) put("po", M.porders().filter(p => M.poState(p) === "draft").length, false);
+    const late = M.porders().filter(p => ["approved", "part"].includes(M.poState(p)) && p.expected && p.expected < t).length; if (late) a.po = { n: (a.po ? a.po.n : 0) + late, urgent: true };
+    if (c("payables") || c("stock.buy")) put("sup", M.payables().filter(x => x.overdue > 0).length, true);
+    const y = addDays(t, -1); const me = (R.me() || {}).id;
+    if (c("sale") || c("collect") || c("pay.record")) put("close", ev.all("payments").some(p => p.date === y && p._by === me) && !ev.get("closes", `${y}@${me}`) ? 1 : 0, true);
+    if (R.isAdmin() && H.backupBanner && H.backupBanner()) put("more", 1, true);
+  } catch (_) {}
+  attnStamp = stamp; attnCache = a; return a;
+}
+const NAVKEY = "bw.navopen";
+const navOpen = () => { try { return JSON.parse(localStorage.getItem(NAVKEY) || "{}"); } catch (_) { return {}; } };
 const bucketOf = v => Object.keys(BUCKETS).find(k => BUCKETS[k][2].includes(v));
 const inBucket = k => BUCKETS[k][2].filter(v => allowedViews().includes(v));
 const onBar = v => R.bar().includes(v) || R.bar().includes("@" + bucketOf(v));
@@ -77,20 +105,25 @@ function applyTheme() {
 }
 // One list for both layouts: phones show the role's tabs at the bottom; wide screens show every allowed screen in a sidebar (.dx = sidebar only).
 function navHtml() {
-  const tabs = R.tabs(); const views = allowedViews(); const owe = R.can("money") ? M.customers().filter(c => c.balance > 0).length : 0; const low = H.lowCount ? H.lowCount() : 0;
+  const tabs = R.tabs(); const views = allowedViews(); const at = attention();
   const c = M.config(); const me = R.me();
   const links = [["customers", ICON.people, "Customers", R.can("customers")], ["reports", ICON.chart, "Sales & profit", R.can("reports")], ["insights", ICON.chart, "Cost & stock reports", views.includes("insights")], ["menu", ICON.menu, "Menu & recipes", R.can("menu.edit") || R.can("reports")], ["data", ICON.dl, "Import & export", R.can("export") || R.isAdmin()], ["help", ICON.help, "Help", true]].filter(x => x[3]);
-  const badge = vs => `${vs.includes("pay") && owe ? `<em>${owe}</em>` : ""}${vs.includes("stock") && low ? `<em>${low}</em>` : ""}`;
+  // Delivery run repeats Today's deliveries, so a group's total counts them once.
+  const badge = vs => { const xs = vs.filter(v => !(v === "run" && vs.includes("today"))).map(v => at[v]).filter(Boolean); if (!xs.length) return ""; const n = xs.reduce((s, x) => s + x.n, 0); return `<em class="${xs.some(x => x.urgent) ? "" : "info"}" aria-label="${n} need attention">${n > 99 ? "99+" : n}</em>`; };
   const btn = (t, cls) => `<button class="nb ${cls}" data-view="${t}" aria-current="${S.view === t ? "page" : "false"}"><span class="dot">${TAB[t][1]}${badge([t])}</span><span class="nl">${cls === "dx" ? TAB[t][0] : SHORT[t] || TAB[t][0]}</span></button>`;
   // Phone bar: a bucket with one screen is that screen; with several, it opens the one used last.
   const bar = R.bar().map(t => { if (t[0] !== "@") return views.includes(t) || t === "more" ? btn(t, "mx") : ""; const k = t.slice(1); const vs = inBucket(k); if (!vs.length) return ""; if (vs.length === 1) return btn(vs[0], "mx");
     const go = vs.includes(S.lastIn[k]) ? S.lastIn[k] : vs[0];
     return `<button class="nb mx" data-view="${go}" aria-current="${vs.includes(S.view) ? "page" : "false"}"><span class="dot">${BUCKETS[k][1]}${badge(vs)}</span><span class="nl">${BUCKETS[k][0]}</span></button>`; }).filter(Boolean);
   const loose = ORDER.filter(v => views.includes(v) && !bucketOf(v) && v !== "more");
-  const side = loose.map(v => btn(v, "dx")).join("") + Object.keys(BUCKETS).map(k => { const vs = inBucket(k); return vs.length ? `<div class="nav-sep dx">${BUCKETS[k][0]}</div>` + vs.map(v => btn(v, "dx")).join("") : ""; }).join("");
+  // Sidebar: each group is a header that opens and closes; the group of the open screen is always open. A closed group shows its total count.
+  const open = navOpen(); const grp = (k, label, ic, body, vs) => { const isOpen = open[k] ?? vs.includes(S.view) ?? false; const cur = vs.includes(S.view);
+    return `<button class="nav-grp dx${cur ? " cur" : ""}" data-navgrp="${k}" aria-expanded="${isOpen || cur}"><span class="dot">${ic}</span><span class="nl">${label}</span>${!(isOpen || cur) ? badge(vs) : ""}<span class="chev">${ICON.chev}</span></button>${isOpen || cur ? `<div class="nav-items dx">${body}</div>` : ""}`; };
+  const side = loose.map(v => btn(v, "dx")).join("") + Object.keys(BUCKETS).map(k => { const vs = inBucket(k); return vs.length ? grp(k, BUCKETS[k][0], BUCKETS[k][1], vs.map(v => btn(v, "dx")).join(""), vs) : ""; }).join("");
+  const recBody = links.map(([a, ic, l]) => `<button class="nb dx" data-act="${a}"><span class="dot">${ic}</span><span class="nl">${l}</span></button>`).join("") + (views.includes("more") || tabs.includes("more") ? btn("more", "dx") : "");
   return `<div class="nav-brand">${logoHtml(c)}<div><b>${esc(c.business)}</b><small>${esc(me.name + " · " + R.ROLES[me.role].label)}</small></div></div><div class="nav-sw dx">${switchersHtml()}</div>
-  <div class="nav-in" style="grid-template-columns:repeat(${bar.length},1fr)">${bar.join("")}${side}${views.includes("more") || tabs.includes("more") ? btn("more", "dx") : ""}
-  ${links.length ? `<div class="nav-sep dx">Records</div>${links.map(([a, ic, l]) => `<button class="nb dx" data-act="${a}"><span class="dot">${ic}</span><span class="nl">${l}</span></button>`).join("")}` : ""}</div>
+  <div class="nav-in" style="grid-template-columns:repeat(${bar.length},1fr)">${bar.join("")}${side}
+  ${recBody ? grp("records", "Reports & records", ICON.chart, recBody, ["more"]) : ""}</div>
   <p class="nav-keys dx">Keys: <kbd>N</kbd> new · <kbd>/</kbd> search</p>`;
 }
 let dayOpen = today();
@@ -115,7 +148,7 @@ export function render() {
   const fk = focusKey($("#main"));
   const sx = $("#days") ? $("#days").scrollLeft : null;
   const bk = bucketOf(v); if (bk) S.lastIn[bk] = v; const sibs = bk ? inBucket(bk) : [];
-  const back = sibs.length > 1 ? `<nav class="bucketbar" aria-label="${BUCKETS[bk][0]}">${sibs.map(x => `<button data-view="${x}" aria-current="${x === v ? "page" : "false"}">${SHORT[x] || TAB[x][0]}</button>`).join("")}</nav>`
+  const back = sibs.length > 1 ? `<nav class="bucketbar" aria-label="${BUCKETS[bk][0]}">${sibs.map(x => { const a = attention()[x]; return `<button data-view="${x}" aria-current="${x === v ? "page" : "false"}">${SHORT[x] || TAB[x][0]}${a ? ` <em class="${a.urgent ? "" : "info"}">${a.n > 99 ? "99+" : a.n}</em>` : ""}</button>`; }).join("")}</nav>`
     : !onBar(v) && !R.tabs().includes(v) ? `<button class="backbar" data-go="${R.home()}">${ICON.back}Back to ${SHORT[R.home()] || TAB[R.home()][0]}</button>` : "";
   // A redraw of the same page keeps open cards and the place in inner scrolling panes (ticket, chip rows, wide tables).
   const same = S.lastView === v; S.lastView = v; const PANES = ".pos-ticket, .chips.scroll, .tablecard";
@@ -141,6 +174,7 @@ document.addEventListener("click", async e => {
   // Date inputs styled as chips are invisible; desktop browsers only open their picker from the calendar icon, so open it explicitly.
   const dl = T.closest && T.closest("label"); const di = T.matches && T.matches('input[type="date"]') ? T : dl && dl.querySelector('input[type="date"]');
   if (di && di.showPicker && e.isTrusted) { try { di.showPicker(); } catch (_) {} if (T !== di) e.preventDefault(); }
+  const ng = T.closest("[data-navgrp]"); if (ng) { const k = ng.dataset.navgrp; const o = navOpen(); o[k] = ng.getAttribute("aria-expanded") !== "true"; try { localStorage.setItem(NAVKEY, JSON.stringify(o)); } catch (_) {} $("#nav").innerHTML = navHtml(); return; }
   const nb = T.closest(".nb[data-view], .bucketbar [data-view]"); if (nb) { S.view = nb.dataset.view; if (S.view === "today") S.center = true; render(); window.scrollTo({ top: 0 }); return; }
   const go = T.closest("[data-go]"); if (go) { if (ui.sheet) closeSheet(); S.view = go.dataset.go; if (go.dataset.stockfilter) S.filter.stock = go.dataset.stockfilter; render(); window.scrollTo({ top: 0 }); return; }
   if (T.closest("#fab")) { H.fab && H.fab(); return; }
