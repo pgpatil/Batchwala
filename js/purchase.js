@@ -26,7 +26,7 @@ const taxFor = i => M.taxCfg().on ? (i.taxPct != null && i.taxPct !== "" ? +i.ta
 export async function draftPOs(rows, note = "") {
   const ings = M.ingMap(); const by = new Map(); const wait = M.onOrder(true);
   rows.forEach(r => { const i = ings[r.ingId]; if (!i || i.type === "sf") return; const q = roundPack(i, Math.max(0, r.qty - (wait[i.id] || 0))); if (q <= 0) return;
-    const sup = M.usualSupplier(i) || ""; (by.get(sup) || by.set(sup, []).get(sup)).push({ ingId: i.id, qty: q, rate: r2((M.lastRate(sup, i.id) || M.lastPrice(i)) * 1e4) / 1e4, taxPct: taxFor(i) }); });
+    const sup = M.usualSupplier(i) || ""; (by.get(sup) || by.set(sup, []).get(sup)).push({ ingId: i.id, qty: q, rate: r2((M.contractRate(sup, i.id) || M.lastRate(sup, i.id) || M.lastPrice(i)) * 1e4) / 1e4, taxPct: taxFor(i) }); });
   const made = [];
   for (const [sup, lines] of by) { const no = M.nextDocNo("porders", prefix(), "PO");
     const po = { id: uid("po"), no, date: today(), supplier: sup, loc: M.here(), expected: addDays(today(), 1), lines, status: "draft", notes: note, by: (R.me() || {}).id || "" };
@@ -62,7 +62,7 @@ async function poSheet(po) {
   if (!x.lines.length) x.lines.push(newLine(mats[0], x.supplier));
   const st = { ...lk, kind: "poEdit", x, isNew: !po }; st.redraw = () => drawPo(st); drawPo(st);
 }
-const newLine = (i, sup) => ({ ingId: i.id, qty: 0, f: M.packOf(i) ? M.packOf(i).size : big(i.unit) ? big(i.unit).f : 1, rate: r2((M.lastRate(sup, i.id) || M.lastPrice(i)) * 1e4) / 1e4, taxPct: taxFor(i) });
+const newLine = (i, sup) => ({ ingId: i.id, qty: 0, f: M.packOf(i) ? M.packOf(i).size : big(i.unit) ? big(i.unit).f : 1, rate: r2((M.contractRate(sup, i.id) || M.lastRate(sup, i.id) || M.lastPrice(i)) * 1e4) / 1e4, taxPct: taxFor(i) });
 function drawPo(st) {
   const x = st.x; const mats = M.ingredients().filter(i => i.type !== "sf"); const ings = M.ingMap(); const tax = M.taxCfg().on; const sm = M.stockMap(x.loc);
   openSheet(st, `<div class="sh-head"><h2 class="h">${st.isNew ? "New purchase order" : "Edit " + esc(x.no)}</h2><button class="x" data-close aria-label="Close">×</button></div>
@@ -161,6 +161,7 @@ V.sup = () => {
   return h + (asLines("sup") ? `<div class="card tablecard"><table class="reg"><thead><tr><th>Supplier</th><th class="r">Owed</th><th class="r">Overdue</th>${M.AGE.map(([n]) => `<th class="r">${n} d</th>`).join("")}<th>Oldest due</th><th class="r">Credit days</th><th class="r">Open POs</th><th>Phone</th></tr></thead><tbody>${rows.map(s => `<tr data-sup="${esc(s.name)}" tabindex="0"><td><b>${esc(s.name)}</b></td><td class="r" data-v="${s.balance}">${s.advance ? `<span title="Advance held by the supplier">${rs2(s.balance)} adv.</span>` : rs2(s.balance)}</td><td class="r" data-v="${s.overdue}">${s.overdue ? `<span class="due">${rs2(s.overdue)}</span>` : "–"}</td>${s.age.map(v => `<td class="r" data-v="${v}">${v > 0.005 ? rs2(v) : "–"}</td>`).join("")}<td data-v="${esc(s.oldest)}">${s.oldest ? esc(dLong(s.oldest)) : "–"}</td><td class="r">${s.days || 0}</td><td class="r">${openPo(s.name) || "–"}</td><td>${esc(s.sup.phone || "")}</td></tr>`).join("")}</tbody></table></div>`
     : `<ul class="list">${rows.map(s => `<li class="row${s.overdue ? " warn" : ""}"><button class="who" data-sup="${esc(s.name)}"><div class="nm">${esc(s.name)}</div><div class="subl">${s.overdue ? `<span class="tag t-due">${rs(s.overdue)} overdue</span> ` : ""}${s.oldest ? "oldest due " + esc(dLong(s.oldest)) : "nothing due"}${openPo(s.name) ? ` · ${openPo(s.name)} open PO` : ""}</div></button><div class="amt">${s.advance ? `${rs(s.advance)} <small class="mut">adv.</small>` : rs(s.balance)}</div></li>`).join("")}</ul>`);
 };
+H.supSheet = name => supSheet(name);
 function supSheet(name) {
   const L = M.supplierLedger(name); const s = L.sup; const money = R.can("money");
   const text = `Statement from ${M.config().business} for ${s.name}\n` + L.open.map(b => `• ${b.doc} ${dLong(b.date)}: ${rs2(b.open)}${b.due < today() ? " (overdue)" : ""}`).join("\n") + `\nBalance ${rs2(L.balance)}`;
@@ -172,6 +173,7 @@ function supSheet(name) {
   <label class="f" for="spLead">Lead time <small class="mut">(days from order to delivery · sets reorder levels)</small></label><input class="in" id="spLead" inputmode="numeric" value="${s.lead ?? ""}" placeholder="${+(M.config().leadDays ?? 2)}">
   <label class="f" for="spGst">${esc(M.taxCfg().name)}IN</label><input class="in" id="spGst" value="${esc(s.gstin || "")}" autocapitalize="characters" placeholder="Optional">
   ${R.can("stock.buy") ? `<button class="btn btn-ghost" data-supsave="${esc(s.name)}">Save details</button>` : ""}
+  ${H.supExtras ? H.supExtras(s.name) : ""}
   ${L.open.length ? `<label class="f" style="margin-top:12px">Unpaid bills</label><div class="kv">${L.open.map(b => `<div><span>${esc(b.doc)}${b.inv ? " · inv " + esc(b.inv) : ""} · ${esc(dLong(b.date))}${b.open < b.bill - 0.005 ? ` <small class="mut">of ${rs2(b.bill)}</small>` : ""}<small class="mut" style="display:block">due ${esc(dLong(b.due))}${b.due < today() ? ` <span class="tag t-due">overdue</span>` : ""}</small></span><b>${rs2(b.open)}</b></div>`).join("")}</div>
     <div class="btnrow"><a class="btn btn-wa" href="${esc(waHref(s.phone || "", text))}" target="_blank" rel="noopener">${ICON.wa}Share statement</a></div>` : ""}
   ${money ? `<label class="f" style="margin-top:12px">Ledger</label><div class="card tablecard" style="margin:0"><table class="reg"><thead><tr><th>Date</th><th>Entry</th><th class="r">Bill</th><th class="r">Paid / returned</th><th class="r">Balance</th><th></th></tr></thead><tbody>${L.entries.map(e => `<tr><td data-v="${esc(e.date)}">${esc(dLong(e.date))}</td><td>${esc(e.doc)}</td><td class="r">${e.bill ? rs2(e.bill) : "–"}</td><td class="r">${e.paid ? rs2(e.paid) : "–"}</td><td class="r">${rs2(e.bal)}</td><td>${e.pay && e.pay.amount > 0 && R.can("payables") && !M.spays().some(x => x.revOf === e.pay.id) ? `<button class="linkbtn" data-suprev="${esc(e.pay.id)}">Reverse</button>` : ""}</td></tr>`).join("") || `<tr><td colspan="6">No bills or payments yet.</td></tr>`}</tbody></table></div>` : ""}`);
@@ -234,5 +236,5 @@ H.change.push(T => { const st = ui.sheet; if (!st || st.kind !== "spay" || T.dat
 H.input.push(T => { const st = ui.sheet; if (!st || st.kind !== "poEdit" || !(T.dataset.poqty != null || T.dataset.porate != null || T.dataset.potax != null)) return false; syncPo(); const el = $("#poTot"); if (el) el.innerHTML = poTotals(st.x); return true; });
 H.change.push(T => { const st = ui.sheet; if (!st || st.kind !== "poEdit") return false;
   if (T.dataset.poing != null) { syncPo(); const i = M.ingMap()[T.value]; st.x.lines[+T.dataset.poing] = { ...newLine(i, st.x.supplier.trim()), qty: 0 }; drawPo(st); return true; }
-  if (T.id === "poSup") { syncPo(); st.x.lines.forEach(l => { const r = M.lastRate(st.x.supplier.trim(), l.ingId); if (r) l.rate = r; }); drawPo(st); return true; }
+  if (T.id === "poSup") { syncPo(); st.x.lines.forEach(l => { const r = M.contractRate(st.x.supplier.trim(), l.ingId) || M.lastRate(st.x.supplier.trim(), l.ingId); if (r) l.rate = r; }); drawPo(st); return true; }
   return false; });

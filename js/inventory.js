@@ -196,13 +196,14 @@ function drawIngEdit(st) {
   <label class="f">Bought in packs of <small class="mut">(optional · e.g. bag of 50 kg, box of 100)</small></label><div class="two"><input class="in" id="gPackName" value="${esc((x.pack || {}).name || "")}" placeholder="bag, box, tin"><div class="two" style="gap:6px"><input class="in" id="gPackSize" inputmode="decimal" value="${x.pack && x.pack.size ? +(x.pack.size / st.rf).toFixed(3) : ""}" placeholder="size">${unitChips(x.unit, st.rf, "grf")}</div></div>
   <label class="f" for="gShelf">Usable for <small class="mut">(days after delivery · fills the best-before date on GRNs)</small></label><input class="in" id="gShelf" inputmode="numeric" value="${x.shelfDays || ""}" placeholder="No expiry tracking">
   <label class="f" for="gCode">Barcode <small class="mut">(optional · scan or type)</small></label><input class="in" id="gCode" value="${esc(x.barcode || "")}" autocapitalize="off">`}
+  ${x.type === "pm" ? `<label class="f" style="display:flex;align-items:center;gap:10px"><input type="checkbox" id="gRtn" ${x.returnable ? "checked" : ""}> Returnable (crates, trays, cake stands) · track who has them</label>` : ""}
   ${x.type !== "pm" ? `<label class="f">Allergens it contains</label><div class="chips">${M.ALLERGENS.map(a => `<button class="chip" data-galg="${esc(a)}" aria-pressed="${(x.allergens || []).includes(a)}">${esc(a)}</button>`).join("")}</div>
     ${sf && M.allergensOf({ recipe: x.recipe }).length ? `<p class="hint">From its recipe: ${esc(M.allergensOf({ recipe: x.recipe }).join(", "))}</p>` : ""}` : ""}
   ${st.isNew ? `<label class="f" for="gOpen">Stock on hand now</label><div class="two"><input class="in" id="gOpen" inputmode="decimal" placeholder="0">${unitChips(x.unit, st.rf, "grf")}</div>` : ""}
   <button class="btn btn-primary" data-inv="saveIng">${st.isNew ? "Add material" : "Save"}</button>
   ${!st.isNew && R.isAdmin() ? `<button class="btn btn-danger" data-inv="deleteIng">Delete material</button>` : ""}`);
 }
-function syncIng() { const st = ui.sheet, x = st.x; const b = big(x.unit); const g = id => document.getElementById(id);
+function syncIng() { const st = ui.sheet, x = st.x; const b = big(x.unit); const g = id => document.getElementById(id); if (g("gRtn")) x.returnable = g("gRtn").checked;
   x.name = g("gName").value; if (g("gCat")) x.category = g("gCat").value.trim(); x.reorder = num(g("gReorder").value) * st.rf;
   if (g("gCost")) x.cost = num(g("gCost").value) / (b ? b.f : 1); if (g("gCode")) x.barcode = g("gCode").value.trim(); if (g("gSupp")) x.supplier = g("gSupp").value.trim(); if (g("gTax")) x.taxPct = g("gTax").value.trim() === "" ? null : num(g("gTax").value);
   if (g("gYield")) x.yield = num(g("gYield").value) * st.rf;
@@ -346,11 +347,11 @@ const I = {
     // Price everything before the moves change stock, so costs are as of this moment.
     const stock = ids.map(id => ({ ingId: id, qty: need[id], cost: r2(M.unitCost(ings[id]) * need[id]) }));
     const madeList = Object.keys(made).map(id => ({ ingId: id, qty: made[id], cost: r2(M.unitCost(ings[id]) * made[id]) }));
-    const loc = st.loc || M.here();
+    const loc = st.loc || M.here(); const lots = ids.flatMap(id => M.lotsFor(id, need[id]));   // traceability: which GRN lots went in
     for (const id of ids) await putMove({ ingId: id, type: "bake", qty: -need[id], date: st.date, note: `Batch #${no}`, ref: bakeId, outletId: loc });
     for (const x of madeList) await putMove({ ingId: x.ingId, type: "make", qty: x.qty, date: st.date, note: `Batch #${no}`, ref: bakeId, outletId: loc });
     const net = stock.reduce((s, x) => s + x.cost, 0) - madeList.reduce((s, x) => s + x.cost, 0);
-    await ev.put("bakes", { id: bakeId, no, date: st.date, lines, prep, notes: (st.notes || "").trim(), stock, made: madeList, cost: r2(Math.max(0, net)), madeBy: me ? me.id : "", at: new Date().toISOString(), outletId: loc });
+    await ev.put("bakes", { id: bakeId, no, date: st.date, lines, prep, notes: (st.notes || "").trim(), stock, made: madeList, lots, cost: r2(Math.max(0, net)), madeBy: me ? me.id : "", at: new Date().toISOString(), outletId: loc });
     sync.soon(); closeSheet(); toast(`Batch #${no} saved`, `<button data-batch="${esc(bakeId)}">View</button>`); },
   newItem: () => itemSheet(null),
   addRecipeLine: () => { syncHost(); const st = ui.sheet; const ings = M.ingredients().filter(i => i.id !== st.x.id); if (ings.length) st.x.recipe.push({ ingId: ings[0].id, qty: 0 }); drawHost(st); },

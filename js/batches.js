@@ -64,7 +64,7 @@ export function batchSheet(id) {
   <label class="f">Stock used</label>${stock.length ? `<div class="kv">${stock.map(x => { const i = ings[x.ingId]; return `<div><span>${esc(i ? i.name : "Removed ingredient")}</span><span>${i ? qty(x.qty, i.unit) : x.qty}${money && x.cost ? ` <small class="mut">${rs2(x.cost)}</small>` : ""}</span></div>`; }).join("")}</div>` : `<p class="hint" style="margin-top:0">No recipe for these items, so stock didn’t change.</p>`}
   ${b.notes ? `<p class="hint">Note: ${esc(b.notes)}</p>` : ""}
   ${edit && !b.void ? `<div class="btnrow"><button class="btn btn-ghost" data-bt="spoil" ${b.lines.length ? "" : "disabled"}>Record spoiled</button><button class="btn btn-ghost" data-bt="note">${b.notes ? "Edit note" : "Add note"}</button></div>` : ""}
-  ${b.lines.length && !b.void ? `<button class="btn btn-ghost" data-labels="batch:${esc(b.id)}">${ICON.print}Print labels</button>` : ""}
+  ${b.lines.length && !b.void ? `<button class="btn btn-ghost" data-labels="batch:${esc(b.id)}">${ICON.print}Print labels</button>` : ""}${H.batchExtras && !b.void ? H.batchExtras(b) : ""}
   ${R.can("history") ? `<button class="btn btn-ghost" data-bt="history">History of changes</button>` : ""}
   ${edit && !b.void ? `<button class="btn btn-danger" data-bt="undo">Undo this batch</button>` : ""}`);
 }

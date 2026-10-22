@@ -188,9 +188,9 @@ H.click.push(async T => {
     const give = st.rows.filter(r => r.now > 0); if (!give.length) { toast("Enter what was issued"); return true; }
     const sm = M.stockMap(M.erpOn() ? w.loc : null); const over = give.filter(r => r.now > Math.max(0, sm[r.ingId] || 0) + 1e-6);
     if (over.length && !await yesNo(`<p class="cq">More than the store holds</p><div class="cdetail">${over.map(r => `${esc(ings[r.ingId].name)}: issuing ${qty(r.now, ings[r.ingId].unit)}, store shows ${qty(Math.max(0, sm[r.ingId] || 0), ings[r.ingId].unit)}`).join("<br>")}<br><br>Stock will go below zero until a GRN or count is recorded.</div>`, "Issue anyway")) return true;
-    const issued = { ...(w.issued || {}) };
+    const issued = { ...(w.issued || {}) }; const lots = [...(w.lots || []), ...give.flatMap(r => M.lotsFor(r.ingId, r.now))];   // traceability
     for (const r of give) { await putMove({ ingId: r.ingId, type: "issue", qty: -r.now, note: `${w.no} · issued`, ref: w.id, outletId: w.loc }); issued[r.ingId] = r4((issued[r.ingId] || 0) + r.now); }
-    await ev.put("wos", { ...clean(ev.get("wos", st.id)), status: "issued", issued }); sync.soon(); toast("Materials issued"); woDetail(st.id); return true; }
+    await ev.put("wos", { ...clean(ev.get("wos", st.id)), status: "issued", issued, lots }); sync.soon(); toast("Materials issued"); woDetail(st.id); return true; }
   if (st.kind === "woDone" && T.closest("[data-wdsave]")) { await complete(st); return true; }
   return false;
 });

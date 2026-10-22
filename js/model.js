@@ -143,6 +143,8 @@ function costFrom(mv) {
     const avg = x.q > 0 ? x.v / x.q : last(); x.q += q; x.v += avg * q; if (x.q <= 0) x.v = x.q * last(); });
   return Object.fromEntries(Object.entries(by).map(([id, x]) => [id, { avg: x.q > 0 && x.v > 0 ? x.v / x.q : (x.rates.at(-1) || own[id] || 0), last: x.rates.at(-1) || 0 }]));
 }
+// A rate contract in force with the supplier for the material on a date (per base unit), or 0.
+export const contractRate = (supplier, ingId, d = today()) => { const k = nameKey(supplier); const c = ev.all("contracts").filter(x => nameKey(x.supplier) === k && x.ingId === ingId && (!x.from || x.from <= d) && (!x.to || x.to >= d)).sort((a, b) => (b.from || "") < (a.from || "") ? -1 : 1)[0]; return c ? +c.rate : 0; };
 export const lastPrice = ing => (costIndex()[ing.id] || {}).last || +ing.cost || 0;
 // Semi-finished cost rolls up through their recipe, level by level.
 // idx: a cost index as of a date (costAsOf); by default today's.
@@ -165,6 +167,13 @@ export function materialLots(ingId = null) {
   Object.entries(lots).forEach(([id, ls]) => { let r = Math.max(0, sm[id] || 0); ls.sort((a, b) => (b.date + b.grn._at) < (a.date + a.grn._at) ? -1 : 1)
     .forEach(l => { l.left = Math.min(l.qty, r); r -= l.left; l.expired = !!l.exp && l.left > 0 && l.exp < t; l.soon = !!l.exp && l.left > 0 && !l.expired && l.exp <= addDays(t, 7); out.push(l); }); });
   return out.sort((a, b) => (a.exp || "9999") < (b.exp || "9999") ? -1 : 1);
+}
+// Which GRN lots a use of `qty` comes from: the oldest lots still holding stock first (the same order stock is used in).
+// Anything beyond what GRN lots hold (counts, older stock) is returned without a GRN.
+export function lotsFor(ingId, qty) {
+  const ls = materialLots(ingId).filter(l => l.left > 0).sort((a, b) => (a.date + a.grn._at) < (b.date + b.grn._at) ? -1 : 1); const out = []; let r = qty;
+  for (const l of ls) { if (r <= 1e-9) break; const q = Math.min(l.left, r); out.push({ ingId, grnId: l.grn.id, grnNo: l.grn.no, lot: l.lot, qty: q }); r -= q; }
+  if (r > 1e-9) out.push({ ingId, grnId: "", grnNo: "", lot: "", qty: r }); return out;
 }
 export const expiringMaterials = () => materialLots().filter(l => l.expired || l.soon);
 /* ---------- allergens and label ingredients ---------- */
@@ -389,7 +398,9 @@ export const preturns = memo(() => ev.all("preturns").sort((a, b) => (b.date + b
 export const AGE = [["0–30", 0], ["31–60", 31], ["61–90", 61], ["90+", 91]];
 export function supplierLedger(name) {
   const n = nameKey(name); const sup = supplierByName(name) || { name, days: 0 }; const days = +sup.days || 0; const t = today();
-  const bills = grns().filter(g => !g.void && nameKey(g.supplier) === n).map(g => ({ date: g.date, doc: g.no, id: g.id, inv: g.invoiceNo || "", bill: +g.total || 0, open: +g.total || 0, due: addDays(g.date, days) })).sort((a, b) => a.date < b.date ? -1 : 1);
+  // A supplier bill entered against a GRN (and accepted when it differs) is what is owed; otherwise the GRN's total.
+  const owe = g => g.bill && g.bill.use ? +g.bill.total || 0 : +g.total || 0;
+  const bills = grns().filter(g => !g.void && nameKey(g.supplier) === n).map(g => ({ date: g.date, doc: g.no, id: g.id, inv: (g.bill && g.bill.no) || g.invoiceNo || "", bill: owe(g), open: owe(g), due: addDays((g.bill && g.bill.date) || g.date, days) })).sort((a, b) => a.date < b.date ? -1 : 1);
   // An opening balance set on the supplier (imported when moving to the app) is a bill dated when it stood; a negative one is an advance with them.
   const ob = +sup.opening || 0, obDate = sup.openingDate || "2000-01-01";
   if (ob > 0) bills.unshift({ date: obDate, doc: "Opening balance", id: "ob:" + n, inv: "", bill: ob, open: ob, due: addDays(obDate, days) });
