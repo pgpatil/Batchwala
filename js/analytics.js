@@ -40,7 +40,7 @@ export const DATA = {
           out.push({ ...base, item: i.item, category: (m && m.category) || "Uncategorised", qty: i.qty, gross: g, discount: g - net, net: nx, tax: tx.tax * share, cost, margin: cost ? nx - cost : 0 }); }); });
       return out; } },
   payments: { label: "Payments received", dims: [...TIME, ["mode", "Mode"], ["person", "Taken by"], ["kind", "Kind"]], measures: [["amount", "Amount ₹", "money"], ["count", "Payments", "count"]],
-    rows(R) { return ev.all("payments").filter(p => inR(p.date || "", R) && p.mode !== "Credit").map(p => ({ ...timeDims(p.date), mode: p.mode || "–", person: memName(p._by), kind: !p.orderId ? (p.amount < 0 ? "Advance refunded / used" : "Advance") : p.amount < 0 ? "Reversal / refund" : "On an order", amount: +p.amount || 0, count: 1 })); } },
+    rows(R) { return ev.all("payments").filter(p => inR(p.date || "", R) && p.mode !== "Credit" && p.mode !== "Credit note").map(p => ({ ...timeDims(p.date), mode: p.mode || "–", person: memName(p._by), kind: !p.orderId ? (p.amount < 0 ? "Advance refunded / used" : "Advance") : p.amount < 0 ? "Reversal / refund" : "On an order", amount: +p.amount || 0, count: 1 })); } },
   production: { label: "Production (batches)", dims: [...TIME, ["item", "Item"], ["category", "Category"], ["location", "Location"], ["person", "Made by"]], measures: [["good", "Good pieces", "num"], ["made", "Pieces made", "num"], ["spoiled", "Spoiled", "num"], ["cost", "Cost ₹", "money"], ["batches", "Batches", "count"]],
     rows(R) { const out = []; const home = M.locations()[0].id;
       M.batches().filter(b => !b.void && inR(b.date, R)).forEach(b => { const pcs = M.batchPcs(b) || 1; const c = M.batchCost(b);

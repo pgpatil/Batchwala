@@ -149,6 +149,7 @@ function pl(a, b) {
   const start = a <= "0001" ? "0000-01-01" : a; let sales = 0, charges = 0;
   M.orders(false).filter(o => o.date >= start && o.date <= b).forEach(o => { const x = M.taxOf(o); const net = M.sub(o) - M.disc(o) + M.charges(o) - (o.taxIncl ? x.tax : 0); sales += net;
     charges += (o.charges || []).reduce((s, ch) => s + (o.taxIncl ? ch.amount / (1 + (+ch.taxPct || 0) / 100) : ch.amount), 0); });
+  const returns = ev.all("creturns").filter(cn => !cn.void && cn.date >= start && cn.date <= b).reduce((s, cn) => s + (+cn.taxable || 0), 0); sales -= returns;
   const sum = rows => rows.reduce((s, r) => s + r.value, 0); const open = a <= "0001" ? 0 : sum(M.stockValueAt(addDays(a, -1))); const close = sum(M.stockValueAt(b));
   const buys = ev.all("moves").filter(m => m.type === "purchase" && m.date >= start && m.date <= b).reduce((s, m) => s + (+m.amount || 0), 0);
   const used = open + buys - close; const gross = sales - used; const months = monthsIn(a, b);
@@ -156,7 +157,7 @@ function pl(a, b) {
   const line = (l, v, cls = "") => `<div class="${cls}"><span>${l}</span><b>${v < 0 ? "−" : ""}${rs(Math.abs(v))}</b></div>`;
   const cur = months.at(-1); const rec = ev.get("overheads", cur) || { lines: [] };
   return `<div class="kpis" style="padding:0"><div class="kpi"><b>${rs(sales)}</b><span>sales before tax</span></div><div class="kpi"><b>${pct(gross, sales)}</b><span>gross margin</span></div><div class="kpi"><b class="${net < 0 ? "due" : ""}">${net < 0 ? "−" : ""}${rs(Math.abs(net))}</b><span>net profit</span></div></div>`
-    + card("Profit and loss", `<div class="kv">${line("Sales (after discounts, before tax)", sales - charges)}${charges ? line("Delivery and packing charges", charges) : ""}${line("<b>Income</b>", sales, "tot")}
+    + card("Profit and loss", `<div class="kv">${line("Sales (after discounts, before tax)", sales - charges + returns)}${returns ? line("Less sales returns (credit notes)", -returns) : ""}${charges ? line("Delivery and packing charges", charges) : ""}${line("<b>Income</b>", sales, "tot")}
       ${a <= "0001" ? "" : line("Opening stock of materials", open)}${line("Purchases (after returns)", buys)}${line("Less closing stock of materials", -close)}${line("<b>Materials used</b>", used, "tot")}
       ${line("<b>Gross profit</b>", gross, "tot")}${oh.flatMap(x => ((x.rec || {}).lines || []).map(l => line(`${esc(l.name)} <small class="mut">${esc(x.m)}</small>`, -l.amount))).join("")}${line("<b>Net profit</b>", net, "tot")}</div>`,
       "Materials used includes wastage, spoilage and stock-count differences. Finished goods on the shelf aren’t counted as stock (they keep only a few days). Overheads are what you enter below for each month; the app doesn’t track them otherwise.")
@@ -191,7 +192,7 @@ export function vouchers(a, b) {
   // A payment whose order was deleted still belongs to its customer (kept on the payment); otherwise it goes to an unallocated ledger to sort out.
   const custs = Object.fromEntries(M.customers(M.orders()).map(x => [x.key, x]));
   // Credit moved onto an order and off the customer's credit is within the same party, so it isn't a voucher.
-  ev.all("payments").filter(p => p.date >= a && p.date <= b && +p.amount && p.mode !== "Credit").forEach(p => { const raw = ev.get("orders", p.orderId); const o = M.normOrder(raw || {}); const cu = !raw && custs[p.customerKey];
+  ev.all("payments").filter(p => p.date >= a && p.date <= b && +p.amount && p.mode !== "Credit" && p.mode !== "Credit note").forEach(p => { const raw = ev.get("orders", p.orderId); const o = M.normOrder(raw || {}); const cu = !raw && custs[p.customerKey];
     const party = raw ? custLedger(o) : cu ? custLedger({ customer: cu.customer, flat: cu.flat, channel: "whatsapp" }) : "Unallocated receipts"; const v = +p.amount;
     out.push({ date: p.date, type: "Receipt", no: "", party, narration: `Order #${o.no || "?"}${p.mode ? " · " + p.mode : ""}${v < 0 ? " · reversal" : ""}`, entries: [{ ledger: bankOf(p.mode), amt: v }, { ledger: party, amt: -v }] }); });
   const ings = M.ingMap();
@@ -200,6 +201,11 @@ export function vouchers(a, b) {
     const ent = [{ ledger: c.purchase, amt: r2((+g.amount || 0) + blocked) }, ...taxEntries(rec, c.inTax, 1), { ledger: partyName(g.supplier, "supplier"), amt: -(+g.total || 0) }];
     const diff = r2(ent.reduce((s, e) => s + e.amt, 0)); if (diff) ent.push({ ledger: c.roundOff, amt: -diff });
     out.push({ date: g.date, type: "Purchase", no: g.invoiceNo || g.no, party: partyName(g.supplier, "supplier"), narration: `${g.no}${g.invoiceNo ? " · supplier invoice " + g.invoiceNo : ""}`, entries: ent }); });
+  // Sales returns: a credit note reverses the sale for the lines returned (sales and output tax debited, the customer credited).
+  ev.all("creturns").filter(cn => !cn.void && cn.date >= a && cn.date <= b).forEach(cn => { const by = {}; cn.lines.forEach(l => { if (!l.taxPct) return; const g = l.qty * l.rate; const o = ev.get("orders", cn.orderId) || {}; const t = o.taxIncl ? g - g / (1 + l.taxPct / 100) : g * l.taxPct / 100; by[l.taxPct] = (by[l.taxPct] || 0) + t; });
+    const o = M.normOrder(ev.get("orders", cn.orderId) || { customer: cn.customer, flat: cn.flat, channel: "whatsapp" }); const party = custLedger(o);
+    const ent = [{ ledger: c.sales, amt: r2(cn.taxable) }, ...taxEntries(by, c.outTax, 1), { ledger: party, amt: -cn.total }]; const diff = r2(ent.reduce((s, e) => s + e.amt, 0)); if (diff) ent.push({ ledger: c.roundOff, amt: -diff });
+    out.push({ date: cn.date, type: "Credit Note", no: cn.no, party, narration: `${cn.no} · order #${cn.orderNo} · ${cn.reason || ""}`, entries: ent }); });
   // Goods returned: the supplier is debited, purchases and the input tax claimed on them are credited back.
   M.preturns().filter(d => !d.void && d.date >= a && d.date <= b).forEach(d => { const rec = {}; let blocked = 0;
     d.lines.forEach(l => { const t = (+l.amount || 0) * (+l.taxPct || 0) / 100; if (!t) return; if (ings[l.ingId] && ings[l.ingId].taxInCost) blocked += t; else rec[l.taxPct] = (rec[l.taxPct] || 0) + t; });
@@ -234,7 +240,7 @@ function saveText(name, text, type) { const blob = new Blob([text], { type }); c
 function book(a, b) {
   const vs = vouchers(a, b); const c = tcfg(); const by = {}; vs.forEach(v => { by[v.type] = (by[v.type] || 0) + 1; });
   const unbalanced = vs.filter(v => Math.abs(v.entries.reduce((s, e) => s + e.amt, 0)) > 0.005).length;
-  return `<div class="kpis" style="padding:0">${["Sales", "Receipt", "Purchase", "Payment", "Debit Note"].map(k => `<div class="kpi"><b>${by[k] || 0}</b><span>${k} vouchers</span></div>`).join("")}</div>`
+  return `<div class="kpis" style="padding:0">${["Sales", "Receipt", "Credit Note", "Purchase", "Payment", "Debit Note"].map(k => `<div class="kpi"><b>${by[k] || 0}</b><span>${k} vouchers</span></div>`).join("")}</div>`
     + card("Day Book", table([["Date"], ["Particulars"], ["Vch Type"], ["Vch No."], ["Debit", 1], ["Credit", 1]], vs.map(v => { const x = partyAmt(v);
       return `<tr>${td(esc(tdate(v.date)), 0, v.date)}${td(`<b>${esc(v.party)}</b><small class="mut" style="display:block">${v.entries.map(e => `${esc(e.ledger)} ${e.amt > 0 ? "Dr" : "Cr"} ${rs2(Math.abs(e.amt))}`).join(" · ")}</small>`)}${td(esc(v.type))}${td(esc(v.no))}${td(x > 0 ? rs2(x) : "", 1, x > 0 ? x : 0)}${td(x < 0 ? rs2(-x) : "", 1, x < 0 ? -x : 0)}</tr>`; })),
       `Laid out like Tally’s Day Book, with each voucher’s ledger entries under the party.${unbalanced ? ` <b class="due">${unbalanced} voucher(s) don’t balance.</b>` : " Every voucher balances (debits = credits)."}`)
