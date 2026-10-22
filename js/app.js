@@ -23,6 +23,7 @@ import "./analytics.js";
 import "./sales.js";
 import "./buystock.js";
 import "./plan2.js";
+import "./qm.js";
 import { enhance } from "./table.js";
 import "./erp.js";
 import "./help.js";
@@ -33,11 +34,11 @@ import { APP_NAME } from "./config.js";
 import { $, esc, ICON, today, addDays } from "./util.js";
 import { ui, toast, closeSheet, yesNo, focusKey, refocus } from "./ui.js";
 
-const TAB = { help: ["Help", ICON.help], data: ["Import & export", ICON.dl], pos: ["Counter", ICON.cart], bom: ["BOM", ICON.tree], plan: ["Planning", ICON.plan], wo: ["Work orders", ICON.oven], po: ["Purchase orders", ICON.orders], sup: ["Suppliers & payables", ICON.people], insights: ["Cost & stock reports", ICON.chart], analytics: ["Analytics", ICON.chart], quotes: ["Quotations", ICON.orders], rtn: ["Returnables", ICON.batch], standing: ["Standing orders", ICON.orders], close: ["Day close", ICON.pay], take: ["Stock-take", ICON.stock], dn: ["Purchase returns", ICON.inbox], prod: ["Production", ICON.oven], grn: ["Purchases (GRN)", ICON.inbox], xfer: ["Transfers", ICON.truck], fg: ["Finished goods", ICON.batch], today: ["Today", ICON.today], orders: ["Orders", ICON.orders], pay: ["Payments", ICON.pay], stock: ["Inventory", ICON.stock], bake: ["Bake board", ICON.oven], batches: ["Batches", ICON.batch], run: ["Delivery run", ICON.run], more: ["More", ICON.more] };
+const TAB = { help: ["Help", ICON.help], data: ["Import & export", ICON.dl], pos: ["Counter", ICON.cart], bom: ["BOM", ICON.tree], plan: ["Planning", ICON.plan], wo: ["Work orders", ICON.oven], po: ["Purchase orders", ICON.orders], sup: ["Suppliers & payables", ICON.people], insights: ["Cost & stock reports", ICON.chart], analytics: ["Analytics", ICON.chart], quotes: ["Quotations", ICON.orders], rtn: ["Returnables", ICON.batch], qlog: ["Food safety logs", ICON.check], complaints: ["Complaints", ICON.help], equip: ["Equipment", ICON.oven], lic: ["Licences", ICON.inbox], standing: ["Standing orders", ICON.orders], close: ["Day close", ICON.pay], take: ["Stock-take", ICON.stock], dn: ["Purchase returns", ICON.inbox], prod: ["Production", ICON.oven], grn: ["Purchases (GRN)", ICON.inbox], xfer: ["Transfers", ICON.truck], fg: ["Finished goods", ICON.batch], today: ["Today", ICON.today], orders: ["Orders", ICON.orders], pay: ["Payments", ICON.pay], stock: ["Inventory", ICON.stock], bake: ["Bake board", ICON.oven], batches: ["Batches", ICON.batch], run: ["Delivery run", ICON.run], more: ["More", ICON.more] };
 const SHORT = { close: "Day close", take: "Stock-take", dn: "Returns", plan: "Plan", wo: "Work orders", po: "POs", sup: "Payables", insights: "Reports", bake: "Bake", run: "My run", grn: "GRN", fg: "FG stock", prod: "Make" };   // bottom-bar labels on phones
 const ORDER = ["pos", "today", "orders", "bake", "prod", "grn", "stock", "xfer", "fg", "batches", "bom", "run", "pay", "more"];
 // Screens grouped into buckets: one bottom-bar button per bucket on phones, a strip of its screens on top of each page, sections in the sidebar.
-const BUCKETS = { orders: ["Orders", ICON.orders, ["today", "orders", "run", "pay", "close"]], make: ["Make", ICON.oven, ["plan", "wo", "prod", "bake", "batches", "bom"]], stores: ["Stock", ICON.store, ["stock", "take", "xfer", "fg", "rtn"]], buy: ["Buying", ICON.inbox, ["po", "grn", "dn", "sup"]] };
+const BUCKETS = { orders: ["Orders", ICON.orders, ["today", "orders", "run", "pay", "close"]], make: ["Make", ICON.oven, ["plan", "wo", "prod", "bake", "batches", "bom"]], stores: ["Stock", ICON.store, ["stock", "take", "xfer", "fg", "rtn"]], buy: ["Buying", ICON.inbox, ["po", "grn", "dn", "sup"]], quality: ["Quality & upkeep", ICON.check, ["qlog", "complaints", "equip", "lic"]] };
 SHORT.buy = "Buying";
 // What needs attention, per screen: a count on its tab (and the sum on a closed group). Worked out once per data change.
 // urgent counts (overdue, short, owed) show red; the rest (to do today) in the brand colour.
@@ -62,6 +63,7 @@ function attention() {
     const y = addDays(t, -1); const me = (R.me() || {}).id;
     if (c("sale") || c("collect") || c("pay.record")) put("close", ev.all("payments").some(p => p.date === y && p._by === me) && !ev.get("closes", `${y}@${me}`) ? 1 : 0, true);
     if (R.isAdmin() && H.backupBanner && H.backupBanner()) put("more", 1, true);
+    if (H.qlogDue) put("qlog", H.qlogDue(), false); if (H.complaintOpen) put("complaints", H.complaintOpen(), true); if (H.equipDue) put("equip", H.equipDue(), true); if (H.licDue) put("lic", H.licDue(), true);
   } catch (_) {}
   attnStamp = stamp; attnCache = a; return a;
 }
@@ -86,6 +88,7 @@ function allowedViews() {
   if (c("sale") || c("collect") || c("pay.record")) t.push("close");
   if (c("reports")) t.push("analytics");
   if (c("orders.edit")) t.push("quotes", "standing");
+  if (c("bake.record") || c("stock.count") || R.isAdmin()) t.push("qlog"); if (c("orders.edit") || c("money")) t.push("complaints"); if (c("bake.record") || R.isAdmin()) t.push("equip"); if (R.isAdmin() || R.role() === "management") t.push("lic");
   t.push("help"); if (c("export") || R.isAdmin()) t.push("data");
   return [...new Set(t)];
 }
@@ -227,7 +230,7 @@ $("#scrim").addEventListener("click", () => { const x = document.querySelector("
   await R.loadMe(); R.setMode(await ev.getMeta("mode")); M.setHere(await ev.getMeta("here") || (R.me() || {}).loc || null);
   ev.setActor(() => (R.me() || {}).id || "setup");
   if (R.me()) S.view = R.home();
-  ev.onChange(() => { if (ui.sheet && ui.sheet.redraw && !["compose", "waConfirm", "settings", "member", "ingEdit", "item", "move", "bake", "part", "batchSpoil", "grn", "xfer", "fgAdj", "xferRecv", "imp", "invin", "expiry", "poEdit", "woNew", "woIssue", "woDone", "spay", "sup", "dnNew", "recipeVer", "cnNew", "priceLists", "custEdit", "bcast", "labels", "billNew", "ctNew", "rtnMove", "forecast"].includes(ui.sheet.kind)) rerenderSheet(); render(); });
+  ev.onChange(() => { if (ui.sheet && ui.sheet.redraw && !["compose", "waConfirm", "settings", "member", "ingEdit", "item", "move", "bake", "part", "batchSpoil", "grn", "xfer", "fgAdj", "xferRecv", "imp", "invin", "expiry", "poEdit", "woNew", "woIssue", "woDone", "spay", "sup", "dnNew", "recipeVer", "cnNew", "priceLists", "custEdit", "bcast", "labels", "billNew", "ctNew", "rtnMove", "forecast", "qcNew", "qlSetup", "ccEdit", "licEdit", "eqEdit"].includes(ui.sheet.kind)) rerenderSheet(); render(); });
   sync.onStatus(async st => {
     let joined = false;
     if (st.state === "ok" && !R.me()) { const a = sync.current(); const m = a && R.matchEmail(a.account); if (m) { await R.setMe(m.id); S.view = R.home(); joined = true; toast(`Welcome, ${m.name}`); } }
