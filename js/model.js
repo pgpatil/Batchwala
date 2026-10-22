@@ -210,7 +210,7 @@ export function requirement(lines, at) {
 
 /* ---------- batches ---------- */
 // A batch is one recorded bake (kind "bakes"): numbered, with pieces and spoiled pieces per item and the stock it used.
-export const batches = memo(() => ev.all("bakes").map(b => ({ no: "", notes: "", void: false, ...b, date: ISO.test(b.date) ? b.date : today(), lines: (b.lines || []).map(l => ({ item: l.item, qty: +l.qty || 0, spoiled: +l.spoiled || 0, discarded: +l.discarded || 0, cleared: +l.cleared || 0 })), prep: (b.prep || []).map(p => ({ ingId: p.ingId, runs: +p.runs || 0, qty: +p.qty || 0 })) }))
+export const batches = memo(() => ev.all("bakes").map(b => ({ no: "", notes: "", void: false, ...b, date: ISO.test(b.date) ? b.date : today(), lines: (b.lines || []).map(l => ({ item: l.item, qty: +l.qty || 0, spoiled: +l.spoiled || 0, discarded: +l.discarded || 0, cleared: +l.cleared || 0 })), prep: (b.prep || []).map(p => ({ ingId: p.ingId, runs: +p.runs || 0, qty: +p.qty || 0, ...(p.std ? { std: +p.std } : {}) })) }))
   .sort((a, b) => (a.date + (a.at || a._at || "")) < (b.date + (b.at || b._at || "")) ? 1 : -1));
 export const bakesOn = date => batches().filter(b => b.date === date && !b.void);
 export const batchPcs = b => b.lines.reduce((s, l) => s + l.qty, 0);
@@ -281,10 +281,12 @@ export function nextBatchNo(prefix) { const n = batches().map(b => +String(b.no 
 
 /* ---------- bake board ---------- */
 // Per item for a date: committed (pre-orders), par (kept ready for on-demand), baked, sold (counter and aggregator), left.
+// Keep-ready level for a date: the item's level for that weekday when set (from the sales forecast), else its everyday level.
+export const parOn = (m, date) => { const d = (new Date(date + "T00:00:00").getDay() + 6) % 7; const v = m.parDays && m.parDays[d]; return v != null && v !== "" ? +v : +m.par || 0; };
 export function board(date) {
   const rows = new Map(); const row = name => { if (!rows.has(name)) rows.set(name, { item: name, committed: 0, par: 0, baked: 0, sold: 0, spoiled: 0 }); return rows.get(name); };
   orders(false).filter(o => o.date === date).forEach(o => o.items.forEach(i => { const r = row(i.item); if (PREORDER.includes(o.channel)) r.committed += i.qty; else r.sold += i.qty; }));
-  menuActive().filter(m => m.par > 0).forEach(m => { row(m.name).par = m.par; });
+  menuActive().filter(m => parOn(m, date) > 0).forEach(m => { row(m.name).par = parOn(m, date); });
   bakesOn(date).forEach(b => b.lines.forEach(l => { const r = row(l.item); r.baked += l.qty - l.spoiled; r.spoiled += l.spoiled; }));
   return [...rows.values()].map(r => ({ ...r, toBake: Math.max(0, r.committed + r.par - r.baked), left: r.baked - r.committed - r.sold })).sort((a, b) => b.toBake - a.toBake || b.committed - a.committed);
 }
@@ -319,7 +321,7 @@ export function fgStock() {
 export function outletBoard(date, loc = here()) {
   const fg = fgStock()[loc] || {}; const way = inTransit(loc); const rows = new Map(); const row = n => { if (!rows.has(n)) rows.set(n, { item: n, committed: 0, par: 0, onHand: 0, sold: 0, coming: 0 }); return rows.get(n); };
   orders(false).filter(o => o.date === date && locOf(o) === loc).forEach(o => o.items.forEach(i => { const r = row(i.item); if (isDelivered(o)) r.sold += i.qty; else r.committed += i.qty; }));
-  if (sellingLocs().some(l => l.id === loc)) menuActive().filter(m => m.par > 0).forEach(m => { row(m.name).par = m.par; });
+  if (sellingLocs().some(l => l.id === loc)) menuActive().filter(m => parOn(m, date) > 0).forEach(m => { row(m.name).par = parOn(m, date); });
   Object.entries(fg).forEach(([n, q]) => { if (q) row(n).onHand = q; }); Object.entries(way).forEach(([n, q]) => { if (q) row(n).coming = q; });
   // Pieces already on the way count against the shortfall, so the kitchen isn't asked twice.
   return [...rows.values()].map(r => ({ ...r, short: Math.max(0, r.committed + r.par - Math.max(0, r.onHand) - r.coming) })).sort((a, b) => b.short - a.short || a.item.localeCompare(b.item));

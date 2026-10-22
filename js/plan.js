@@ -86,9 +86,11 @@ export function printHtml(title, html, bare = false) {
 H.printHtml = printHtml;
 
 /* ---------- screen ---------- */
-const TABS = [["fg", "Finished goods"], ["sf", "Semi-finished"], ["indent", "Indent"], ["card", "Batch card"], ["calc", "Requirement calculator"]];
+const TABS = [["fg", "Finished goods"], ["sf", "Semi-finished"], ["indent", "Indent"], ["card", "Batch card"], ["week", "Next 7 days"], ["calc", "Requirement calculator"]];
 V.plan = () => {
   S.filter.plan = S.filter.plan || "fg"; S.filter.indent = S.filter.indent || "short"; const k = S.filter.plan;
+  if (k === "week" && H.weekPlan) return band("Planning · next 7 days", "", `<p class="bandnote">Pre-orders and keep-ready levels day by day, and what the week needs from the store.</p>`)
+    + `<div class="tools">${layoutSwitch("plan")}${chipBar("plan", TABS)}</div>` + H.weekPlan();
   if (k === "calc") return band("Planning", "", `<p class="bandnote">Work out raw and packing materials for any mix of products, such as a bulk order. Nothing is recorded.</p>`)
     + `<div class="tools">${layoutSwitch("plan")}${chipBar("plan", TABS)}</div>` + calcView();
   const t = today(); const d = S.planDate || t; const ings = M.ingMap();

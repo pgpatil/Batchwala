@@ -121,22 +121,26 @@ function drawDone(st) {
   openSheet(st, `<div class="sh-head"><h2 class="h">Complete ${esc(w.no)}</h2><button class="x" data-close aria-label="Close">×</button></div>
   <label class="f" for="wdDate">Made on</label><input class="in" id="wdDate" type="date" value="${st.date}">
   <label class="f">What was made</label><div class="kv">${st.lines.map((l, ix) => `<div style="align-items:center;gap:8px"><span>${esc(l.item)}</span><span style="display:flex;gap:6px;align-items:center"><label class="mini">Good <input class="rate" data-wdg="${ix}" inputmode="numeric" value="${l.good}"></label><label class="mini">Spoiled <input class="rate" data-wds="${ix}" inputmode="numeric" value="${l.spoiled || ""}" placeholder="0"></label></span></div>`).join("")}
-  ${st.prep.map((p, ix) => `<div style="align-items:center"><span>${esc(ings[p.ingId].name)} <small class="mut">runs made</small></span><input class="rate" data-wdr="${ix}" inputmode="decimal" value="${p.runs}"></div>`).join("")}</div>
+  ${st.prep.map((p, ix) => { const i = ings[p.ingId]; const b = UNITF(i, i.yield * p.runs); return `<div style="align-items:center"><span>${esc(i.name)} <small class="mut">runs made</small></span><input class="rate" data-wdr="${ix}" inputmode="decimal" value="${p.runs}"></div>
+    <div style="align-items:center"><span><small class="mut">actually made (blank = ${qty(i.yield * p.runs, i.unit)} by the recipe)</small></span><span style="display:flex;gap:6px;align-items:center"><input class="rate" data-wda="${ix}" inputmode="decimal" value="${p.actual ? +(p.actual / b.f).toFixed(3) : ""}"><span class="unitlbl">${b.u}</span></span></div>`; }).join("")}</div>
+  <div class="two"><div><label class="f" for="wdPeople">People</label><input class="in" id="wdPeople" inputmode="numeric" value="${st.people || ""}" placeholder="Optional"></div><div><label class="f" for="wdHours">Hours taken</label><input class="in" id="wdHours" inputmode="decimal" value="${st.hours || ""}" placeholder="e.g. 3"></div></div>
   <label class="f" style="margin-top:12px">Returned to the store unused</label><div class="kv">${Object.keys(issued).filter(x => ings[x]).map(x => { const i = ings[x]; const b = UNITF(i, issued[x]); const used = issued[x] - (st.ret[x] || 0); const d = used - (use[x] || 0);
     return `<div style="align-items:center;gap:8px"><span>${esc(i.name)}<small class="mut" style="display:block">issued ${qty(issued[x], i.unit)} · standard for this output ${qty(use[x] || 0, i.unit)}${Math.abs(d) > 1e-6 ? ` · <b class="${d > 0 ? "due" : ""}">${d > 0 ? "over" : "under"} ${qty(Math.abs(d), i.unit)}</b>` : ""}</small></span><span style="display:flex;align-items:center;gap:6px"><input class="rate" data-wdret="${esc(x)}" inputmode="decimal" value="${st.ret[x] ? +(st.ret[x] / b.f).toFixed(3) : ""}" placeholder="0"><span class="unitlbl">${b.u}</span></span></div>`; }).join("")}</div>
   <p class="hint">Used = issued − returned. The difference from the BOM for what was made is the variance, shown on the work order and in Reports.</p>
   <button class="btn btn-ok" data-wdsave>${ICON.oven}Complete · record the batch</button>`);
 }
 function syncDone() { const st = ui.sheet; const w = ev.get("wos", st.id); const ings = M.ingMap(); const v = s => document.querySelector(s);
-  st.date = $("#wdDate").value || today();
+  st.date = $("#wdDate").value || today(); st.people = ($("#wdPeople") || {}).value || ""; st.hours = ($("#wdHours") || {}).value || "";
+  st.prep.forEach((p, ix) => { const el = v(`[data-wda="${ix}"]`); if (el) { const i = ings[p.ingId]; p.actual = el.value.trim() === "" ? 0 : Math.max(0, num(el.value) * UNITF(i, i.yield * p.runs).f); } });
   st.lines.forEach((l, ix) => { l.good = Math.max(0, Math.round(num(v(`[data-wdg="${ix}"]`).value))); l.spoiled = Math.max(0, Math.round(num(v(`[data-wds="${ix}"]`).value))); });
   st.prep.forEach((p, ix) => { p.runs = Math.max(0, num(v(`[data-wdr="${ix}"]`).value)); });
   Object.keys(w.issued || {}).forEach(x => { const el = v(`[data-wdret="${x}"]`); if (el && ings[x]) st.ret[x] = Math.min(w.issued[x], Math.max(0, num(el.value) * UNITF(ings[x], w.issued[x]).f)); }); }
 async function complete(st) {
   syncDone(); if (!await L.saveOk(st)) return; const w = ev.get("wos", st.id); if (w.status !== "issued") { toast("This work order was already completed or cancelled"); woDetail(w.id); return; } const ings = M.ingMap(); const issued = w.issued || {};
   const lines = st.lines.filter(l => l.good + l.spoiled > 0).map(l => ({ item: l.item, qty: l.good + l.spoiled, spoiled: l.spoiled }));
-  const prep = st.prep.filter(p => p.runs > 0 && ings[p.ingId]).map(p => ({ ingId: p.ingId, runs: p.runs, qty: ings[p.ingId].yield * p.runs }));
+  const prep = st.prep.filter(p => p.runs > 0 && ings[p.ingId]).map(p => ({ ingId: p.ingId, runs: p.runs, qty: ings[p.ingId].yield * p.runs, ...(p.actual > 0 ? { actual: p.actual } : {}) }));
   if (!lines.length && !prep.length) { toast("Enter what was made"); return; }
+  const labour = { people: Math.max(0, Math.round(num(st.people))), hours: Math.max(0, num(st.hours)) };
   const { use, surplus } = stdUse(lines, prep, w.date); const me = R.me(); const no = M.nextBatchNo(R.numPrefix());
   const used = {}; Object.keys(issued).forEach(x => { used[x] = issued[x] - (st.ret[x] || 0); });
   const ids = [...new Set([...Object.keys(use), ...Object.keys(used)])].filter(x => ings[x]);
@@ -145,11 +149,13 @@ async function complete(st) {
   if (!await yesNo(`<p class="cq">Complete ${esc(w.no)} as batch #${esc(no)}?</p><div class="cdetail">${lines.map(l => `${esc(l.item)}: ${l.qty - l.spoiled} good${l.spoiled ? `, ${l.spoiled} spoiled` : ""}`).join("<br>")}${prep.map(p => `<br>${esc(ings[p.ingId].name)}: ${runsTxt(p.runs)}`).join("")}<br><br>${off.length ? `Off the BOM: ${off.map(v => `${esc(ings[v.ingId].name)} ${varCell(v, ings[v.ingId], false)}`).join(", ")}${R.can("money") && Math.abs(vc) >= 0.5 ? ` · value ${varTxt(vc)}` : ""}` : "Materials used match the BOM."}</div>`, "Complete", "btn-ok")) return;
   const bakeId = uid("b");
   for (const x of Object.keys(st.ret)) if (st.ret[x] > 0) await putMove({ ingId: x, type: "return", qty: st.ret[x], date: st.date, note: `${w.no} · returned`, ref: w.id, outletId: w.loc });
-  const madeList = Object.keys(surplus).filter(x => ings[x]).map(x => ({ ingId: x, qty: surplus[x], cost: r2(M.unitCost(ings[x]) * surplus[x]) }));
+  // Semi-finished actually made (when typed) adjusts what goes into stock against the recipe's yield.
+  prep.forEach(p => { if (p.actual) { surplus[p.ingId] = Math.max(0, (surplus[p.ingId] || 0) + p.actual - p.qty); p.std = p.qty; p.qty = p.actual; delete p.actual; } });
+  const madeList = Object.keys(surplus).filter(x => ings[x] && surplus[x] > 0).map(x => ({ ingId: x, qty: surplus[x], cost: r2(M.unitCost(ings[x]) * surplus[x]) }));
   for (const m of madeList) await putMove({ ingId: m.ingId, type: "make", qty: m.qty, date: st.date, note: `Batch #${no} · ${w.no}`, ref: bakeId, outletId: w.loc });
   const stock = Object.keys(used).filter(x => ings[x] && used[x] > 0).map(x => ({ ingId: x, qty: used[x], cost: r2(M.unitCost(ings[x]) * used[x]) }));
   const net = stock.reduce((s, x) => s + x.cost, 0) - madeList.reduce((s, x) => s + x.cost, 0);
-  await ev.put("bakes", { id: bakeId, no, date: st.date, lines, prep, notes: `${w.no}${w.notes ? " · " + w.notes : ""}`, stock, made: madeList, cost: r2(Math.max(0, net)), madeBy: me ? me.id : "", at: new Date().toISOString(), outletId: w.loc, wo: w.id, variance });
+  await ev.put("bakes", { id: bakeId, no, date: st.date, lines, prep, notes: `${w.no}${w.notes ? " · " + w.notes : ""}`, stock, made: madeList, cost: r2(Math.max(0, net)), madeBy: me ? me.id : "", at: new Date().toISOString(), outletId: w.loc, wo: w.id, variance, ...(labour.hours ? { labour } : {}) });
   await ev.put("wos", { ...clean(w), status: "done", batchId: bakeId, returned: st.ret, doneAt: new Date().toISOString() }); sync.soon(); toast(`${w.no} done · batch #${no}`); woDetail(w.id);
 }
 
