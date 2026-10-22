@@ -335,6 +335,8 @@ const I = {
     const date = $("#mDate").value || today(); const note = $("#mNote").value.trim();
     const at = st.loc ? { outletId: st.loc } : {};
     if (st.type === "purchase") { const amt = num($("#mAmt").value); await putMove({ ingId: i.id, type: "purchase", qty: q, amount: amt, date, note, ...at }); toast(`Added ${qty(q, i.unit)} ${i.name}`); }
+    if (st.type === "waste" && H.approve && !await H.approve("adjust", q * M.unitCost(i), `Wastage of ${i.name}`)) return;
+    if (st.type === "count") { const on0 = M.stockLevel(i, M.stockMap(st.loc || null)).on; if (q < on0 && H.approve && !await H.approve("adjust", (on0 - q) * M.unitCost(i), `Count of ${i.name} removing stock`)) return; }
     if (st.type === "waste") { if (!await yesNo(`<p class="cq">Record wastage?</p><div class="cdetail">${qty(q, i.unit)} of ${esc(i.name)} will be removed from stock.</div>`, "Record")) return; await putMove({ ingId: i.id, type: "waste", qty: -q, date, note }); toast("Wastage recorded"); }
     if (st.type === "count") { const on = M.stockLevel(i, M.stockMap(st.loc || null)).on; const d = q - on; if (!await yesNo(`<p class="cq">Set stock to ${qty(q, i.unit)}?</p><div class="cdetail">${esc(i.name)} shows ${qty(on, i.unit)} now. This ${d >= 0 ? "adds" : "removes"} ${qty(Math.abs(d), i.unit)}.</div>`, "Save count")) return; await putMove({ ingId: i.id, type: "count", qty: d, date, note: note || "Stock count" }); toast("Stock count saved"); }
     ingSheet(i.id); },

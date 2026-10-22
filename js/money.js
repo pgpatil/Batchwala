@@ -100,7 +100,7 @@ async function creditPrompt(title, max) {
 A.takeAdvance = async () => { const c = sheetCust(); if (!c || !guard("pay.record")) return; const r = await creditPrompt(`Advance from ${c.customer}`); if (!r) return;
   await addCredit(c, r.amt, r.mode, r.note || "Advance"); toast(`${rs(r.amt)} held as credit for ${c.customer}`); custSheet(c.key); };
 A.useCredit = async () => { const c = sheetCust(); if (!c || !guard("pay.record")) return; const used = await useCredit(c); toast(used ? `${rs(used)} of credit used` : "Nothing to pay"); custSheet(c.key); };
-A.refundCredit = async () => { const c = sheetCust(); if (!c || !guard("pay.reverse")) return; const r = await creditPrompt(`Refund credit to ${c.customer}`, c.credit); if (!r) return;
+A.refundCredit = async () => { const c = sheetCust(); if (!c || !guard("pay.reverse")) return; const r = await creditPrompt(`Refund credit to ${c.customer}`, c.credit); if (!r) return; if (H.approve && !await H.approve("refund", r.amt, `Refund of credit to ${c.customer}`)) return;
   await addCredit(c, -r.amt, r.mode, r.note || "Refunded"); toast(`${rs(r.amt)} refunded`); custSheet(c.key); };
 A.customers = customersSheet; H.custSheet = key => custSheet(key);
 A.orderForCust = () => { const c = sheetCust(); compose(null, { customer: c.customer, flat: c.flat, phone: c.phone, date: today() }); };

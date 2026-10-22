@@ -24,6 +24,7 @@ import "./sales.js";
 import "./buystock.js";
 import "./plan2.js";
 import "./qm.js";
+import "./controls.js";
 import { enhance } from "./table.js";
 import "./erp.js";
 import "./help.js";
@@ -34,7 +35,7 @@ import { APP_NAME } from "./config.js";
 import { $, esc, ICON, today, addDays } from "./util.js";
 import { ui, toast, closeSheet, yesNo, focusKey, refocus } from "./ui.js";
 
-const TAB = { help: ["Help", ICON.help], data: ["Import & export", ICON.dl], pos: ["Counter", ICON.cart], bom: ["BOM", ICON.tree], plan: ["Planning", ICON.plan], wo: ["Work orders", ICON.oven], po: ["Purchase orders", ICON.orders], sup: ["Suppliers & payables", ICON.people], insights: ["Cost & stock reports", ICON.chart], analytics: ["Analytics", ICON.chart], quotes: ["Quotations", ICON.orders], rtn: ["Returnables", ICON.batch], qlog: ["Food safety logs", ICON.check], complaints: ["Complaints", ICON.help], equip: ["Equipment", ICON.oven], lic: ["Licences", ICON.inbox], standing: ["Standing orders", ICON.orders], close: ["Day close", ICON.pay], take: ["Stock-take", ICON.stock], dn: ["Purchase returns", ICON.inbox], prod: ["Production", ICON.oven], grn: ["Purchases (GRN)", ICON.inbox], xfer: ["Transfers", ICON.truck], fg: ["Finished goods", ICON.batch], today: ["Today", ICON.today], orders: ["Orders", ICON.orders], pay: ["Payments", ICON.pay], stock: ["Inventory", ICON.stock], bake: ["Bake board", ICON.oven], batches: ["Batches", ICON.batch], run: ["Delivery run", ICON.run], more: ["More", ICON.more] };
+const TAB = { help: ["Help", ICON.help], data: ["Import & export", ICON.dl], pos: ["Counter", ICON.cart], bom: ["BOM", ICON.tree], plan: ["Planning", ICON.plan], wo: ["Work orders", ICON.oven], po: ["Purchase orders", ICON.orders], sup: ["Suppliers & payables", ICON.people], insights: ["Cost & stock reports", ICON.chart], analytics: ["Analytics", ICON.chart], quotes: ["Quotations", ICON.orders], rtn: ["Returnables", ICON.batch], qlog: ["Food safety logs", ICON.check], complaints: ["Complaints", ICON.help], equip: ["Equipment", ICON.oven], lic: ["Licences", ICON.inbox], audit: ["Audit trail", ICON.help], standing: ["Standing orders", ICON.orders], close: ["Day close", ICON.pay], take: ["Stock-take", ICON.stock], dn: ["Purchase returns", ICON.inbox], prod: ["Production", ICON.oven], grn: ["Purchases (GRN)", ICON.inbox], xfer: ["Transfers", ICON.truck], fg: ["Finished goods", ICON.batch], today: ["Today", ICON.today], orders: ["Orders", ICON.orders], pay: ["Payments", ICON.pay], stock: ["Inventory", ICON.stock], bake: ["Bake board", ICON.oven], batches: ["Batches", ICON.batch], run: ["Delivery run", ICON.run], more: ["More", ICON.more] };
 const SHORT = { close: "Day close", take: "Stock-take", dn: "Returns", plan: "Plan", wo: "Work orders", po: "POs", sup: "Payables", insights: "Reports", bake: "Bake", run: "My run", grn: "GRN", fg: "FG stock", prod: "Make" };   // bottom-bar labels on phones
 const ORDER = ["pos", "today", "orders", "bake", "prod", "grn", "stock", "xfer", "fg", "batches", "bom", "run", "pay", "more"];
 // Screens grouped into buckets: one bottom-bar button per bucket on phones, a strip of its screens on top of each page, sections in the sidebar.
@@ -88,7 +89,7 @@ function allowedViews() {
   if (c("sale") || c("collect") || c("pay.record")) t.push("close");
   if (c("reports")) t.push("analytics");
   if (c("orders.edit")) t.push("quotes", "standing");
-  if (c("bake.record") || c("stock.count") || R.isAdmin()) t.push("qlog"); if (c("orders.edit") || c("money")) t.push("complaints"); if (c("bake.record") || R.isAdmin()) t.push("equip"); if (R.isAdmin() || R.role() === "management") t.push("lic");
+  if (c("bake.record") || c("stock.count") || R.isAdmin()) t.push("qlog"); if (c("orders.edit") || c("money")) t.push("complaints"); if (c("bake.record") || R.isAdmin()) t.push("equip"); if (R.isAdmin() || R.role() === "management") t.push("lic", "audit");
   t.push("help"); if (c("export") || R.isAdmin()) t.push("data");
   return [...new Set(t)];
 }
@@ -130,10 +131,10 @@ function navHtml() {
   const open = navOpen(); const grp = (k, label, ic, body, vs) => { const isOpen = open[k] ?? vs.includes(S.view) ?? false; const cur = vs.includes(S.view);
     return `<button class="nav-grp dx${cur ? " cur" : ""}" data-navgrp="${k}" aria-expanded="${isOpen || cur}"><span class="dot">${ic}</span><span class="nl">${label}</span>${!(isOpen || cur) ? badge(vs) : ""}<span class="chev">${ICON.chev}</span></button>${isOpen || cur ? `<div class="nav-items dx">${body}</div>` : ""}`; };
   const side = loose.map(v => btn(v, "dx")).join("") + Object.keys(BUCKETS).map(k => { const vs = inBucket(k); return vs.length ? grp(k, BUCKETS[k][0], BUCKETS[k][1], vs.map(v => btn(v, "dx")).join(""), vs) : ""; }).join("");
-  const recBody = (views.includes("analytics") ? btn("analytics", "dx") : "") + links.map(([a, ic, l]) => `<button class="nb dx" data-act="${a}"><span class="dot">${ic}</span><span class="nl">${l}</span></button>`).join("") + (views.includes("more") || tabs.includes("more") ? btn("more", "dx") : "");
+  const recBody = (views.includes("analytics") ? btn("analytics", "dx") : "") + (views.includes("audit") ? btn("audit", "dx") : "") + links.map(([a, ic, l]) => `<button class="nb dx" data-act="${a}"><span class="dot">${ic}</span><span class="nl">${l}</span></button>`).join("") + (views.includes("more") || tabs.includes("more") ? btn("more", "dx") : "");
   return `<div class="nav-brand">${logoHtml(c)}<div><b>${esc(c.business)}</b><small>${esc(me.name + " · " + R.ROLES[me.role].label)}</small></div></div><div class="nav-sw dx">${switchersHtml()}</div>
   <div class="nav-in" style="grid-template-columns:repeat(${bar.length},1fr)">${bar.join("")}${side}
-  ${recBody ? grp("records", "Reports & analytics", ICON.chart, recBody, ["more", "analytics"]) : ""}</div>
+  ${recBody ? grp("records", "Reports & analytics", ICON.chart, recBody, ["more", "analytics", "audit"]) : ""}</div>
   <p class="nav-keys dx">Keys: <kbd>N</kbd> new · <kbd>/</kbd> search</p>`;
 }
 let dayOpen = today();

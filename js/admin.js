@@ -32,6 +32,7 @@ V.more = () => {
     ["@equip", "oven", "Equipment", "Ovens, mixers, fridges: services and breakdowns", !H.onBar("equip") && H.canOpen("equip")],
     ["@lic", "inbox", "Licences & certificates", "FSSAI and other licences, with expiry reminders", !H.onBar("lic") && H.canOpen("lic")],
     ["@rtn", "batch", "Returnables", "Crates and trays out with customers and outlets", !H.onBar("rtn") && H.canOpen("rtn")],
+    ["@audit", "help", "Audit trail", "Every change: who, when, which device, what changed", !H.onBar("audit") && H.canOpen("audit")],
     ["priceLists", "menu", "Price lists", "Wholesale, café or staff prices for customer groups", R.isAdmin() || R.can("prices")],
     ["reports", "chart", "Sales & profit", "Sales by day and channel, best sellers, margins", R.can("reports")],
     ["users", "people", "Users & roles", `${R.members().length} people`, R.isAdmin()],
@@ -46,7 +47,7 @@ V.more = () => {
   return `<div class="band"><div class="top">${logoHtml(c)}<div class="biz"><div class="name">${esc(c.business)}</div><div class="sub">${esc(me ? me.name + " · " + R.ROLES[me.role].label : "")}</div></div></div>${toran()}</div>
   ${H.switchers ? `<div class="moresw">${H.switchers()}</div>` : ""}${H.backupBanner && H.backupBanner() ? `<div class="boardfoot" style="padding-bottom:0">${H.backupBanner()}</div>` : ""}
   <div class="menu-list" style="margin-top:14px">${items.map(([a, ic, t, s]) => `<button class="mi" ${a[0] === "@" ? `data-go="${a.slice(1)}"` : `data-act="${a}"`}><span class="ic">${ICON[ic]}</span><span class="grow">${t}<small>${esc(s)}</small></span><span class="chev">${ICON.chev}</span></button>`).join("")}</div>
-  <p class="hint" style="padding:4px 18px">${APP_NAME} 2.15${R.mode() !== "classic" ? " · " + esc(M.MODES[R.mode()]) + " mode" : ""} · ${st.state === "off" ? "data saved on this phone only" : "synced through Google Drive"}${st.last ? " · last sync " + new Date(st.last).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" }) : ""}</p>`;
+  <p class="hint" style="padding:4px 18px">${APP_NAME} 2.16${R.mode() !== "classic" ? " · " + esc(M.MODES[R.mode()]) + " mode" : ""} · ${st.state === "off" ? "data saved on this phone only" : "synced through Google Drive"}${st.last ? " · last sync " + new Date(st.last).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" }) : ""}</p>`;
 };
 
 /* ---------- first run ---------- */
@@ -205,6 +206,8 @@ function drawSettings(st) {
   <div class="kv">${(c.coupons || []).map((x, ix) => `<div style="align-items:center;gap:6px;flex-wrap:wrap"><input class="in" data-cpcode="${ix}" value="${esc(x.code)}" placeholder="CODE" autocapitalize="characters" style="max-width:120px"><input class="in" data-cpval="${ix}" inputmode="decimal" value="${x.value || ""}" placeholder="10" style="max-width:70px"><div class="chips">${[["pct", "% off"], ["amt", "₹ off"]].map(([k, l]) => `<button class="chip" data-cpkind="${ix}:${k}" aria-pressed="${(x.kind || "pct") === k}">${l}</button>`).join("")}</div><input class="in" data-cpmin="${ix}" inputmode="decimal" value="${x.min || ""}" placeholder="min bill ₹" style="max-width:100px"><input class="in" type="date" data-cpuntil="${ix}" value="${esc(x.until || "")}" style="max-width:150px" aria-label="Valid till"><button class="rm" data-cprm="${ix}" aria-label="Remove coupon">×</button></div>`).join("") || `<div class="mut">None yet</div>`}</div>
   <button class="add-line" data-act="addCoupon">+ Add a coupon</button>
   <p class="hint">A coupon gives % or ₹ off the items, above an optional minimum bill and until an optional date.</p>
+  <label class="f" style="margin-top:18px">Approvals <small class="mut">(blank = no limit · above a limit, an admin or management person approves with their PIN)</small></label>
+  <div class="two">${[["discount", "Discount on a bill above %"], ["refund", "Refund above ₹"], ["adjust", "Stock written off above ₹"], ["po", "PO a buyer approves alone up to ₹"]].map(([k, l]) => `<div><label class="f" for="ap_${k}">${l}</label><input class="in" id="ap_${k}" data-aplim="${k}" inputmode="decimal" value="${(c.approvals || {})[k] ?? ""}" placeholder="No limit"></div>`).join("")}</div>
   <label class="f" style="margin-top:18px">Material cost</label><div class="chips">${[["avg", "Weighted average of stock"], ["last", "Last purchase price"]].map(([k, l]) => `<button class="chip" data-costing="${k}" aria-pressed="${(c.costing === "last" ? "last" : "avg") === k}">${l}</button>`).join("")}</div>
   <p class="hint">Used for recipe, batch and stock values. Average smooths price changes; old batches keep the cost they were saved with.</p>
   <label class="f" for="sLabour">Labour cost per hour ₹ <small class="mut">(optional · for labour cost in Analytics)</small></label><input class="in" id="sLabour" inputmode="numeric" value="${c.labourRate || ""}" placeholder="e.g. 120">
@@ -221,6 +224,7 @@ function syncSettings() { const c = ui.sheet.c; const g = id => document.getElem
   if (g("sTaxName")) { c.tax.name = g("sTaxName").value.trim() || "GST"; c.tax.rate = num(g("sTaxRate").value); c.tax.gstin = g("sGstin").value.trim().toUpperCase(); }
   c.locations.forEach((l, ix) => { const el = document.querySelector(`[data-locname="${ix}"]`); if (el) l.name = el.value.trim() || l.name; });
   const q = sel => document.querySelector(sel); if (g("sSac")) c.sac = g("sSac").value.trim(); if (g("sFssai")) c.fssai = g("sFssai").value.replace(/\D/g, ""); if (g("sLabour")) c.labourRate = Math.max(0, num(g("sLabour").value));
+  document.querySelectorAll("[data-aplim]").forEach(el => { c.approvals = c.approvals || {}; c.approvals[el.dataset.aplim] = el.value.trim() === "" ? "" : Math.max(0, num(el.value)); });
   (c.charges || []).forEach((x, ix) => { const n = q(`[data-chname="${ix}"]`), a = q(`[data-chamt="${ix}"]`); if (n) x.name = n.value.trim(); if (a) x.amount = num(a.value); });
   (c.coupons || []).forEach((x, ix) => { const cd = q(`[data-cpcode="${ix}"]`), v = q(`[data-cpval="${ix}"]`), mn = q(`[data-cpmin="${ix}"]`), u = q(`[data-cpuntil="${ix}"]`);
     if (cd) x.code = cd.value.trim().toUpperCase().replace(/\s+/g, ""); if (v) x.value = num(v.value); if (mn) x.min = num(mn.value); if (u) x.until = u.value; }); }

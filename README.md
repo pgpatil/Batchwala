@@ -38,6 +38,11 @@ It is a Progressive Web App: it opens from a link, installs to the home screen, 
 | Finance reports | Profit & loss with monthly overheads, month-end stock value by location, reorder levels from use and lead time, price-rise alerts, HSN-wise sales summary |
 | Security | Hashed PINs; removing a person revokes their Drive access; device sync health list; printable purchase orders |
 | Analytics | Dashboards for sales, production, buying and stock with comparison to the previous period; Explore to slice any dataset by any dimension with filters, charts, CSV and shared saved views; a period picker (presets or any from–to range) on every report |
+| Sales controls | Quotations to orders, standing (repeating) orders, price lists by customer group, credit limits, credit notes for returns, birthday and anniversary reminders, WhatsApp broadcasts |
+| Buying controls | Supplier bill checked against GRN and PO, rate contracts, returnable packaging, lot tracing from GRN to batch to customer and back |
+| Planning ahead | Next 7 days with run-out dates, keep-ready forecast per weekday from sales, actual yield and labour per run |
+| Quality & upkeep | Goods-receipt inspection, daily food-safety logs, complaints with root cause and action, licence expiry, equipment services and breakdowns |
+| Approvals & audit | Limits for discounts, refunds, write-offs and POs with PIN approval; an audit trail of every change |
 | Editing locks | A saved record being edited is locked for others until saved or closed (lapses after 8 quiet minutes; admin can take over); saves check for changes made meanwhile |
 | Menu | Prices, categories, short names for WhatsApp reading, par levels, recipes with cost and margin |
 | Reports | Sales by day and channel, best sellers with margin, wastage value, repeat customers |

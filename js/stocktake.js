@@ -63,6 +63,7 @@ H.click.push(async T => {
   if (T.closest("[data-takesave]")) { if (!guard("stock.count")) return true; const sm = M.stockMap(multi() ? d.loc : null); const ings = M.ingMap();
     const lines = Object.keys(d.counts).filter(id => ings[id]).map(id => { const diff = d.counts[id] - (sm[id] || 0); return { ingId: id, system: sm[id] || 0, counted: d.counts[id], diff, reason: d.reasons[id] || "", value: Math.round(diff * M.unitCost(ings[id]) * 100) / 100 }; });
     const missing = lines.filter(l => Math.abs(l.diff) > 1e-6 && !l.reason); const value = lines.reduce((s, l) => s + l.value, 0);
+    { const loss = -lines.reduce((s, l) => s + Math.min(0, l.value), 0); if (loss > 0 && H.approve && !await H.approve("adjust", loss, "Stock-take write-off")) return true; }
     if (!await yesNo(`<p class="cq">Save this stock-take?</p><div class="cdetail">${lines.length} counted · ${lines.filter(l => Math.abs(l.diff) > 1e-6).length} with a difference${R.can("money") ? ` worth ${value >= 0 ? "+" : "−"}${rs2(Math.abs(value))}` : ""}.${missing.length ? `<br><br>${missing.length} difference${missing.length > 1 ? "s have" : " has"} no reason yet.` : ""}</div>`, "Save stock-take")) return true;
     const id = uid("st"); const no = M.nextDocNo("stocktakes", R.numPrefix(), "ST"); const loc = d.loc;
     for (const l of lines) if (Math.abs(l.diff) > 1e-6) await putMove({ ingId: l.ingId, type: "count", qty: l.diff, note: `${no}${l.reason ? " · " + l.reason : ""}`, ref: id, outletId: loc });

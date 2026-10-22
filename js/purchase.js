@@ -79,7 +79,7 @@ function drawPo(st) {
   <button class="add-line" data-poadd>+ Add item</button>
   <div class="kv" id="poTot" style="margin-top:12px">${poTotals(x)}</div>
   <label class="f" for="poNote">Note to supplier</label><input class="in" id="poNote" value="${esc(x.notes || "")}" placeholder="Optional · delivery time, brand">
-  <div class="btnrow"><button class="btn btn-ghost" data-posave="draft">Save draft</button>${canApprove() ? `<button class="btn btn-ok" data-posave="approve">${ICON.check}Save & approve</button>` : ""}</div>
+  <div class="btnrow"><button class="btn btn-ghost" data-posave="draft">Save draft</button>${canApprove() || (H.poSelfLimit && H.poSelfLimit() != null) ? `<button class="btn btn-ok" data-posave="approve">${ICON.check}Save & approve</button>` : ""}</div>
   ${canApprove() ? "" : `<p class="hint">An admin or management approves it before goods are received.</p>`}`);
 }
 const poTotals = x => { const a = x.lines.reduce((s, l) => s + (l.qty * l.rate || 0), 0), t = x.lines.reduce((s, l) => s + (l.qty * l.rate * (+l.taxPct || 0) / 100 || 0), 0);
@@ -98,6 +98,8 @@ async function savePo(approve) {
     if (d) { d.rate = (d.rate * d.qty + (+l.rate || 0) * l.qty) / (d.qty + l.qty); d.qty += l.qty; } else lines.push({ ingId: l.ingId, qty: l.qty, rate: +l.rate || 0, taxPct: +l.taxPct || 0 }); });
   if (!lines.length) { toast("Enter what to order"); return; }
   if (lines.some(l => !l.rate) && !await yesNo(`<p class="cq">Some lines have no rate</p><div class="cdetail">Save anyway? The GRN will take the bill amount.</div>`, "Save")) return;
+  // A buyer without approval rights may approve a PO up to the limit set by the admin.
+  if (approve && !canApprove()) { const v = M.poValue({ lines }); const lim = H.poSelfLimit ? H.poSelfLimit() : null; if (lim == null || v > lim + 0.5) { toast(`POs above ${rs(lim || 0)} need the admin or management to approve. Saved as a draft instead.`); approve = false; } }
   if (!await L.saveOk(st)) return;
   if (!M.supplierByName(sup)) await ev.put("suppliers", { id: uid("s"), name: sup });
   const rec = { ...clean(x), supplier: sup, lines, status: approve ? "approved" : "draft", ...(approve ? { approvedBy: (R.me() || {}).id || "", approvedAt: new Date().toISOString() } : {}) };
