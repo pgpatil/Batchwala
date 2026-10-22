@@ -24,7 +24,16 @@ V.more = () => {
     ["@plan", "plan", "Planning", "What to make, semi-finished, indent and batch cards", !H.onBar("plan") && H.canOpen("plan")],
     ["@bom", "tree", "BOM", "Multilevel bills of materials", !H.onBar("bom") && (R.can("menu.edit") || R.can("reports") || R.can("bake.record"))],
     ["@batches", "batch", "Batches", `${M.batches().filter(b => !b.void).length} recorded · pieces, spoilage and cost`, !H.onBar("batches") && (R.can("bake.record") || R.can("orders.edit"))],
-    ["customers", "people", "Customers", `${M.customers().length} saved`, R.can("customers")],
+    ["customers", "people", "Customers", `${M.customers().length} saved${H.celebCount && H.celebCount() ? ` · 🎂 ${H.celebCount()} this week` : ""}`, R.can("customers")],
+    ["@quotes", "orders", "Quotations", "Priced offers for bulk and event orders", !H.onBar("quotes") && H.canOpen("quotes")],
+    ["@standing", "orders", "Standing orders", "Repeat orders made by themselves on set days", !H.onBar("standing") && H.canOpen("standing")],
+    ["@qlog", "check", "Food safety logs", "Daily temperature, cleaning and pest checks", !H.onBar("qlog") && H.canOpen("qlog")],
+    ["@complaints", "help", "Complaints", "Customer complaints, root cause and action", !H.onBar("complaints") && H.canOpen("complaints")],
+    ["@equip", "oven", "Equipment", "Ovens, mixers, fridges: services and breakdowns", !H.onBar("equip") && H.canOpen("equip")],
+    ["@lic", "inbox", "Licences & certificates", "FSSAI and other licences, with expiry reminders", !H.onBar("lic") && H.canOpen("lic")],
+    ["@rtn", "batch", "Returnables", "Crates and trays out with customers and outlets", !H.onBar("rtn") && H.canOpen("rtn")],
+    ["@audit", "help", "Audit trail", "Every change: who, when, which device, what changed", !H.onBar("audit") && H.canOpen("audit")],
+    ["priceLists", "menu", "Price lists", "Wholesale, café or staff prices for customer groups", R.isAdmin() || R.can("prices")],
     ["reports", "chart", "Sales & profit", "Sales by day and channel, best sellers, margins", R.can("reports")],
     ["users", "people", "Users & roles", `${R.members().length} people`, R.isAdmin()],
     ["settings", "gear", "Business settings", "Logo, name, colour, UPI ID, occasions", R.isAdmin()],
@@ -38,7 +47,7 @@ V.more = () => {
   return `<div class="band"><div class="top">${logoHtml(c)}<div class="biz"><div class="name">${esc(c.business)}</div><div class="sub">${esc(me ? me.name + " · " + R.ROLES[me.role].label : "")}</div></div></div>${toran()}</div>
   ${H.switchers ? `<div class="moresw">${H.switchers()}</div>` : ""}${H.backupBanner && H.backupBanner() ? `<div class="boardfoot" style="padding-bottom:0">${H.backupBanner()}</div>` : ""}
   <div class="menu-list" style="margin-top:14px">${items.map(([a, ic, t, s]) => `<button class="mi" ${a[0] === "@" ? `data-go="${a.slice(1)}"` : `data-act="${a}"`}><span class="ic">${ICON[ic]}</span><span class="grow">${t}<small>${esc(s)}</small></span><span class="chev">${ICON.chev}</span></button>`).join("")}</div>
-  <p class="hint" style="padding:4px 18px">${APP_NAME} 2.15${R.mode() !== "classic" ? " · " + esc(M.MODES[R.mode()]) + " mode" : ""} · ${st.state === "off" ? "data saved on this phone only" : "synced through Google Drive"}${st.last ? " · last sync " + new Date(st.last).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" }) : ""}</p>`;
+  <p class="hint" style="padding:4px 18px">${APP_NAME} 2.16${R.mode() !== "classic" ? " · " + esc(M.MODES[R.mode()]) + " mode" : ""} · ${st.state === "off" ? "data saved on this phone only" : "synced through Google Drive"}${st.last ? " · last sync " + new Date(st.last).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" }) : ""}</p>`;
 };
 
 /* ---------- first run ---------- */
@@ -197,8 +206,11 @@ function drawSettings(st) {
   <div class="kv">${(c.coupons || []).map((x, ix) => `<div style="align-items:center;gap:6px;flex-wrap:wrap"><input class="in" data-cpcode="${ix}" value="${esc(x.code)}" placeholder="CODE" autocapitalize="characters" style="max-width:120px"><input class="in" data-cpval="${ix}" inputmode="decimal" value="${x.value || ""}" placeholder="10" style="max-width:70px"><div class="chips">${[["pct", "% off"], ["amt", "₹ off"]].map(([k, l]) => `<button class="chip" data-cpkind="${ix}:${k}" aria-pressed="${(x.kind || "pct") === k}">${l}</button>`).join("")}</div><input class="in" data-cpmin="${ix}" inputmode="decimal" value="${x.min || ""}" placeholder="min bill ₹" style="max-width:100px"><input class="in" type="date" data-cpuntil="${ix}" value="${esc(x.until || "")}" style="max-width:150px" aria-label="Valid till"><button class="rm" data-cprm="${ix}" aria-label="Remove coupon">×</button></div>`).join("") || `<div class="mut">None yet</div>`}</div>
   <button class="add-line" data-act="addCoupon">+ Add a coupon</button>
   <p class="hint">A coupon gives % or ₹ off the items, above an optional minimum bill and until an optional date.</p>
+  <label class="f" style="margin-top:18px">Approvals <small class="mut">(blank = no limit · above a limit, an admin or management person approves with their PIN)</small></label>
+  <div class="two">${[["discount", "Discount on a bill above %"], ["refund", "Refund above ₹"], ["adjust", "Stock written off above ₹"], ["po", "PO a buyer approves alone up to ₹"]].map(([k, l]) => `<div><label class="f" for="ap_${k}">${l}</label><input class="in" id="ap_${k}" data-aplim="${k}" inputmode="decimal" value="${(c.approvals || {})[k] ?? ""}" placeholder="No limit"></div>`).join("")}</div>
   <label class="f" style="margin-top:18px">Material cost</label><div class="chips">${[["avg", "Weighted average of stock"], ["last", "Last purchase price"]].map(([k, l]) => `<button class="chip" data-costing="${k}" aria-pressed="${(c.costing === "last" ? "last" : "avg") === k}">${l}</button>`).join("")}</div>
   <p class="hint">Used for recipe, batch and stock values. Average smooths price changes; old batches keep the cost they were saved with.</p>
+  <label class="f" for="sLabour">Labour cost per hour ₹ <small class="mut">(optional · for labour cost in Analytics)</small></label><input class="in" id="sLabour" inputmode="numeric" value="${c.labourRate || ""}" placeholder="e.g. 120">
   <label class="f" style="margin-top:18px">Locations</label><div class="kv">${c.locations.map((l, ix) => `<div style="align-items:center;gap:8px"><input class="in" data-locname="${ix}" value="${esc(l.name)}" style="flex:1;min-width:0"><div class="chips">${[["kitchen", "Kitchen"], ["outlet", "Outlet"]].map(([k, n]) => `<button class="chip" data-lockind="${ix}:${k}" aria-pressed="${l.kind === k}">${n}</button>`).join("")}</div>${ix ? `<button class="rm" data-locrm="${ix}" aria-label="Remove location">×</button>` : ""}</div>`).join("")}</div>
   <button class="add-line" data-act="addLocation">+ Add outlet or kitchen</button>
   <p class="hint">Kitchens make; outlets sell and receive transfers. The first location holds everything recorded before locations existed.</p>
@@ -211,7 +223,8 @@ function drawSettings(st) {
 function syncSettings() { const c = ui.sheet.c; const g = id => document.getElementById(id); if (g("sAddr")) { c.address = g("sAddr").value.trim(); c.phone = g("sPhone").value.trim(); c.state = g("sState").value.trim(); c.invoicePrefix = g("sInvPre").value.trim().toUpperCase().replace(/[^A-Z0-9]/g, "") || "INV"; c.hsn = g("sHsn").value.trim(); } c.business = g("sBiz").value.trim() || "My Bakery"; c.tagline = g("sTag").value.trim(); c.upi = g("sUpi").value.trim(); c.payee = g("sPayee").value.trim(); c.activeTag = g("sActive").value; c.accent = g("sAccent").value; c.tables = Math.min(60, Math.max(0, Math.round(num(g("sTables").value)))) || 10;
   if (g("sTaxName")) { c.tax.name = g("sTaxName").value.trim() || "GST"; c.tax.rate = num(g("sTaxRate").value); c.tax.gstin = g("sGstin").value.trim().toUpperCase(); }
   c.locations.forEach((l, ix) => { const el = document.querySelector(`[data-locname="${ix}"]`); if (el) l.name = el.value.trim() || l.name; });
-  const q = sel => document.querySelector(sel); if (g("sSac")) c.sac = g("sSac").value.trim(); if (g("sFssai")) c.fssai = g("sFssai").value.replace(/\D/g, "");
+  const q = sel => document.querySelector(sel); if (g("sSac")) c.sac = g("sSac").value.trim(); if (g("sFssai")) c.fssai = g("sFssai").value.replace(/\D/g, ""); if (g("sLabour")) c.labourRate = Math.max(0, num(g("sLabour").value));
+  document.querySelectorAll("[data-aplim]").forEach(el => { c.approvals = c.approvals || {}; c.approvals[el.dataset.aplim] = el.value.trim() === "" ? "" : Math.max(0, num(el.value)); });
   (c.charges || []).forEach((x, ix) => { const n = q(`[data-chname="${ix}"]`), a = q(`[data-chamt="${ix}"]`); if (n) x.name = n.value.trim(); if (a) x.amount = num(a.value); });
   (c.coupons || []).forEach((x, ix) => { const cd = q(`[data-cpcode="${ix}"]`), v = q(`[data-cpval="${ix}"]`), mn = q(`[data-cpmin="${ix}"]`), u = q(`[data-cpuntil="${ix}"]`);
     if (cd) x.code = cd.value.trim().toUpperCase().replace(/\s+/g, ""); if (v) x.value = num(v.value); if (mn) x.min = num(mn.value); if (u) x.until = u.value; }); }

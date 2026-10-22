@@ -143,6 +143,8 @@ function costFrom(mv) {
     const avg = x.q > 0 ? x.v / x.q : last(); x.q += q; x.v += avg * q; if (x.q <= 0) x.v = x.q * last(); });
   return Object.fromEntries(Object.entries(by).map(([id, x]) => [id, { avg: x.q > 0 && x.v > 0 ? x.v / x.q : (x.rates.at(-1) || own[id] || 0), last: x.rates.at(-1) || 0 }]));
 }
+// A rate contract in force with the supplier for the material on a date (per base unit), or 0.
+export const contractRate = (supplier, ingId, d = today()) => { const k = nameKey(supplier); const c = ev.all("contracts").filter(x => nameKey(x.supplier) === k && x.ingId === ingId && (!x.from || x.from <= d) && (!x.to || x.to >= d)).sort((a, b) => (b.from || "") < (a.from || "") ? -1 : 1)[0]; return c ? +c.rate : 0; };
 export const lastPrice = ing => (costIndex()[ing.id] || {}).last || +ing.cost || 0;
 // Semi-finished cost rolls up through their recipe, level by level.
 // idx: a cost index as of a date (costAsOf); by default today's.
@@ -165,6 +167,13 @@ export function materialLots(ingId = null) {
   Object.entries(lots).forEach(([id, ls]) => { let r = Math.max(0, sm[id] || 0); ls.sort((a, b) => (b.date + b.grn._at) < (a.date + a.grn._at) ? -1 : 1)
     .forEach(l => { l.left = Math.min(l.qty, r); r -= l.left; l.expired = !!l.exp && l.left > 0 && l.exp < t; l.soon = !!l.exp && l.left > 0 && !l.expired && l.exp <= addDays(t, 7); out.push(l); }); });
   return out.sort((a, b) => (a.exp || "9999") < (b.exp || "9999") ? -1 : 1);
+}
+// Which GRN lots a use of `qty` comes from: the oldest lots still holding stock first (the same order stock is used in).
+// Anything beyond what GRN lots hold (counts, older stock) is returned without a GRN.
+export function lotsFor(ingId, qty) {
+  const ls = materialLots(ingId).filter(l => l.left > 0).sort((a, b) => (a.date + a.grn._at) < (b.date + b.grn._at) ? -1 : 1); const out = []; let r = qty;
+  for (const l of ls) { if (r <= 1e-9) break; const q = Math.min(l.left, r); out.push({ ingId, grnId: l.grn.id, grnNo: l.grn.no, lot: l.lot, qty: q }); r -= q; }
+  if (r > 1e-9) out.push({ ingId, grnId: "", grnNo: "", lot: "", qty: r }); return out;
 }
 export const expiringMaterials = () => materialLots().filter(l => l.expired || l.soon);
 /* ---------- allergens and label ingredients ---------- */
@@ -201,7 +210,7 @@ export function requirement(lines, at) {
 
 /* ---------- batches ---------- */
 // A batch is one recorded bake (kind "bakes"): numbered, with pieces and spoiled pieces per item and the stock it used.
-export const batches = memo(() => ev.all("bakes").map(b => ({ no: "", notes: "", void: false, ...b, date: ISO.test(b.date) ? b.date : today(), lines: (b.lines || []).map(l => ({ item: l.item, qty: +l.qty || 0, spoiled: +l.spoiled || 0, discarded: +l.discarded || 0, cleared: +l.cleared || 0 })), prep: (b.prep || []).map(p => ({ ingId: p.ingId, runs: +p.runs || 0, qty: +p.qty || 0 })) }))
+export const batches = memo(() => ev.all("bakes").map(b => ({ no: "", notes: "", void: false, ...b, date: ISO.test(b.date) ? b.date : today(), lines: (b.lines || []).map(l => ({ item: l.item, qty: +l.qty || 0, spoiled: +l.spoiled || 0, discarded: +l.discarded || 0, cleared: +l.cleared || 0 })), prep: (b.prep || []).map(p => ({ ingId: p.ingId, runs: +p.runs || 0, qty: +p.qty || 0, ...(p.std ? { std: +p.std } : {}) })) }))
   .sort((a, b) => (a.date + (a.at || a._at || "")) < (b.date + (b.at || b._at || "")) ? 1 : -1));
 export const bakesOn = date => batches().filter(b => b.date === date && !b.void);
 export const batchPcs = b => b.lines.reduce((s, l) => s + l.qty, 0);
@@ -272,10 +281,12 @@ export function nextBatchNo(prefix) { const n = batches().map(b => +String(b.no 
 
 /* ---------- bake board ---------- */
 // Per item for a date: committed (pre-orders), par (kept ready for on-demand), baked, sold (counter and aggregator), left.
+// Keep-ready level for a date: the item's level for that weekday when set (from the sales forecast), else its everyday level.
+export const parOn = (m, date) => { const d = (new Date(date + "T00:00:00").getDay() + 6) % 7; const v = m.parDays && m.parDays[d]; return v != null && v !== "" ? +v : +m.par || 0; };
 export function board(date) {
   const rows = new Map(); const row = name => { if (!rows.has(name)) rows.set(name, { item: name, committed: 0, par: 0, baked: 0, sold: 0, spoiled: 0 }); return rows.get(name); };
   orders(false).filter(o => o.date === date).forEach(o => o.items.forEach(i => { const r = row(i.item); if (PREORDER.includes(o.channel)) r.committed += i.qty; else r.sold += i.qty; }));
-  menuActive().filter(m => m.par > 0).forEach(m => { row(m.name).par = m.par; });
+  menuActive().filter(m => parOn(m, date) > 0).forEach(m => { row(m.name).par = parOn(m, date); });
   bakesOn(date).forEach(b => b.lines.forEach(l => { const r = row(l.item); r.baked += l.qty - l.spoiled; r.spoiled += l.spoiled; }));
   return [...rows.values()].map(r => ({ ...r, toBake: Math.max(0, r.committed + r.par - r.baked), left: r.baked - r.committed - r.sold })).sort((a, b) => b.toBake - a.toBake || b.committed - a.committed);
 }
@@ -310,7 +321,7 @@ export function fgStock() {
 export function outletBoard(date, loc = here()) {
   const fg = fgStock()[loc] || {}; const way = inTransit(loc); const rows = new Map(); const row = n => { if (!rows.has(n)) rows.set(n, { item: n, committed: 0, par: 0, onHand: 0, sold: 0, coming: 0 }); return rows.get(n); };
   orders(false).filter(o => o.date === date && locOf(o) === loc).forEach(o => o.items.forEach(i => { const r = row(i.item); if (isDelivered(o)) r.sold += i.qty; else r.committed += i.qty; }));
-  if (sellingLocs().some(l => l.id === loc)) menuActive().filter(m => m.par > 0).forEach(m => { row(m.name).par = m.par; });
+  if (sellingLocs().some(l => l.id === loc)) menuActive().filter(m => parOn(m, date) > 0).forEach(m => { row(m.name).par = parOn(m, date); });
   Object.entries(fg).forEach(([n, q]) => { if (q) row(n).onHand = q; }); Object.entries(way).forEach(([n, q]) => { if (q) row(n).coming = q; });
   // Pieces already on the way count against the shortfall, so the kitchen isn't asked twice.
   return [...rows.values()].map(r => ({ ...r, short: Math.max(0, r.committed + r.par - Math.max(0, r.onHand) - r.coming) })).sort((a, b) => b.short - a.short || a.item.localeCompare(b.item));
@@ -389,7 +400,9 @@ export const preturns = memo(() => ev.all("preturns").sort((a, b) => (b.date + b
 export const AGE = [["0–30", 0], ["31–60", 31], ["61–90", 61], ["90+", 91]];
 export function supplierLedger(name) {
   const n = nameKey(name); const sup = supplierByName(name) || { name, days: 0 }; const days = +sup.days || 0; const t = today();
-  const bills = grns().filter(g => !g.void && nameKey(g.supplier) === n).map(g => ({ date: g.date, doc: g.no, id: g.id, inv: g.invoiceNo || "", bill: +g.total || 0, open: +g.total || 0, due: addDays(g.date, days) })).sort((a, b) => a.date < b.date ? -1 : 1);
+  // A supplier bill entered against a GRN (and accepted when it differs) is what is owed; otherwise the GRN's total.
+  const owe = g => g.bill && g.bill.use ? +g.bill.total || 0 : +g.total || 0;
+  const bills = grns().filter(g => !g.void && nameKey(g.supplier) === n).map(g => ({ date: g.date, doc: g.no, id: g.id, inv: (g.bill && g.bill.no) || g.invoiceNo || "", bill: owe(g), open: owe(g), due: addDays((g.bill && g.bill.date) || g.date, days) })).sort((a, b) => a.date < b.date ? -1 : 1);
   // An opening balance set on the supplier (imported when moving to the app) is a bill dated when it stood; a negative one is an advance with them.
   const ob = +sup.opening || 0, obDate = sup.openingDate || "2000-01-01";
   if (ob > 0) bills.unshift({ date: obDate, doc: "Opening balance", id: "ob:" + n, inv: "", bill: ob, open: ob, due: addDays(obDate, days) });

@@ -71,20 +71,22 @@ async function savePos(status) {
   await saveOrder(o); return M.orders().find(x => x.id === o.id);   // as stored, with tax stamped
 }
 const reset = () => { const p = P(); S.pos = fresh(p.svc, p.mode); S.query.pos = ""; H.render(); };
-A.posCharge = async el => { if (!guard("sale")) return; const p = P(); if (!p.items.length) return;
+// A discount above the approval limit needs an admin or management PIN before the sale is saved.
+const discOk = async p => { const pct = M.discF(asOrder(p)) * 100; return !(pct > 0.01) || !H.approve || await H.approve("discount", pct, "Discount at the counter"); };
+A.posCharge = async el => { if (!guard("sale")) return; const p = P(); if (!p.items.length) return; if (!await discOk(p)) return;
   if (p.customer.trim()) { const r = await checkCustomer({ customer: p.customer.trim(), flat: "", phone: p.phone }); if (!r) return; if (r !== "new") { p.customer = r.customer; p.phone = r.phone || p.phone; } }
   recheckCoupon(p); const parts = p.mode === "Split" ? await splitPrompt(total(p)) : [[p.mode, null]]; if (!parts) return;
   el.disabled = true;
   const o = await savePos("delivered"); await payParts(o, parts); reset();
   toast(`${rs(M.total(o))} by ${parts.map(x => x[0]).join(" + ")} · order ${o.no}`, `<button data-receipt="${esc(o.id)}">Receipt</button><button data-undosale="${esc(o.id)}">Undo</button>`);
   if (M.config().autoReceipt && H.printReceipt) H.printReceipt(o.id); };
-A.posAggregator = async el => { if (!guard("sale")) return; el.disabled = true; const o = await savePos("delivered"); reset();
+A.posAggregator = async el => { if (!guard("sale")) return; if (!await discOk(P())) return; el.disabled = true; const o = await savePos("delivered"); reset();
   toast(`${M.CHANNELS[o.channel]} order ${o.no} saved`, `<button data-undosale="${esc(o.id)}">Undo</button>`); };
 // One save at a time: a double tap would otherwise open two tabs on one table with the same number.
 let saving = false;
 A.posSaveTab = async el => { if (!guard("sale") || saving) return; const p = P(); if (!p.table) { toast("Pick a table"); return; }
   saving = true; if (el) el.disabled = true; let o; try { o = await savePos("received"); } finally { saving = false; } toast(`Table ${p.table} · ${rs(M.total(o))} on the bill`); reset(); };
-A.posSettle = async () => { if (!guard("sale")) return; const p = P(); if (!p.table) { toast("Pick a table"); return; } recheckCoupon(p);
+A.posSettle = async () => { if (!guard("sale")) return; const p = P(); if (!p.table) { toast("Pick a table"); return; } if (!await discOk(p)) return; recheckCoupon(p);
   const parts = await payPrompt(`Settle table ${esc(p.table)}`, total(p), `${pcs(p)} pcs${M.disc(asOrder(p)) ? ` · ${esc(M.offerText(asOrder(p)))}` : ""}`);
   if (!parts) return; const o = await savePos("delivered"); await payParts(o, parts); toast(`Table ${p.table} settled · ${rs(M.total(o))} by ${parts.map(x => x[0]).join(" + ")}`); reset(); };
 

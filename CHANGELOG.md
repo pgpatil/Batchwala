@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.16.0 — 22 Oct 2026 · ERP gaps closed (from the SAP comparison)
+- Sales: quotations (validity, WhatsApp, print, one tap to an order); standing orders made two days ahead with skip and pause; price lists by customer group; credit limits with management override; credit notes for returns (Tally Credit Note, less sales returns in the P&L); birthdays and anniversaries with greetings; WhatsApp broadcasts by customer group
+- Buying: supplier bill against the GRN and PO rates, accepted or held; rate contracts used first on POs and flagged on GRNs; returnable crates and trays out with customers, outlets and suppliers; lot tracing from GRN to batches to customers (recall list) and back
+- Production: next 7 days of finished goods and materials with the day each runs short and draft POs; keep-ready levels per weekday from an 8-week sales forecast; actual yield of semi-finished runs and labour (people × hours) on batches and work orders, shown in Analytics
+- Quality & upkeep (new group): goods-receipt inspection with rejections onto a debit note; daily food-safety logs with corrective actions and a printable month; complaints with root cause and action; licences and certificates with expiry reminders; equipment with service schedules, breakdowns and repair costs
+- Controls: approval limits for discounts, refunds, stock write-offs and buyer-approved POs, approved on the spot with an admin or management PIN and logged; audit trail of every change with who, when, device and what changed
+
 ## 2.15.0 — 20 Oct 2026 · analytics and report periods
 - Analytics section (Reports & analytics): Overview, Sales, Production, Buying and Stock dashboards with trends against the previous period, and Explore for slicing sales lines, payments, production, purchases or stock movements by any dimension and measure, with filters, bar or line charts, a table with totals and shares, CSV download and saved views shared with the team
 - Every report has a period picker: today, yesterday, this or last week, this or last month, quarter, this or last financial year, last 30 or 90 days, all time, or a custom from–to range (Cost & stock reports, Sales & profit, Analytics)

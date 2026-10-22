@@ -111,7 +111,7 @@ V.orders = () => {
   const chans = [...new Set(all.map(o => o.channel))].sort((a, b) => ck.indexOf(a) - ck.indexOf(b));
   const list = group.filter(o => !tagF || o.tag === tagF).filter(o => !chanF || o.channel === chanF).filter(o => matchQ("orders", o))
     .sort((a, b) => S.filter.orders === "past" ? (a.date < b.date ? 1 : a.date > b.date ? -1 : cmpFlat(a, b)) : (a.date < b.date ? -1 : a.date > b.date ? 1 : cmpFlat(a, b)));
-  let h = band("Orders", R.can("export") ? `<button class="pillbtn" data-act="export">${ICON.dl}Excel</button>` : "");
+  let h = band("Orders", `${R.can("orders.edit") ? `<button class="pillbtn" data-go="quotes">Quotations${H.quoteCount && H.quoteCount() ? ` <em class="pillnum">${H.quoteCount()}</em>` : ""}</button><button class="pillbtn" data-go="standing">Standing orders</button>` : ""}${R.can("export") ? `<button class="pillbtn" data-act="export">${ICON.dl}Excel</button>` : ""}`);
   h += `<div class="tools">${searchBox("orders", "Search name, flat, phone or #")}${layoutSwitch("orders")}${chipBar("orders", [["upcoming", "Upcoming", all.filter(g.upcoming).length], ["past", "Past", all.filter(g.past).length], ["cancelled", "Cancelled", all.filter(g.cancelled).length], ["all", "All", all.length]])}</div>`;
   if (chans.length > 1) h += `<div class="tools" style="padding-top:2px"><div class="chips scroll"><button class="chip" data-chanf="" aria-pressed="${!chanF}">All channels</button>${chans.map(k => `<button class="chip" data-chanf="${esc(k)}" aria-pressed="${chanF === k}">${esc(M.CHANNELS[k] || k)}<span class="n">${group.filter(o => o.channel === k).length}</span></button>`).join("")}</div></div>`;
   if (tags.length) h += `<div class="tools" style="padding-top:2px"><div class="chips"><button class="chip" data-tagf="" aria-pressed="${!tagF}">All occasions</button>${tags.map(x => `<button class="chip" data-tagf="${esc(x)}" aria-pressed="${tagF === x}">${esc(x)}</button>`).join("")}</div></div>`;
@@ -151,6 +151,7 @@ export async function confirmDeliver(o, withCollect = false) {
 
 /* ---------- order detail ---------- */
 const getOrder = id => { const o = ev.get("orders", id); return o ? M.normOrder(o) : null; };
+H.openOrder = id => openOrder(id);
 export function openOrder(id) {
   const o = getOrder(id); if (!o) { closeSheet(); return; }
   const s = M.payState(o); const money = R.can("money"); const edit = R.can("orders.edit"); const cancelled = o.status === "cancelled";
@@ -165,6 +166,7 @@ export function openOrder(id) {
   ${cancelled ? "" : `<div class="statusrow"><button class="sbox ${M.isDelivered(o) ? "on" : "off"}" data-act="toggleDeliver" ${R.can("deliver") ? "" : "disabled"}><small>Delivery</small><b>${M.isDelivered(o) ? "Delivered ✓" : "Not delivered"}</b><em>${R.can("deliver") ? "Tap to " + (M.isDelivered(o) ? "undo" : "mark delivered") : ""}</em></button>
   ${money ? `<button class="sbox ${s === "paid" ? "on" : "off"}" data-act="${s === "paid" ? "unpay" : "payOrder"}" ${R.can("pay.record") || R.can("collect") ? "" : "disabled"}><small>Payment</small><b>${s === "paid" ? "Paid ✓" : s === "part" ? rs(M.bal(o)) + " due" : "Unpaid"}</b><em>${s === "paid" ? (M.lastPayMode(o) ? M.lastPayMode(o) + " · " : "") + "tap to undo" : "Tap to record payment"}</em></button>` : ""}</div>`}
   ${money ? `<div class="btnrow"><button class="btn btn-ghost" data-invoice="${esc(o.id)}">${ICON.print}${o.invoiceNo ? "Invoice " + esc(o.invoiceNo) : M.taxCfg().on && M.taxCfg().gstin ? "Tax invoice" : "Invoice"}</button><button class="btn btn-ghost" data-receipt="${esc(o.id)}">${ICON.print}Receipt</button></div>` : ""}
+  ${H.orderExtras ? H.orderExtras(o) : ""}
   ${money && !cancelled ? `<button class="btn btn-primary" data-act="billSummary">Bill summary${o.billSentAt ? " · " + (billChanged(o) ? "order changed since sent" : "sent " + esc(billWhen(o))) : ""}</button>` : ""}
   ${money && cancelled && M.received(o) > 0.005 ? `<div class="banner warn">${rs(M.received(o))} was paid on this cancelled order. ${R.can("pay.reverse") ? `<button class="linkbtn" data-act="refundOrder">Refund / reverse it</button>` : "Ask an admin to refund it."}</div>` : ""}
   ${money && !cancelled && M.received(o) - M.total(o) > 0.5 ? `<div class="banner warn">${rs(M.received(o) - M.total(o))} paid above the total. ${R.can("pay.reverse") ? `<button class="linkbtn" data-act="refundExtra">Refund the extra</button>` : ""}${R.can("pay.record") && o.channel !== "walkin" ? ` · <button class="linkbtn" data-act="extraToCredit">Keep as credit</button>` : ""}</div>` : ""}
@@ -185,11 +187,11 @@ A.editOrder = () => guard("orders.edit") && compose(sheetOrder());
 A.repeatOrder = () => guard("orders.edit") && compose(sheetOrder(), { repeat: true });
 A.cancelOrder = async () => { const o = sheetOrder(); if (!guard("orders.cancel")) return;
   const v = await ask(`${plate(o.flat)}<p class="cq">Cancel this order?</p><div class="cname">${esc(o.customer)} · ${esc(dLong(o.date))}</div><input class="in" id="cxReason" placeholder="Reason (optional)" style="margin-top:12px">${M.received(o) > 0 ? (R.can("pay.reverse") ? `<label class="chkline"><input type="checkbox" id="cxRefund" checked> Refund the ${rs(M.received(o))} paid</label>` : `<div class="cdetail">${rs(M.received(o))} was paid; ask an admin to refund it.</div>`) : ""}`, [{ label: "Keep order", cls: "btn-ghost", value: false }, { label: "Cancel order", cls: "btn-danger-solid", value: true }], true);
-  if (v) { const refund = ($("#cxRefund") || {}).checked; await saveOrder({ ...o, status: "cancelled", cancelReason: ($("#cxReason") || {}).value || "" }); if (refund && R.can("pay.reverse")) await reversePayments(o); openOrder(o.id); toast(refund ? "Order cancelled and payment refunded" : "Order cancelled"); } };
+  if (v) { const refund = ($("#cxRefund") || {}).checked; if (refund && H.approve && !await H.approve("refund", M.received(o), `Refund on order ${o.no}`)) return; await saveOrder({ ...o, status: "cancelled", cancelReason: ($("#cxReason") || {}).value || "" }); if (refund && R.can("pay.reverse")) await reversePayments(o); openOrder(o.id); toast(refund ? "Order cancelled and payment refunded" : "Order cancelled"); } };
 A.restoreOrder = async () => { const o = sheetOrder(); if (guard("orders.cancel")) { await saveOrder({ ...o, status: "received", cancelReason: "" }); openOrder(o.id); toast("Order restored"); } };
-A.refundOrder = async () => { const o = sheetOrder(); if (!o || !guard("pay.reverse")) return;
+A.refundOrder = async () => { const o = sheetOrder(); if (!o || !guard("pay.reverse")) return; if (H.approve && !await H.approve("refund", M.received(o), `Refund on order ${o.no}`)) return;
   if (await yesNo(`<p class="cq">Refund ${rs(M.received(o))}?</p><div class="cdetail">Reversal entries are added for the payments on this order (same mode). Hand the money back to ${esc(o.customer || "the customer")}.</div>`, "Refund", "btn-danger-solid")) { await reversePayments(o); openOrder(o.id); toast("Refund recorded"); } };
-A.refundExtra = async () => { const o = sheetOrder(); if (!o || !guard("pay.reverse")) return; const extra = Math.round((M.received(o) - M.total(o)) * 100) / 100;
+A.refundExtra = async () => { const o = sheetOrder(); if (!o || !guard("pay.reverse")) return; const extra = Math.round((M.received(o) - M.total(o)) * 100) / 100; if (H.approve && !await H.approve("refund", extra, `Refund on order ${o.no}`)) return;
   if (extra > 0 && await yesNo(`<p class="cq">Refund ${rs(extra)}?</p><div class="cdetail">The order total is ${rs(M.total(o))}; ${rs(M.received(o))} was received.</div>`, "Refund", "btn-danger-solid")) { await addPayment(o, -extra, M.lastPayMode(o), "Refund of extra"); openOrder(o.id); toast("Refund recorded"); } };
 A.extraToCredit = async () => { const o = sheetOrder(); if (!o || !guard("pay.record")) return; const extra = Math.round((M.received(o) - M.total(o)) * 100) / 100; if (!(extra > 0)) return;
   await addPayment(o, -extra, "Credit", "Moved to customer credit"); await addCredit({ key: M.ckey(o), customer: o.customer, flat: o.flat }, extra, "Credit", `Extra paid on #${o.no}`); openOrder(o.id); toast(`${rs(extra)} kept as credit for ${o.customer}`); };
@@ -245,7 +247,7 @@ export async function compose(o, opts = {}) {
   if (o && opts.repeat) { Object.assign(base, { id: uid("o"), no: "", date: today(), status: "received", deliveredAt: "", cancelReason: "", createdAt: new Date().toISOString(), tag: c.activeTag || "" });
     // A repeat is a new order: no bill sent yet, today's tax rates and prices-include-tax setting, this device's location.
     ["billSentAt", "billTotal", "taxIncl", "outletId"].forEach(k => delete base[k]); base.items = base.items.map(({ taxPct, list, ...i }) => i); }
-  const st = { ...lk, kind: "compose", o: base, isNew: !o || !!opts.repeat, dirty: !!opts.repeat || !!(opts.items && opts.items.length), cat: "", sugg: false, prefix: R.numPrefix() };
+  const st = { ...lk, kind: "compose", o: base, isNew: opts.isNew != null ? opts.isNew : !o || !!opts.repeat, dirty: !!opts.repeat || !!(opts.items && opts.items.length), cat: "", sugg: false, prefix: R.numPrefix(), quote: !!opts.quote, standing: !!opts.standing, fromQuote: opts.fromQuote || "" };
   st.redraw = () => drawCompose(st); drawCompose(st);
 }
 // Pre-orders carry a delivery window (or exact time), a cake message, weight and flavour, and an advance to collect.
@@ -260,14 +262,15 @@ function drawCompose(st) {
   const q = o.customer.trim().toLowerCase();
   const sugg = st.sugg && q ? M.customers().filter(c => (c.customer + " " + c.flat + " " + c.phone).toLowerCase().includes(q) && !(c.customer === o.customer && c.flat === o.flat)).slice(0, 5) : [];
   const c = M.config(); const three = [t, addDays(t, 1), addDays(t, 2)]; const prices = R.can("prices") || R.can("orders.edit");
-  openSheet(st, `<div class="sh-head"><h2 class="h">${st.isNew ? "New order" : "Edit order " + noLabel(o)}</h2><button class="x" data-close aria-label="Close">×</button></div>
+  openSheet(st, `<div class="sh-head"><h2 class="h">${st.quote ? (st.isNew ? "New quotation" : "Edit quotation " + esc(o.no || "")) : st.standing ? (st.isNew ? "New standing order" : "Edit standing order " + esc(o.no || "")) : st.isNew ? "New order" : "Edit order " + noLabel(o)}</h2><button class="x" data-close aria-label="Close">×</button></div>
   <div class="comp-scroll">
     <label class="f" for="cName">Customer</label><input class="in" id="cName" value="${esc(o.customer)}" placeholder="Name" autocomplete="off">
     ${sugg.length ? `<div class="sugg">${sugg.map(c => `<button data-pickcust="${esc(c.key)}"><b>${esc(c.customer)}</b> ${esc(c.flat)}<small>${c.orders.length} past order${c.orders.length > 1 ? "s" : ""}</small></button>`).join("")}</div>` : ""}
     <div class="two"><div><label class="f" for="cFlat">Flat / address</label><input class="in" id="cFlat" value="${esc(o.flat)}" placeholder="e.g. A-1301" autocomplete="off"></div>
     <div><label class="f" for="cPhone">Phone</label><input class="in" id="cPhone" value="${esc(o.phone)}" placeholder="10-digit mobile" inputmode="tel" autocomplete="off"></div></div>
     <label class="f">Channel</label><div class="chips">${M.PREORDER.map(k => `<button class="chip" data-chan="${k}" aria-pressed="${o.channel === k}">${M.CHANNELS[k]}</button>`).join("")}</div>
-    <label class="f">Delivery date</label><div class="datechips">
+    ${st.standing && H.standingFields ? H.standingFields(o) : ""}
+    <label class="f"${st.standing ? ' hidden' : ""}>${st.quote ? "Delivery date asked for" : "Delivery date"}</label><div class="datechips"${st.standing ? ' hidden' : ""}>
       ${three.map((d, i) => `<button class="chip" data-cdate="${d}" aria-pressed="${o.date === d}">${i === 0 ? "Today" : i === 1 ? "Tomorrow" : esc(dObj(d).toLocaleDateString("en-IN", { weekday: "short", day: "numeric" }))}</button>`).join("")}
       <label class="chip" aria-pressed="${!three.includes(o.date)}">${!three.includes(o.date) ? esc(dLong(o.date)) : "Other date"}<input type="date" id="cDate" value="${o.date}" aria-label="Other date"></label></div>
     <label class="f">Tap items to add</label>
@@ -290,7 +293,8 @@ function drawCompose(st) {
   </div>
   <div class="comp-foot">${extrasHtml(o, "Offer")}
     <div class="totline"><small>${M.pcs(o)} pcs${M.disc(o) ? ` · saves ${rs(M.disc(o))}` : ""}${M.charges(o) ? ` · charges ${rs(M.charges(o))}` : ""}${M.taxOf(M.withTax(o)).tax ? ` · ${M.withTax(o).taxIncl ? "incl." : "+"} ${esc(M.taxCfg().name)} ${rs2(M.taxOf(M.withTax(o)).tax)}` : ""}</small><b>${rs(M.total(M.withTax(o)))}</b></div>
-    <button class="btn btn-primary" data-act="saveCompose" ${o.items.length ? "" : "disabled"}>${st.isNew ? "Save order" : "Save changes"}</button></div>`, true);
+    <button class="btn btn-primary" data-act="saveCompose" ${o.items.length ? "" : "disabled"}>${st.quote ? "Save quotation" : st.standing ? "Save standing order" : st.isNew ? "Save order" : "Save changes"}</button>
+    ${st.isNew && !st.quote && !st.standing && H.saveQuote ? `<button class="linkbtn" data-act="composeAsQuote" style="margin-top:6px">Save as a quotation instead</button>` : ""}</div>`, true);
   const cs = $(".comp-scroll"); if (cs) cs.scrollTop = sc;
   if (fid) { const el = document.getElementById(fid); if (el) { el.focus(); try { el.setSelectionRange(fpos, fpos); } catch (_) {} } }
 }
@@ -305,23 +309,27 @@ A.saveCompose = async el => { syncCompose(); const st = ui.sheet; const o = st.o
   if (!o.customer) { toast("Add the customer’s name"); $("#cName").focus(); return; }
   if (!o.items.length) { toast("Add at least one item"); return; }
   recheckCoupon(o);
+  if (st.quote && H.saveQuote) { await H.saveQuote(o, st); return; }
+  if (st.standing && H.saveStanding) { await H.saveStanding(o, st); return; }
   // A customer not seen before is checked against saved ones (same flat or phone, similar name) before the order is saved.
   const prev = st.isNew ? null : M.orders().find(x => x.id === o.id);
   if (!prev || M.ckey(prev) !== M.ckey(o)) { const r = await checkCustomer(o); if (!r) return; if (r !== "new") { Object.assign(o, r); st.dirty = true; } }
   if (!await L.saveOk(st)) return;
+  if (H.creditCheck && !await H.creditCheck(o, st)) return;
+  { const pct = M.discF(M.withTax(o)) * 100; const prev = !st.isNew && M.orders().find(x => x.id === o.id); if (pct > 0.01 && (!prev || Math.abs(M.discF(prev) * 100 - pct) > 0.01) && H.approve && !await H.approve("discount", pct, `Discount on ${o.customer || "the order"}`)) return; }
   if (!o.no) o.no = M.nextNo(st.prefix);
-  el.disabled = true; await saveOrder(o); const wasNew = st.isNew; if (st.lock) L.release(st.lock); ui.sheet = null; closeSheet();
+  el.disabled = true; await saveOrder(o); if (st.fromQuote && H.quoteAccepted) await H.quoteAccepted(st.fromQuote, o.id); const wasNew = st.isNew; if (st.lock) L.release(st.lock); ui.sheet = null; closeSheet();
   if (S.view === "today" && wasNew && o.date !== S.date) { S.date = o.date; S.center = true; render(); }
   toast(wasNew ? `Order #${o.no} saved for ${dLabel(o.date)}` : "Changes saved", o.phone ? `<a href="${esc(waHref(o.phone, orderText(M.normOrder(o))))}" target="_blank" rel="noopener">Send on WhatsApp</a>` : ""); };
 
 H.click.push(async T => {
   const st = ui.sheet; if (!st || st.kind !== "compose") return false; const o = st.o;
   const sl = T.closest("[data-slot]"); if (sl) { syncCompose(); o.slot = o.slot === sl.dataset.slot ? "" : sl.dataset.slot; if ($("#cSlot")) $("#cSlot").value = ""; st.dirty = true; drawCompose(st); return true; }
-  const pc = T.closest("[data-pickcust]"); if (pc) { const c = M.customers().find(x => x.key === pc.dataset.pickcust); if (c) Object.assign(o, { customer: c.customer, flat: c.flat, phone: c.phone || o.phone }); st.sugg = false; drawCompose(st); return true; }
+  const pc = T.closest("[data-pickcust]"); if (pc) { const c = M.customers().find(x => x.key === pc.dataset.pickcust); if (c) { Object.assign(o, { customer: c.customer, flat: c.flat, phone: c.phone || o.phone }); if (H.repriceFor) H.repriceFor(o); } st.sugg = false; drawCompose(st); return true; }
   const cd = T.closest("[data-cdate]"); if (cd) { syncCompose(); o.date = cd.dataset.cdate; st.dirty = true; drawCompose(st); return true; }
   const ch = T.closest("[data-chan]"); if (ch) { syncCompose(); o.channel = ch.dataset.chan; st.dirty = true; drawCompose(st); return true; }
   const ct = T.closest("[data-cat]"); if (ct) { syncCompose(); st.cat = ct.dataset.cat; drawCompose(st); return true; }
-  const am = T.closest("[data-addm]"); if (am) { syncCompose(); const m = M.menu().find(x => x.id === am.dataset.addm); if (!m) return true; const ex = o.items.find(i => i.menuId === m.id); if (ex) ex.qty++; else o.items.push({ item: m.name, qty: 1, rate: m.price, menuId: m.id }); st.dirty = true; st.sugg = false; drawCompose(st); return true; }
+  const am = T.closest("[data-addm]"); if (am) { syncCompose(); const m = M.menu().find(x => x.id === am.dataset.addm); if (!m) return true; const ex = o.items.find(i => i.menuId === m.id); if (ex) ex.qty++; else o.items.push({ item: m.name, qty: 1, rate: H.priceFor ? H.priceFor(m, o) : m.price, menuId: m.id }); st.dirty = true; st.sugg = false; drawCompose(st); return true; }
   const sp = T.closest("[data-step]"); if (sp) { syncCompose(); const [ix, d] = sp.dataset.step.split(":").map(Number); o.items[ix].qty += d; if (o.items[ix].qty <= 0) o.items.splice(ix, 1); st.dirty = true; drawCompose(st); return true; }
   if (T.closest("[data-xdisc],[data-xcustom],[data-xcoupon],[data-xcharge],[data-xother]")) { syncCompose(); if (await extrasClick(T, o)) { st.dirty = true; drawCompose(st); } return true; }
   return false;

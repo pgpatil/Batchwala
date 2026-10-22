@@ -20,6 +20,11 @@ import "./stocktake.js";
 import "./returns.js";
 import "./labels.js";
 import "./analytics.js";
+import "./sales.js";
+import "./buystock.js";
+import "./plan2.js";
+import "./qm.js";
+import "./controls.js";
 import { enhance } from "./table.js";
 import "./erp.js";
 import "./help.js";
@@ -30,11 +35,11 @@ import { APP_NAME } from "./config.js";
 import { $, esc, ICON, today, addDays } from "./util.js";
 import { ui, toast, closeSheet, yesNo, focusKey, refocus } from "./ui.js";
 
-const TAB = { help: ["Help", ICON.help], data: ["Import & export", ICON.dl], pos: ["Counter", ICON.cart], bom: ["BOM", ICON.tree], plan: ["Planning", ICON.plan], wo: ["Work orders", ICON.oven], po: ["Purchase orders", ICON.orders], sup: ["Suppliers & payables", ICON.people], insights: ["Cost & stock reports", ICON.chart], analytics: ["Analytics", ICON.chart], close: ["Day close", ICON.pay], take: ["Stock-take", ICON.stock], dn: ["Purchase returns", ICON.inbox], prod: ["Production", ICON.oven], grn: ["Purchases (GRN)", ICON.inbox], xfer: ["Transfers", ICON.truck], fg: ["Finished goods", ICON.batch], today: ["Today", ICON.today], orders: ["Orders", ICON.orders], pay: ["Payments", ICON.pay], stock: ["Inventory", ICON.stock], bake: ["Bake board", ICON.oven], batches: ["Batches", ICON.batch], run: ["Delivery run", ICON.run], more: ["More", ICON.more] };
+const TAB = { help: ["Help", ICON.help], data: ["Import & export", ICON.dl], pos: ["Counter", ICON.cart], bom: ["BOM", ICON.tree], plan: ["Planning", ICON.plan], wo: ["Work orders", ICON.oven], po: ["Purchase orders", ICON.orders], sup: ["Suppliers & payables", ICON.people], insights: ["Cost & stock reports", ICON.chart], analytics: ["Analytics", ICON.chart], quotes: ["Quotations", ICON.orders], rtn: ["Returnables", ICON.batch], qlog: ["Food safety logs", ICON.check], complaints: ["Complaints", ICON.help], equip: ["Equipment", ICON.oven], lic: ["Licences", ICON.inbox], audit: ["Audit trail", ICON.help], standing: ["Standing orders", ICON.orders], close: ["Day close", ICON.pay], take: ["Stock-take", ICON.stock], dn: ["Purchase returns", ICON.inbox], prod: ["Production", ICON.oven], grn: ["Purchases (GRN)", ICON.inbox], xfer: ["Transfers", ICON.truck], fg: ["Finished goods", ICON.batch], today: ["Today", ICON.today], orders: ["Orders", ICON.orders], pay: ["Payments", ICON.pay], stock: ["Inventory", ICON.stock], bake: ["Bake board", ICON.oven], batches: ["Batches", ICON.batch], run: ["Delivery run", ICON.run], more: ["More", ICON.more] };
 const SHORT = { close: "Day close", take: "Stock-take", dn: "Returns", plan: "Plan", wo: "Work orders", po: "POs", sup: "Payables", insights: "Reports", bake: "Bake", run: "My run", grn: "GRN", fg: "FG stock", prod: "Make" };   // bottom-bar labels on phones
 const ORDER = ["pos", "today", "orders", "bake", "prod", "grn", "stock", "xfer", "fg", "batches", "bom", "run", "pay", "more"];
 // Screens grouped into buckets: one bottom-bar button per bucket on phones, a strip of its screens on top of each page, sections in the sidebar.
-const BUCKETS = { orders: ["Orders", ICON.orders, ["today", "orders", "run", "pay", "close"]], make: ["Make", ICON.oven, ["plan", "wo", "prod", "bake", "batches", "bom"]], stores: ["Stock", ICON.store, ["stock", "take", "xfer", "fg"]], buy: ["Buying", ICON.inbox, ["po", "grn", "dn", "sup"]] };
+const BUCKETS = { orders: ["Orders", ICON.orders, ["today", "orders", "run", "pay", "close"]], make: ["Make", ICON.oven, ["plan", "wo", "prod", "bake", "batches", "bom"]], stores: ["Stock", ICON.store, ["stock", "take", "xfer", "fg", "rtn"]], buy: ["Buying", ICON.inbox, ["po", "grn", "dn", "sup"]], quality: ["Quality & upkeep", ICON.check, ["qlog", "complaints", "equip", "lic"]] };
 SHORT.buy = "Buying";
 // What needs attention, per screen: a count on its tab (and the sum on a closed group). Worked out once per data change.
 // urgent counts (overdue, short, owed) show red; the rest (to do today) in the brand colour.
@@ -54,10 +59,12 @@ function attention() {
     put("xfer", ev.all("transfers").filter(x => !x.void && x.to === M.here() && !M.xferReceived(x)).length, false);
     if (c("po.approve")) put("po", M.porders().filter(p => M.poState(p) === "draft").length, false);
     const late = M.porders().filter(p => ["approved", "part"].includes(M.poState(p)) && p.expected && p.expected < t).length; if (late) a.po = { n: (a.po ? a.po.n : 0) + late, urgent: true };
+    if (c("stock.buy") && H.grnAttention) put("grn", H.grnAttention(), false);
     if (c("payables") || c("stock.buy")) put("sup", M.payables().filter(x => x.overdue > 0).length, true);
     const y = addDays(t, -1); const me = (R.me() || {}).id;
     if (c("sale") || c("collect") || c("pay.record")) put("close", ev.all("payments").some(p => p.date === y && p._by === me) && !ev.get("closes", `${y}@${me}`) ? 1 : 0, true);
     if (R.isAdmin() && H.backupBanner && H.backupBanner()) put("more", 1, true);
+    if (H.qlogDue) put("qlog", H.qlogDue(), false); if (H.complaintOpen) put("complaints", H.complaintOpen(), true); if (H.equipDue) put("equip", H.equipDue(), true); if (H.licDue) put("lic", H.licDue(), true);
   } catch (_) {}
   attnStamp = stamp; attnCache = a; return a;
 }
@@ -75,12 +82,14 @@ function allowedViews() {
   if (erp) {
     if (c("bake.record") || c("orders.edit")) t.push("batches");
     if (c("bake.record") || c("menu.edit") || c("stock.edit") || c("reports")) t.push("bom", "plan");
-    if (c("stock.buy") || c("stock.count")) t.push("stock");
+    if (c("stock.buy") || c("stock.count")) t.push("stock", "rtn");
     if (c("stock.buy")) t.push("po", "grn", "dn"); if (c("stock.count")) t.push("take"); if (c("stock.buy") || c("payables")) t.push("sup"); if (c("bake.record")) t.push("wo"); if (c("reports")) t.push("insights");
     if (md === "erp") { if (c("bake.record") || c("orders.edit")) t.push("prod"); if (c("transfer")) t.push("xfer"); t.push("fg"); }
   }
   if (c("sale") || c("collect") || c("pay.record")) t.push("close");
   if (c("reports")) t.push("analytics");
+  if (c("orders.edit")) t.push("quotes", "standing");
+  if (c("bake.record") || c("stock.count") || R.isAdmin()) t.push("qlog"); if (c("orders.edit") || c("money")) t.push("complaints"); if (c("bake.record") || R.isAdmin()) t.push("equip"); if (R.isAdmin() || R.role() === "management") t.push("lic", "audit");
   t.push("help"); if (c("export") || R.isAdmin()) t.push("data");
   return [...new Set(t)];
 }
@@ -122,17 +131,17 @@ function navHtml() {
   const open = navOpen(); const grp = (k, label, ic, body, vs) => { const isOpen = open[k] ?? vs.includes(S.view) ?? false; const cur = vs.includes(S.view);
     return `<button class="nav-grp dx${cur ? " cur" : ""}" data-navgrp="${k}" aria-expanded="${isOpen || cur}"><span class="dot">${ic}</span><span class="nl">${label}</span>${!(isOpen || cur) ? badge(vs) : ""}<span class="chev">${ICON.chev}</span></button>${isOpen || cur ? `<div class="nav-items dx">${body}</div>` : ""}`; };
   const side = loose.map(v => btn(v, "dx")).join("") + Object.keys(BUCKETS).map(k => { const vs = inBucket(k); return vs.length ? grp(k, BUCKETS[k][0], BUCKETS[k][1], vs.map(v => btn(v, "dx")).join(""), vs) : ""; }).join("");
-  const recBody = (views.includes("analytics") ? btn("analytics", "dx") : "") + links.map(([a, ic, l]) => `<button class="nb dx" data-act="${a}"><span class="dot">${ic}</span><span class="nl">${l}</span></button>`).join("") + (views.includes("more") || tabs.includes("more") ? btn("more", "dx") : "");
+  const recBody = (views.includes("analytics") ? btn("analytics", "dx") : "") + (views.includes("audit") ? btn("audit", "dx") : "") + links.map(([a, ic, l]) => `<button class="nb dx" data-act="${a}"><span class="dot">${ic}</span><span class="nl">${l}</span></button>`).join("") + (views.includes("more") || tabs.includes("more") ? btn("more", "dx") : "");
   return `<div class="nav-brand">${logoHtml(c)}<div><b>${esc(c.business)}</b><small>${esc(me.name + " · " + R.ROLES[me.role].label)}</small></div></div><div class="nav-sw dx">${switchersHtml()}</div>
   <div class="nav-in" style="grid-template-columns:repeat(${bar.length},1fr)">${bar.join("")}${side}
-  ${recBody ? grp("records", "Reports & analytics", ICON.chart, recBody, ["more", "analytics"]) : ""}</div>
+  ${recBody ? grp("records", "Reports & analytics", ICON.chart, recBody, ["more", "analytics", "audit"]) : ""}</div>
   <p class="nav-keys dx">Keys: <kbd>N</kbd> new · <kbd>/</kbd> search</p>`;
 }
 let dayOpen = today();
 // Once a day: register this device (for its number letter) after a first sync, and drop old superseded events so the log stays small.
 async function housekeeping() {
   try { if (sync.current()) await sync.syncNow(); if (R.me()) await R.registerDevice();
-    if (H.autoBackup) await H.autoBackup(); if (H.migratePins) await H.migratePins();
+    if (H.standingRun) await H.standingRun(); if (H.autoBackup) await H.autoBackup(); if (H.migratePins) await H.migratePins();
     const day = today(); if ((await ev.getMeta("prune.day")) !== day) { await ev.setMeta("prune.day", day); if (await ev.prune(120)) { await ev.setMeta("sync.compact", true); if (sync.current()) sync.soon(); } } } catch (_) {}
 }
 export function render() {
@@ -222,7 +231,7 @@ $("#scrim").addEventListener("click", () => { const x = document.querySelector("
   await R.loadMe(); R.setMode(await ev.getMeta("mode")); M.setHere(await ev.getMeta("here") || (R.me() || {}).loc || null);
   ev.setActor(() => (R.me() || {}).id || "setup");
   if (R.me()) S.view = R.home();
-  ev.onChange(() => { if (ui.sheet && ui.sheet.redraw && !["compose", "waConfirm", "settings", "member", "ingEdit", "item", "move", "bake", "part", "batchSpoil", "grn", "xfer", "fgAdj", "xferRecv", "imp", "invin", "expiry", "poEdit", "woNew", "woIssue", "woDone", "spay", "sup", "dnNew", "recipeVer"].includes(ui.sheet.kind)) rerenderSheet(); render(); });
+  ev.onChange(() => { if (ui.sheet && ui.sheet.redraw && !["compose", "waConfirm", "settings", "member", "ingEdit", "item", "move", "bake", "part", "batchSpoil", "grn", "xfer", "fgAdj", "xferRecv", "imp", "invin", "expiry", "poEdit", "woNew", "woIssue", "woDone", "spay", "sup", "dnNew", "recipeVer", "cnNew", "priceLists", "custEdit", "bcast", "labels", "billNew", "ctNew", "rtnMove", "forecast", "qcNew", "qlSetup", "ccEdit", "licEdit", "eqEdit"].includes(ui.sheet.kind)) rerenderSheet(); render(); });
   sync.onStatus(async st => {
     let joined = false;
     if (st.state === "ok" && !R.me()) { const a = sync.current(); const m = a && R.matchEmail(a.account); if (m) { await R.setMe(m.id); S.view = R.home(); joined = true; toast(`Welcome, ${m.name}`); } }

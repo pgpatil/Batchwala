@@ -60,13 +60,14 @@ function drawBake(st) {
   <p class="hint" style="margin-top:-4px">Batch #${esc(M.nextBatchNo(R.numPrefix()))} · ${esc(dLong(st.date))}${M.locations().length > 1 ? " · at " + esc(M.locName(st.loc)) : ""} · pieces you are baking now</p>
   <label class="f">Finished pieces</label><div class="kv">${st.lines.map((l, ix) => `<div style="align-items:center"><span>${esc(l.item)}</span><div class="stepper"><button data-bstep="${ix}:-1" aria-label="One less">−</button><input class="stepin" data-bqty="${ix}" inputmode="numeric" value="${l.qty}" aria-label="Pieces of ${esc(l.item)}"><button data-bstep="${ix}:1" aria-label="One more">+</button></div></div>`).join("")}</div>
   ${st.prep.length ? `<label class="f" style="margin-top:14px">Semi-finished to prepare <small class="mut">(recipe runs · suggested from what’s short)</small></label><div class="kv">${st.prep.map((p, ix) => { const i = ings[p.ingId];
-    return `<div style="align-items:center"><span>${esc(i.name)}<small class="mut" style="display:block">${qty(i.yield, i.unit)} per run · have ${qty(Math.max(0, sm[i.id] || 0), i.unit)}</small></span><div class="stepper"><button data-pstep="${ix}:-1" aria-label="One run less">−</button><input class="stepin" data-prun="${ix}" inputmode="decimal" value="${+(+p.runs).toFixed(2)}" aria-label="Runs of ${esc(i.name)}"><button data-pstep="${ix}:1" aria-label="One run more">+</button></div></div>`; }).join("")}</div>` : ""}
+    return `<div style="align-items:center"><span>${esc(i.name)}<small class="mut" style="display:block">${qty(i.yield, i.unit)} per run · have ${qty(Math.max(0, sm[i.id] || 0), i.unit)}</small></span><div class="stepper"><button data-pstep="${ix}:-1" aria-label="One run less">−</button><input class="stepin" data-prun="${ix}" inputmode="decimal" value="${+(+p.runs).toFixed(2)}" aria-label="Runs of ${esc(i.name)}"><button data-pstep="${ix}:1" aria-label="One run more">+</button></div>${p.runs > 0 ? `<label class="mini" style="display:flex;align-items:center;gap:6px;margin-top:4px">Actually made <input class="rate" data-pact="${ix}" inputmode="decimal" value="${p.actual ? +(p.actual / (UNITS[i.unit] ? UNITS[i.unit].f : 1)).toFixed(3) : ""}" placeholder="${+(i.yield * p.runs / (UNITS[i.unit] ? UNITS[i.unit].f : 1)).toFixed(3)}"> ${UNITS[i.unit] ? UNITS[i.unit].big : esc(i.unit)}</label>` : ""}</div>`; }).join("")}</div>` : ""}
   <label class="f" style="margin-top:14px">Stock this batch uses</label>
   ${ids.length ? `<div class="kv">${ids.map(id => { const i = ings[id]; const h = have(id); const s = h < need[id];
     return `<div><span>${esc(i.name)} ${typeTag(i)}${s ? ` <span class="tag t-due">short ${qty(need[id] - h, i.unit)}</span>` : ""}</span><span>${qty(need[id], i.unit)} <small class="mut">/ ${qty(h, i.unit)}</small></span></div>`; }).join("")}</div>`
   : `<p class="hint">No recipe for these items yet, so stock won’t change. The batch still counts on the board.</p>`}
   ${Object.keys(made).length ? `<p class="hint">Adds to stock: ${Object.keys(made).map(id => esc(ings[id].name) + " " + qty(made[id], ings[id].unit)).join(", ")}</p>` : ""}
   ${unknown.length && ids.length ? `<p class="hint">No recipe yet for ${unknown.map(esc).join(", ")}.</p>` : ""}
+  <div class="two"><div><label class="f" for="bPeople">People on this batch</label><input class="in" id="bPeople" inputmode="numeric" value="${st.people || ""}" placeholder="Optional"></div><div><label class="f" for="bHours">Hours taken</label><input class="in" id="bHours" inputmode="decimal" value="${st.hours || ""}" placeholder="e.g. 2.5"></div></div>
   <label class="f" for="bNotes">Note <small class="mut">(optional · oven, tray, flavour, who baked)</small></label><input class="in" id="bNotes" value="${esc(st.notes)}" placeholder="Optional">
   <button class="btn btn-primary" data-inv="saveBake" ${st.lines.some(l => l.qty > 0) || st.prep.some(p => p.runs > 0) ? "" : "disabled"}>${ICON.oven}Save batch</button>
   ${short.length ? `<p class="hint" style="color:var(--due)">${short.length} ingredient${short.length > 1 ? "s" : ""} will go below zero. Record purchases first, or save and fix with a stock count.</p>` : ""}`);
@@ -196,13 +197,14 @@ function drawIngEdit(st) {
   <label class="f">Bought in packs of <small class="mut">(optional · e.g. bag of 50 kg, box of 100)</small></label><div class="two"><input class="in" id="gPackName" value="${esc((x.pack || {}).name || "")}" placeholder="bag, box, tin"><div class="two" style="gap:6px"><input class="in" id="gPackSize" inputmode="decimal" value="${x.pack && x.pack.size ? +(x.pack.size / st.rf).toFixed(3) : ""}" placeholder="size">${unitChips(x.unit, st.rf, "grf")}</div></div>
   <label class="f" for="gShelf">Usable for <small class="mut">(days after delivery · fills the best-before date on GRNs)</small></label><input class="in" id="gShelf" inputmode="numeric" value="${x.shelfDays || ""}" placeholder="No expiry tracking">
   <label class="f" for="gCode">Barcode <small class="mut">(optional · scan or type)</small></label><input class="in" id="gCode" value="${esc(x.barcode || "")}" autocapitalize="off">`}
+  ${x.type === "pm" ? `<label class="f" style="display:flex;align-items:center;gap:10px"><input type="checkbox" id="gRtn" ${x.returnable ? "checked" : ""}> Returnable (crates, trays, cake stands) · track who has them</label>` : ""}
   ${x.type !== "pm" ? `<label class="f">Allergens it contains</label><div class="chips">${M.ALLERGENS.map(a => `<button class="chip" data-galg="${esc(a)}" aria-pressed="${(x.allergens || []).includes(a)}">${esc(a)}</button>`).join("")}</div>
     ${sf && M.allergensOf({ recipe: x.recipe }).length ? `<p class="hint">From its recipe: ${esc(M.allergensOf({ recipe: x.recipe }).join(", "))}</p>` : ""}` : ""}
   ${st.isNew ? `<label class="f" for="gOpen">Stock on hand now</label><div class="two"><input class="in" id="gOpen" inputmode="decimal" placeholder="0">${unitChips(x.unit, st.rf, "grf")}</div>` : ""}
   <button class="btn btn-primary" data-inv="saveIng">${st.isNew ? "Add material" : "Save"}</button>
   ${!st.isNew && R.isAdmin() ? `<button class="btn btn-danger" data-inv="deleteIng">Delete material</button>` : ""}`);
 }
-function syncIng() { const st = ui.sheet, x = st.x; const b = big(x.unit); const g = id => document.getElementById(id);
+function syncIng() { const st = ui.sheet, x = st.x; const b = big(x.unit); const g = id => document.getElementById(id); if (g("gRtn")) x.returnable = g("gRtn").checked;
   x.name = g("gName").value; if (g("gCat")) x.category = g("gCat").value.trim(); x.reorder = num(g("gReorder").value) * st.rf;
   if (g("gCost")) x.cost = num(g("gCost").value) / (b ? b.f : 1); if (g("gCode")) x.barcode = g("gCode").value.trim(); if (g("gSupp")) x.supplier = g("gSupp").value.trim(); if (g("gTax")) x.taxPct = g("gTax").value.trim() === "" ? null : num(g("gTax").value);
   if (g("gYield")) x.yield = num(g("gYield").value) * st.rf;
@@ -267,7 +269,7 @@ function drawItem(st) {
   <div><label class="f" for="iCat">Category</label><input class="in" id="iCat" list="catlist" value="${esc(x.category || "")}" placeholder="Fresh bake"><datalist id="catlist">${cats.map(c => `<option value="${esc(c)}">`).join("")}</datalist></div></div>
   <label class="f" for="iAlias">Short names customers use <small class="mut">(comma separated)</small></label><input class="in" id="iAlias" value="${esc(x.aliases || "")}" placeholder="e.g. strudel, ps">
   <label class="f" for="iLife">Shelf life in days <small class="mut">(blank = ${M.shelfLife({ name: x.name, category: x.category })} for this item: cookies 30, others 3)</small></label><input class="in" id="iLife" inputmode="numeric" value="${x.shelfLife ?? ""}" placeholder="${M.shelfLife({ name: x.name, category: x.category })}">
-  <div class="two"><div><label class="f" for="iPar">Keep ready each day${M.sellingLocs().length > 1 ? " (per outlet)" : ""}</label><input class="in" id="iPar" inputmode="numeric" value="${x.par || ""}" placeholder="0"></div>
+  <div class="two"><div><label class="f" for="iPar">Keep ready each day${M.sellingLocs().length > 1 ? " (per outlet)" : ""}</label><input class="in" id="iPar" inputmode="numeric" value="${x.par || ""}" ${x.parDays ? `title="Set per weekday"` : ""} placeholder="0">${x.parDays ? `<small class="mut" style="display:block">By weekday: ${["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((d, k) => d + " " + (x.parDays[k] ?? x.par)).join(", ")} · <button class="linkbtn" data-clearpar>use one level</button></small>` : ""}</div>
   ${M.taxCfg().on ? `<div><label class="f" for="iTax">${esc(M.taxCfg().name)} % <small class="mut">(blank = ${M.taxCfg().rate}%)</small></label><input class="in" id="iTax" inputmode="decimal" value="${x.taxPct ?? ""}" placeholder="${M.taxCfg().rate}"></div>` : "<div></div>"}</div>
   <label class="f" for="iHsn">HSN / SAC <small class="mut">(for tax invoices · blank = ${esc(M.config().hsn || "business default")})</small></label><input class="in" id="iHsn" value="${esc(x.hsn || "")}" placeholder="${esc(M.config().hsn || "e.g. 1905")}">
   <label class="f">Food type <small class="mut">(for labels)</small></label><div class="chips">${[["veg", "🟢 Veg"], ["egg", "🟡 Contains egg"], ["nonveg", "🔴 Non-veg"]].map(([k, l]) => `<button class="chip" data-idiet="${k}" aria-pressed="${(x.diet || "veg") === k}">${l}</button>`).join("")}</div>
@@ -333,24 +335,30 @@ const I = {
     const date = $("#mDate").value || today(); const note = $("#mNote").value.trim();
     const at = st.loc ? { outletId: st.loc } : {};
     if (st.type === "purchase") { const amt = num($("#mAmt").value); await putMove({ ingId: i.id, type: "purchase", qty: q, amount: amt, date, note, ...at }); toast(`Added ${qty(q, i.unit)} ${i.name}`); }
+    if (st.type === "waste" && H.approve && !await H.approve("adjust", q * M.unitCost(i), `Wastage of ${i.name}`)) return;
+    if (st.type === "count") { const on0 = M.stockLevel(i, M.stockMap(st.loc || null)).on; if (q < on0 && H.approve && !await H.approve("adjust", (on0 - q) * M.unitCost(i), `Count of ${i.name} removing stock`)) return; }
     if (st.type === "waste") { if (!await yesNo(`<p class="cq">Record wastage?</p><div class="cdetail">${qty(q, i.unit)} of ${esc(i.name)} will be removed from stock.</div>`, "Record")) return; await putMove({ ingId: i.id, type: "waste", qty: -q, date, note }); toast("Wastage recorded"); }
     if (st.type === "count") { const on = M.stockLevel(i, M.stockMap(st.loc || null)).on; const d = q - on; if (!await yesNo(`<p class="cq">Set stock to ${qty(q, i.unit)}?</p><div class="cdetail">${esc(i.name)} shows ${qty(on, i.unit)} now. This ${d >= 0 ? "adds" : "removes"} ${qty(Math.abs(d), i.unit)}.</div>`, "Save count")) return; await putMove({ ingId: i.id, type: "count", qty: d, date, note: note || "Stock count" }); toast("Stock count saved"); }
     ingSheet(i.id); },
   bake: el => bakeSheet(el.dataset.date),
   saveBake: async () => { const st = ui.sheet; const lines = st.lines.filter(l => l.qty > 0).map(l => ({ item: l.item, qty: l.qty })); const ings = M.ingMap();
     const prep = st.prep.filter(p => p.runs > 0 && ings[p.ingId]).map(p => ({ ingId: p.ingId, runs: p.runs, qty: ings[p.ingId].yield * p.runs }));
-    const { need, made } = M.batchNeed(lines, prep); const ids = Object.keys(need).filter(id => ings[id]); const me = R.me(); const no = M.nextBatchNo(R.numPrefix());
+    // What was actually made of each semi-finished (when typed) replaces the recipe's yield; people × hours is the labour.
+    document.querySelectorAll("[data-pact]").forEach(el => { const p = st.prep[+el.dataset.pact]; if (p) { const f = UNITS[ings[p.ingId].unit] ? UNITS[ings[p.ingId].unit].f : 1; p.actual = el.value.trim() === "" ? 0 : Math.max(0, num(el.value) * f); } });
+    prep.forEach(p => { const s = st.prep.find(x => x.ingId === p.ingId); if (s && s.actual > 0) { p.std = p.qty; p.qty = s.actual; } });
+    const labour = { people: Math.max(0, Math.round(num(($("#bPeople") || {}).value))), hours: Math.max(0, num(($("#bHours") || {}).value)) };
+    const { need, made } = M.batchNeed(lines, prep); prep.forEach(p => { if (p.std) made[p.ingId] = (made[p.ingId] || 0) + p.qty - p.std; }); const ids = Object.keys(need).filter(id => ings[id]); const me = R.me(); const no = M.nextBatchNo(R.numPrefix());
     const what = [...lines.map(l => esc(l.item) + " × " + l.qty), ...prep.map(p => esc(ings[p.ingId].name) + " × " + p.runs + " run" + (p.runs > 1 ? "s" : "") + " (" + qty(p.qty, ings[p.ingId].unit) + ")")];
     if (!await yesNo(`<p class="cq">Save batch #${esc(no)}?</p><div class="cdetail">${what.join("<br>")}${ids.length ? "<br><br>Stock used: " + ids.map(id => esc(ings[id].name) + " " + qty(need[id], ings[id].unit)).join(", ") : ""}</div>`, "Save batch", "btn-ok")) return;
     const bakeId = uid("b"); const r2 = v => Math.round(v * 100) / 100;
     // Price everything before the moves change stock, so costs are as of this moment.
     const stock = ids.map(id => ({ ingId: id, qty: need[id], cost: r2(M.unitCost(ings[id]) * need[id]) }));
     const madeList = Object.keys(made).map(id => ({ ingId: id, qty: made[id], cost: r2(M.unitCost(ings[id]) * made[id]) }));
-    const loc = st.loc || M.here();
+    const loc = st.loc || M.here(); const lots = ids.flatMap(id => M.lotsFor(id, need[id]));   // traceability: which GRN lots went in
     for (const id of ids) await putMove({ ingId: id, type: "bake", qty: -need[id], date: st.date, note: `Batch #${no}`, ref: bakeId, outletId: loc });
     for (const x of madeList) await putMove({ ingId: x.ingId, type: "make", qty: x.qty, date: st.date, note: `Batch #${no}`, ref: bakeId, outletId: loc });
     const net = stock.reduce((s, x) => s + x.cost, 0) - madeList.reduce((s, x) => s + x.cost, 0);
-    await ev.put("bakes", { id: bakeId, no, date: st.date, lines, prep, notes: (st.notes || "").trim(), stock, made: madeList, cost: r2(Math.max(0, net)), madeBy: me ? me.id : "", at: new Date().toISOString(), outletId: loc });
+    await ev.put("bakes", { id: bakeId, no, date: st.date, lines, prep, notes: (st.notes || "").trim(), stock, made: madeList, lots, ...(labour.hours ? { labour } : {}), cost: r2(Math.max(0, net)), madeBy: me ? me.id : "", at: new Date().toISOString(), outletId: loc });
     sync.soon(); closeSheet(); toast(`Batch #${no} saved`, `<button data-batch="${esc(bakeId)}">View</button>`); },
   newItem: () => itemSheet(null),
   addRecipeLine: () => { syncHost(); const st = ui.sheet; const ings = M.ingredients().filter(i => i.id !== st.x.id); if (ings.length) st.x.recipe.push({ ingId: ings[0].id, qty: 0 }); drawHost(st); },
@@ -397,10 +405,13 @@ H.click.push(async T => {
     const pb = T.closest("[data-pstep]"); if (pb) { const [ix, d] = pb.dataset.pstep.split(":").map(Number); st.prep[ix].runs = Math.max(0, st.prep[ix].runs + d); drawBake(st); return true; } }
   if ((st.kind === "item" || st.kind === "ingEdit") && st.nm) { const nt = T.closest("[data-nmtype],[data-nmunit]"); if (nt) { syncHost(); st.nm.name = $("#nmName").value; if (nt.dataset.nmtype) { st.nm.type = nt.dataset.nmtype; if (st.nm.type === "pm") st.nm.unit = "pcs"; } else st.nm.unit = nt.dataset.nmunit; drawHost(st); return true; } }
   if (st.kind === "item") { const ia = T.closest("[data-ialg]"); if (ia) { syncItem(); const a = ia.dataset.ialg; const l = st.x.allergens || []; st.x.allergens = l.includes(a) ? l.filter(y => y !== a) : [...l, a]; drawItem(st); return true; }
+    if (T.closest("[data-clearpar]")) { syncItem(); delete st.x.parDays; drawItem(st); return true; }
     const dt = T.closest("[data-idiet]"); if (dt) { syncItem(); st.x.diet = dt.dataset.idiet; drawItem(st); return true; } }
   if (st.kind === "item" || st.kind === "ingEdit") { const rm = T.closest("[data-rprm]"); if (rm) { syncHost(); st.x.recipe.splice(+rm.dataset.rprm, 1); drawHost(st); return true; } }
   return false;
 });
+H.input.push(T => { const st = ui.sheet; if (!st || st.kind !== "bake") return false; if (T.id === "bPeople") { st.people = T.value; return true; } if (T.id === "bHours") { st.hours = T.value; return true; }
+  if (T.dataset.pact != null) { const p = st.prep[+T.dataset.pact]; const i = M.ingMap()[p.ingId]; p.actual = T.value.trim() === "" ? 0 : num(T.value) * (UNITS[i.unit] ? UNITS[i.unit].f : 1); return true; } return false; });
 H.input.push(T => {
   const st = ui.sheet; if (st && st.kind === "bake" && T.id === "bNotes") { st.notes = T.value; return true; }
   // Typing a batch size recomputes the materials straight away.

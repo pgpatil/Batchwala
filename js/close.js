@@ -19,7 +19,7 @@ export const closeId = (d, who) => `${d}@${who}`;
 // What the app recorded for one person on one day, by mode.
 export function dayTotals(d, who) {
   const got = Object.fromEntries([...MODES, "Other"].map(m => [m, 0])); const refunds = { ...got }; const out = { ...got };
-  ev.all("payments").filter(p => p.date === d && p._by === who && p.mode !== "Credit").forEach(p => { const m = modeOf(p.mode); if (p.amount >= 0) got[m] += +p.amount; else refunds[m] += -p.amount; });
+  ev.all("payments").filter(p => p.date === d && p._by === who && p.mode !== "Credit" && p.mode !== "Credit note").forEach(p => { const m = modeOf(p.mode); if (p.amount >= 0) got[m] += +p.amount; else refunds[m] += -p.amount; });
   // Only cash paid to suppliers leaves the drawer; a payment and its reversal cancel out.
   const sp = M.spays(); const rev = new Set(sp.filter(p => p.revOf).map(p => p.revOf));
   sp.filter(p => p.date === d && p._by === who && !p.revOf && !rev.has(p.id) && modeOf(p.mode) === "Cash").forEach(p => { out.Cash += +p.amount || 0; });

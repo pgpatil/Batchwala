@@ -2,7 +2,7 @@
 // Event: { id, dev, seq, at, by, kind, rid, op: "put"|"del", data }
 // For a record, the event with the latest (at, id) wins. Ledger kinds (payments, moves) are only ever added.
 const DB = "batchwala", VER = 1;
-export const KINDS = ["orders", "payments", "menu", "ingredients", "moves", "bakes", "config", "members", "grns", "transfers", "fg", "suppliers", "plans", "porders", "spays", "wos", "locks", "devices", "closes", "stocktakes", "preturns", "custs", "overheads", "aviews"];
+export const KINDS = ["orders", "payments", "menu", "ingredients", "moves", "bakes", "config", "members", "grns", "transfers", "fg", "suppliers", "plans", "porders", "spays", "wos", "locks", "devices", "closes", "stocktakes", "preturns", "custs", "overheads", "aviews", "quotes", "standing", "creturns", "contracts", "lends", "qlogs", "complaints", "licences", "equipment", "mlogs", "approvals"];
 const state = Object.fromEntries(KINDS.map(k => [k, new Map()]));   // kind -> rid -> { ev, data|null }
 const byRecord = new Map();                                            // kind:rid -> [events]
 const listeners = new Set();
@@ -10,6 +10,8 @@ const known = new Set();                                               // event 
 let idb, dev = null, seq = 0, actor = () => "unknown", version = 0;
 // Bumped whenever the folded state changes, so the model can reuse what it worked out until then.
 export const dataVersion = () => version;
+// Every event held (all kinds, all versions), for the audit trail.
+export const events = () => [...byRecord.values()].flat();
 
 const req = r => new Promise((res, rej) => { r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
 function open() {
