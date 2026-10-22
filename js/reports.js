@@ -7,30 +7,29 @@ import { S, A, V, H, chipBar, band } from "./core.js";
 import { download } from "./data.js";
 import { esc, rs, rs2, today, addDays, dLong, qty } from "./util.js";
 import { toast } from "./ui.js";
+import { periodBar, periodRange, periodLabel } from "./period.js";
 
 const r2 = v => Math.round(v * 100) / 100;
 const pct = (a, b) => b ? Math.round(a / b * 1000) / 10 + "%" : "–";
-const PERIODS = { month: "This month", last: "Last month", d30: "Last 30 days", all: "All time" };
-function range(k) { const t = today(); const m0 = t.slice(0, 8) + "01";
-  if (k === "last") { const e = addDays(m0, -1); return [e.slice(0, 8) + "01", e]; }
-  return [{ month: m0, d30: addDays(t, -29), all: "0000" }[k] || m0, t]; }
 const card = (title, body, note = "") => `<div class="card" style="margin:10px 0"><h3>${title}</h3>${body}${note ? `<p class="hint">${note}</p>` : ""}</div>`;
 const table = (head, rows, empty = "Nothing in this period.") => `<div class="tablecard"><table class="reg"><thead><tr>${head.map(h => `<th${h[1] ? ' class="r"' : ""}>${h[0]}</th>`).join("")}</tr></thead><tbody>${rows.join("") || `<tr><td colspan="${head.length}">${empty}</td></tr>`}</tbody></table></div>`;
 const td = (v, right, sort) => `<td${right ? ' class="r"' : ""}${sort != null ? ` data-v="${esc(sort)}"` : ""}>${v}</td>`;
 
 V.insights = () => {
-  S.filter.ins = S.filter.ins || "cost"; S.filter.insp = S.filter.insp || "month"; const k = S.filter.ins; const [a, b] = range(S.filter.insp);
-  let h = band("Cost & stock reports", "", `<p class="bandnote">${esc(dLong(a === "0000" ? M.orders().map(o => o.date).sort()[0] || today() : a))} – ${esc(dLong(b))}</p>`);
-  h += `<div class="tools">${chipBar("insp", Object.entries(PERIODS))}</div><div class="tools" style="padding-top:0">${layoutSwitch("insights")}${chipBar("ins", [["cost", "Food cost"], ["pl", "Profit & loss"], ["value", "Stock value"], ["waste", "Wastage"], ["var", "Variance"], ["age", "Stock ageing"], ["buy", "Buying"], ["reorder", "Reorder"], ["tax", "Tax"], ["book", "Day book"]])}</div>`;
+  S.filter.ins = S.filter.ins || "cost"; const k = S.filter.ins; const [a, b] = periodRange("ins");
+  let h = band("Cost & stock reports", "", `<p class="bandnote">${esc(periodLabel("ins"))}</p>`);
+  h += `<div class="tools">${periodBar("ins")}</div><div class="tools" style="padding-top:0">${layoutSwitch("insights")}${chipBar("ins", [["cost", "Food cost"], ["pl", "Profit & loss"], ["value", "Stock value"], ["waste", "Wastage"], ["var", "Variance"], ["age", "Stock ageing"], ["buy", "Buying"], ["reorder", "Reorder"], ["tax", "Tax"], ["book", "Day book"]])}</div>`;
   return h + (({ cost, pl, value: valuation, waste, variance, age, buy, reorder, tax, book })[k === "var" ? "variance" : k] || cost)(a, b);
 };
 
 /* food cost: sales against the standard material cost of what was sold, by item */
 function cost(a, b) {
-  const list = M.orders(false).filter(o => o.date >= a && o.date <= b); const items = {};
+  const list = M.orders(false).filter(o => o.date >= a && o.date <= b); const items = {}; const std = {};   // standard cost per item and recipe version
   // Each sale is costed with the recipe in force on its order date (recipe versions), at today's material costs.
   list.forEach(o => o.items.forEach(i => { const x = items[i.item] = items[i.item] || { q: 0, v: 0, c: 0, has: false }; x.q += i.qty; x.v += i.qty * i.rate * (1 - M.discF(o)) / (o.taxIncl && i.taxPct ? 1 + i.taxPct / 100 : 1);
-    const m = M.recipeAt(M.menuByName(i.item), o.date); if (m && (m.recipe || []).length) { x.c += M.recipeCost(m).cost * i.qty; x.has = true; } }));
+    const m = M.menuByName(i.item); if (!m) return; const vk = m.id + "|" + ((m.versions || []).filter(v => v.until > o.date).map(v => v.until).sort()[0] || "now");
+    if (!(vk in std)) { const rec = M.recipeAt(m, o.date); std[vk] = rec && (rec.recipe || []).length ? M.recipeCost(rec).cost : null; }
+    if (std[vk] != null) { x.c += std[vk] * i.qty; x.has = true; } }));
   let sales = 0, cogs = 0, costed = 0; const rows = Object.entries(items).sort((x, y) => y[1].v - x[1].v).map(([n, x]) => { const c = x.has && x.q ? x.c / x.q : null;
     sales += x.v; if (c != null) { cogs += c * x.q; costed += x.v; }
     return `<tr>${td(esc(n))}${td(x.q, 1)}${td(rs(x.v), 1, x.v)}${td(c != null ? rs2(c) : "no BOM", 1, c ?? -1)}${td(c != null ? pct(c * x.q, x.v) : "–", 1, c != null && x.v ? c * x.q / x.v : -1)}</tr>`; });
@@ -145,12 +144,12 @@ function valuation(a, b) {
 }
 
 /* profit and loss for the period: sales, materials used (opening + purchases − closing), gross profit, overheads, net */
-const monthsIn = (a, b) => { const out = []; let m = (a === "0000" ? (M.orders().map(o => o.date).sort()[0] || today()) : a).slice(0, 7); const e = b.slice(0, 7); while (m <= e && out.length < 120) { out.push(m); const [y, mo] = m.split("-").map(Number); m = mo === 12 ? `${y + 1}-01` : `${y}-${String(mo + 1).padStart(2, "0")}`; } return out; };
+const monthsIn = (a, b) => { const out = []; let m = (a <= "0001" ? (M.orders().map(o => o.date).sort()[0] || today()) : a).slice(0, 7); const e = b.slice(0, 7); while (m <= e && out.length < 120) { out.push(m); const [y, mo] = m.split("-").map(Number); m = mo === 12 ? `${y + 1}-01` : `${y}-${String(mo + 1).padStart(2, "0")}`; } return out; };
 function pl(a, b) {
-  const start = a === "0000" ? "0000-01-01" : a; let sales = 0, charges = 0;
+  const start = a <= "0001" ? "0000-01-01" : a; let sales = 0, charges = 0;
   M.orders(false).filter(o => o.date >= start && o.date <= b).forEach(o => { const x = M.taxOf(o); const net = M.sub(o) - M.disc(o) + M.charges(o) - (o.taxIncl ? x.tax : 0); sales += net;
     charges += (o.charges || []).reduce((s, ch) => s + (o.taxIncl ? ch.amount / (1 + (+ch.taxPct || 0) / 100) : ch.amount), 0); });
-  const sum = rows => rows.reduce((s, r) => s + r.value, 0); const open = a === "0000" ? 0 : sum(M.stockValueAt(addDays(a, -1))); const close = sum(M.stockValueAt(b));
+  const sum = rows => rows.reduce((s, r) => s + r.value, 0); const open = a <= "0001" ? 0 : sum(M.stockValueAt(addDays(a, -1))); const close = sum(M.stockValueAt(b));
   const buys = ev.all("moves").filter(m => m.type === "purchase" && m.date >= start && m.date <= b).reduce((s, m) => s + (+m.amount || 0), 0);
   const used = open + buys - close; const gross = sales - used; const months = monthsIn(a, b);
   const oh = months.map(m => ({ m, rec: ev.get("overheads", m) })); const ohTot = oh.reduce((s, x) => s + ((x.rec || {}).lines || []).reduce((t, l) => t + (+l.amount || 0), 0), 0); const net = gross - ohTot;
@@ -158,7 +157,7 @@ function pl(a, b) {
   const cur = months.at(-1); const rec = ev.get("overheads", cur) || { lines: [] };
   return `<div class="kpis" style="padding:0"><div class="kpi"><b>${rs(sales)}</b><span>sales before tax</span></div><div class="kpi"><b>${pct(gross, sales)}</b><span>gross margin</span></div><div class="kpi"><b class="${net < 0 ? "due" : ""}">${net < 0 ? "−" : ""}${rs(Math.abs(net))}</b><span>net profit</span></div></div>`
     + card("Profit and loss", `<div class="kv">${line("Sales (after discounts, before tax)", sales - charges)}${charges ? line("Delivery and packing charges", charges) : ""}${line("<b>Income</b>", sales, "tot")}
-      ${a === "0000" ? "" : line("Opening stock of materials", open)}${line("Purchases (after returns)", buys)}${line("Less closing stock of materials", -close)}${line("<b>Materials used</b>", used, "tot")}
+      ${a <= "0001" ? "" : line("Opening stock of materials", open)}${line("Purchases (after returns)", buys)}${line("Less closing stock of materials", -close)}${line("<b>Materials used</b>", used, "tot")}
       ${line("<b>Gross profit</b>", gross, "tot")}${oh.flatMap(x => ((x.rec || {}).lines || []).map(l => line(`${esc(l.name)} <small class="mut">${esc(x.m)}</small>`, -l.amount))).join("")}${line("<b>Net profit</b>", net, "tot")}</div>`,
       "Materials used includes wastage, spoilage and stock-count differences. Finished goods on the shelf aren’t counted as stock (they keep only a few days). Overheads are what you enter below for each month; the app doesn’t track them otherwise.")
     + (R.isAdmin() || R.role() === "management" ? card(`Overheads for ${esc(new Date(cur + "-01T00:00:00").toLocaleDateString("en-IN", { month: "long", year: "numeric" }))}`,
@@ -246,11 +245,11 @@ function book(a, b) {
       <p class="hint">In Tally: import the ledgers first, then the vouchers (Gateway of Tally → Import → Masters, then Transactions; choose the XML file). Ledgers that already exist are left as they are. Sales and purchases come in as accounting vouchers with tax on their own ledgers, not item invoices.</p></div>`;
 }
 H.click.push(async T => {
-  const [a, b] = range(S.filter.insp || "month"); const tag = `${(M.config().business || "bakery").replace(/[^\w]+/g, "_")}_${a === "0000" ? "all" : a}_${b}`;
+  const [a, b] = periodRange("ins"); const tag = `${(M.config().business || "bakery").replace(/[^\w]+/g, "_")}_${a <= "0001" ? "all" : a}_${b}`;
   if (T.closest("[data-daybook],[data-tallyxml]") && !R.can("export")) { toast("Your role can’t export. Ask an admin."); return true; }
   if (T.closest("[data-daybook]")) { const rows = bookRows(a, b); download(`${tag}_daybook.csv`, rows); toast(`${rows.length - 1} vouchers downloaded`); return true; }
   const x = T.closest("[data-tallyxml]"); if (x) { const m = x.dataset.tallyxml === "masters"; saveText(`${tag}_tally_${m ? "ledgers" : "vouchers"}.xml`, m ? mastersXml(a, b) : vouchersXml(a, b), "application/xml"); toast(m ? "Ledgers XML downloaded" : `${vouchers(a, b).length} vouchers in XML`); return true; }
-  if (T.closest("[data-hsncsv]")) { if (!R.can("export")) { toast("Your role can’t export"); return true; } download(`${tag}_hsn.csv`, [["HSN/SAC", "Description", "UQC", "Qty", "Rate %", "Taxable value", "Tax", "Total"], ...hsnRows(a === "0000" ? "0000-01-01" : a, b).map(x => [x.hsn, x.desc, x.uqc, x.q, x.r, r2(x.taxable), r2(x.tax), r2(x.taxable + x.tax)])]); toast("HSN summary downloaded"); return true; }
+  if (T.closest("[data-hsncsv]")) { if (!R.can("export")) { toast("Your role can’t export"); return true; } download(`${tag}_hsn.csv`, [["HSN/SAC", "Description", "UQC", "Qty", "Rate %", "Taxable value", "Tax", "Total"], ...hsnRows(a <= "0001" ? "0000-01-01" : a, b).map(x => [x.hsn, x.desc, x.uqc, x.q, x.r, r2(x.taxable), r2(x.tax), r2(x.taxable + x.tax)])]); toast("HSN summary downloaded"); return true; }
   if (T.closest("[data-valcsv]")) { if (!R.can("export")) { toast("Your role can’t export"); return true; } const rows = valRows(b); download(`${tag}_stock_value.csv`, rows); toast(`${rows.length - 1} lines downloaded`); return true; }
   if (T.closest("[data-roapply]")) { if (!R.can("stock.buy")) return true; const plan = M.reorderPlan(); const ids = [...document.querySelectorAll("[data-rolv]:checked")].map(x => x.dataset.rolv); let n = 0;
     for (const id of ids) { const x = plan.find(y => y.i.id === id); if (!x || !x.daily) continue; const step = x.i.unit === "pcs" ? 1 : 100; const lvl = Math.ceil(x.level / step) * step; const { _at, _by, ...rec } = ev.get("ingredients", id); await ev.put("ingredients", { ...rec, reorder: lvl }); n++; }

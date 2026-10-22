@@ -37,6 +37,7 @@ It is a Progressive Web App: it opens from a link, installs to the home screen, 
 | Labels | Allergens on materials carried through the BOM; printable product labels with ingredients, allergens, veg mark, MRP, batch, made and best-before dates, FSSAI licence |
 | Finance reports | Profit & loss with monthly overheads, month-end stock value by location, reorder levels from use and lead time, price-rise alerts, HSN-wise sales summary |
 | Security | Hashed PINs; removing a person revokes their Drive access; device sync health list; printable purchase orders |
+| Analytics | Dashboards for sales, production, buying and stock with comparison to the previous period; Explore to slice any dataset by any dimension with filters, charts, CSV and shared saved views; a period picker (presets or any from–to range) on every report |
 | Editing locks | A saved record being edited is locked for others until saved or closed (lapses after 8 quiet minutes; admin can take over); saves check for changes made meanwhile |
 | Menu | Prices, categories, short names for WhatsApp reading, par levels, recipes with cost and margin |
 | Reports | Sales by day and channel, best sellers with margin, wastage value, repeat customers |

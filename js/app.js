@@ -19,6 +19,7 @@ import "./invoice.js";
 import "./stocktake.js";
 import "./returns.js";
 import "./labels.js";
+import "./analytics.js";
 import { enhance } from "./table.js";
 import "./erp.js";
 import "./help.js";
@@ -29,7 +30,7 @@ import { APP_NAME } from "./config.js";
 import { $, esc, ICON, today, addDays } from "./util.js";
 import { ui, toast, closeSheet, yesNo, focusKey, refocus } from "./ui.js";
 
-const TAB = { help: ["Help", ICON.help], data: ["Import & export", ICON.dl], pos: ["Counter", ICON.cart], bom: ["BOM", ICON.tree], plan: ["Planning", ICON.plan], wo: ["Work orders", ICON.oven], po: ["Purchase orders", ICON.orders], sup: ["Suppliers & payables", ICON.people], insights: ["Cost & stock reports", ICON.chart], close: ["Day close", ICON.pay], take: ["Stock-take", ICON.stock], dn: ["Purchase returns", ICON.inbox], prod: ["Production", ICON.oven], grn: ["Purchases (GRN)", ICON.inbox], xfer: ["Transfers", ICON.truck], fg: ["Finished goods", ICON.batch], today: ["Today", ICON.today], orders: ["Orders", ICON.orders], pay: ["Payments", ICON.pay], stock: ["Inventory", ICON.stock], bake: ["Bake board", ICON.oven], batches: ["Batches", ICON.batch], run: ["Delivery run", ICON.run], more: ["More", ICON.more] };
+const TAB = { help: ["Help", ICON.help], data: ["Import & export", ICON.dl], pos: ["Counter", ICON.cart], bom: ["BOM", ICON.tree], plan: ["Planning", ICON.plan], wo: ["Work orders", ICON.oven], po: ["Purchase orders", ICON.orders], sup: ["Suppliers & payables", ICON.people], insights: ["Cost & stock reports", ICON.chart], analytics: ["Analytics", ICON.chart], close: ["Day close", ICON.pay], take: ["Stock-take", ICON.stock], dn: ["Purchase returns", ICON.inbox], prod: ["Production", ICON.oven], grn: ["Purchases (GRN)", ICON.inbox], xfer: ["Transfers", ICON.truck], fg: ["Finished goods", ICON.batch], today: ["Today", ICON.today], orders: ["Orders", ICON.orders], pay: ["Payments", ICON.pay], stock: ["Inventory", ICON.stock], bake: ["Bake board", ICON.oven], batches: ["Batches", ICON.batch], run: ["Delivery run", ICON.run], more: ["More", ICON.more] };
 const SHORT = { close: "Day close", take: "Stock-take", dn: "Returns", plan: "Plan", wo: "Work orders", po: "POs", sup: "Payables", insights: "Reports", bake: "Bake", run: "My run", grn: "GRN", fg: "FG stock", prod: "Make" };   // bottom-bar labels on phones
 const ORDER = ["pos", "today", "orders", "bake", "prod", "grn", "stock", "xfer", "fg", "batches", "bom", "run", "pay", "more"];
 // Screens grouped into buckets: one bottom-bar button per bucket on phones, a strip of its screens on top of each page, sections in the sidebar.
@@ -79,6 +80,7 @@ function allowedViews() {
     if (md === "erp") { if (c("bake.record") || c("orders.edit")) t.push("prod"); if (c("transfer")) t.push("xfer"); t.push("fg"); }
   }
   if (c("sale") || c("collect") || c("pay.record")) t.push("close");
+  if (c("reports")) t.push("analytics");
   t.push("help"); if (c("export") || R.isAdmin()) t.push("data");
   return [...new Set(t)];
 }
@@ -120,10 +122,10 @@ function navHtml() {
   const open = navOpen(); const grp = (k, label, ic, body, vs) => { const isOpen = open[k] ?? vs.includes(S.view) ?? false; const cur = vs.includes(S.view);
     return `<button class="nav-grp dx${cur ? " cur" : ""}" data-navgrp="${k}" aria-expanded="${isOpen || cur}"><span class="dot">${ic}</span><span class="nl">${label}</span>${!(isOpen || cur) ? badge(vs) : ""}<span class="chev">${ICON.chev}</span></button>${isOpen || cur ? `<div class="nav-items dx">${body}</div>` : ""}`; };
   const side = loose.map(v => btn(v, "dx")).join("") + Object.keys(BUCKETS).map(k => { const vs = inBucket(k); return vs.length ? grp(k, BUCKETS[k][0], BUCKETS[k][1], vs.map(v => btn(v, "dx")).join(""), vs) : ""; }).join("");
-  const recBody = links.map(([a, ic, l]) => `<button class="nb dx" data-act="${a}"><span class="dot">${ic}</span><span class="nl">${l}</span></button>`).join("") + (views.includes("more") || tabs.includes("more") ? btn("more", "dx") : "");
+  const recBody = (views.includes("analytics") ? btn("analytics", "dx") : "") + links.map(([a, ic, l]) => `<button class="nb dx" data-act="${a}"><span class="dot">${ic}</span><span class="nl">${l}</span></button>`).join("") + (views.includes("more") || tabs.includes("more") ? btn("more", "dx") : "");
   return `<div class="nav-brand">${logoHtml(c)}<div><b>${esc(c.business)}</b><small>${esc(me.name + " · " + R.ROLES[me.role].label)}</small></div></div><div class="nav-sw dx">${switchersHtml()}</div>
   <div class="nav-in" style="grid-template-columns:repeat(${bar.length},1fr)">${bar.join("")}${side}
-  ${recBody ? grp("records", "Reports & records", ICON.chart, recBody, ["more"]) : ""}</div>
+  ${recBody ? grp("records", "Reports & analytics", ICON.chart, recBody, ["more", "analytics"]) : ""}</div>
   <p class="nav-keys dx">Keys: <kbd>N</kbd> new · <kbd>/</kbd> search</p>`;
 }
 let dayOpen = today();

@@ -16,6 +16,7 @@ V.more = () => {
   const items = [
     ["menu", "menu", "Menu, prices & recipes", `${M.menuActive().length} items on sale`, R.can("menu.edit") || R.can("reports")],
     ["@stock", "stock", "Inventory · RM / PM / semi-finished", `${M.ingredients().length} items`, !H.onBar("stock") && (R.can("stock.buy") || R.can("stock.count"))],
+    ["@analytics", "chart", "Analytics", "Dashboards for sales, production, buying and stock; slice and dice any data", H.canOpen("analytics")],
     ["@insights", "chart", "Cost & stock reports", "Food cost, wastage, variance, stock ageing, buying, tax, day book", !H.onBar("insights") && H.canOpen("insights")],
     ["@wo", "oven", "Work orders", "Issue materials, complete, see variance", !H.onBar("wo") && H.canOpen("wo")],
     ["@po", "orders", "Purchase orders", "Raise, approve, receive against", !H.onBar("po") && H.canOpen("po")],
@@ -37,7 +38,7 @@ V.more = () => {
   return `<div class="band"><div class="top">${logoHtml(c)}<div class="biz"><div class="name">${esc(c.business)}</div><div class="sub">${esc(me ? me.name + " · " + R.ROLES[me.role].label : "")}</div></div></div>${toran()}</div>
   ${H.switchers ? `<div class="moresw">${H.switchers()}</div>` : ""}${H.backupBanner && H.backupBanner() ? `<div class="boardfoot" style="padding-bottom:0">${H.backupBanner()}</div>` : ""}
   <div class="menu-list" style="margin-top:14px">${items.map(([a, ic, t, s]) => `<button class="mi" ${a[0] === "@" ? `data-go="${a.slice(1)}"` : `data-act="${a}"`}><span class="ic">${ICON[ic]}</span><span class="grow">${t}<small>${esc(s)}</small></span><span class="chev">${ICON.chev}</span></button>`).join("")}</div>
-  <p class="hint" style="padding:4px 18px">${APP_NAME} 2.14${R.mode() !== "classic" ? " · " + esc(M.MODES[R.mode()]) + " mode" : ""} · ${st.state === "off" ? "data saved on this phone only" : "synced through Google Drive"}${st.last ? " · last sync " + new Date(st.last).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" }) : ""}</p>`;
+  <p class="hint" style="padding:4px 18px">${APP_NAME} 2.15${R.mode() !== "classic" ? " · " + esc(M.MODES[R.mode()]) + " mode" : ""} · ${st.state === "off" ? "data saved on this phone only" : "synced through Google Drive"}${st.last ? " · last sync " + new Date(st.last).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" }) : ""}</p>`;
 };
 
 /* ---------- first run ---------- */
